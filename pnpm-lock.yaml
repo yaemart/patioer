@@ -44,12 +44,18 @@ importers:
       '@patioer/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@patioer/harness':
+        specifier: workspace:*
+        version: link:../../packages/harness
       '@patioer/shared':
         specifier: workspace:*
         version: link:../../packages/shared
       dotenv:
         specifier: latest
         version: 17.3.1
+      drizzle-orm:
+        specifier: latest
+        version: 0.45.1(@types/pg@8.20.0)(pg@8.20.0)
       fastify:
         specifier: latest
         version: 5.8.2
