@@ -19,4 +19,23 @@ export default [
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
     },
   },
+  {
+    files: ['apps/api/src/**/*.ts'],
+    rules: {
+      // Tenant business queries should run through request.withDb (withTenantDb),
+      // not the global db connection.
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: '@patioer/db',
+              importNames: ['db'],
+              message: 'Use request.withDb()/withTenantDb for tenant-scoped queries.',
+            },
+          ],
+        },
+      ],
+    },
+  },
 ]
