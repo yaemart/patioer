@@ -13,8 +13,10 @@
   "dependencies": {
     "@fastify/sensible": "latest",
     "@patioer/db": "workspace:*",
+    "@patioer/harness": "workspace:*",
     "@patioer/shared": "workspace:*",
     "dotenv": "latest",
+    "drizzle-orm": "latest",
     "fastify": "latest",
     "fastify-plugin": "^5.1.0",
     "zod": "latest"

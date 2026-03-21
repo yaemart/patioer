@@ -1,3 +1,11 @@
+/**
+ * Flattened product representation used across all harness implementations.
+ *
+ * **Multi-variant limitation (Shopify):** `toProduct()` maps only the *first*
+ * variant's price and inventory_quantity. Products with multiple variants will
+ * have their additional variant data silently discarded. This is a known MVP
+ * trade-off — full multi-variant support is tracked for a future sprint.
+ */
 export interface Product {
   id: string
   title: string
@@ -26,12 +34,7 @@ export interface Analytics {
   orders: number
 }
 
-export interface GetProductsOpts {
-  cursor?: string
-  limit?: number
-}
-
-export interface GetOrdersOpts {
+export interface PaginationOpts {
   cursor?: string
   limit?: number
 }

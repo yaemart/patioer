@@ -7,3 +7,4 @@ coverage
 
 # Vendor copy of the Paperclip framework — not part of this repo
 paperclip/
+.cursor/
