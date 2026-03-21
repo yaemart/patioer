@@ -26,6 +26,9 @@ importers:
       prettier:
         specifier: latest
         version: 3.8.1
+      tsx:
+        specifier: latest
+        version: 4.21.0
       typescript:
         specifier: latest
         version: 5.9.3
@@ -41,6 +44,9 @@ importers:
       '@fastify/sensible':
         specifier: latest
         version: 6.0.4
+      '@patioer/agent-runtime':
+        specifier: workspace:*
+        version: link:../../packages/agent-runtime
       '@patioer/db':
         specifier: workspace:*
         version: link:../../packages/db

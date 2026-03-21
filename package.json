@@ -8,7 +8,9 @@
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm -r test"
+    "test": "pnpm -r test",
+    "seed:agents": "pnpm exec tsx ./scripts/agents.seed.ts",
+    "test:scripts": "pnpm exec vitest run scripts/agents.seed.test.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -17,6 +19,7 @@
     "eslint": "latest",
     "globals": "^17.4.0",
     "prettier": "latest",
+    "tsx": "latest",
     "typescript": "latest",
     "typescript-eslint": "^8.57.1",
     "vitest": "latest"
