@@ -1,7 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import type { FastifyPluginAsync } from 'fastify'
-import { withTenantDb, schema } from '@patioer/db'
-import { eq, and } from 'drizzle-orm'
+import { withTenantDb, schema, getTenantIdByShopDomain } from '@patioer/db'
 
 // --- Event dispatch ---
 
@@ -9,9 +8,8 @@ async function handleOrdersCreate(
   shopDomain: string,
   payload: Record<string, unknown>,
 ): Promise<void> {
-  // Resolve tenant from shop domain, then upsert order into DB
-  const tenantRow = await findTenantByShopDomain(shopDomain)
-  if (!tenantRow) {
+  const tenantId = await getTenantIdByShopDomain('shopify', shopDomain)
+  if (!tenantId) {
     console.warn(`[webhook] orders/create: no tenant for shop ${shopDomain}`)
     return
   }
@@ -20,11 +18,11 @@ async function handleOrdersCreate(
   const status = String(payload.financial_status ?? 'unknown')
   const totalPrice = String(payload.total_price ?? '0')
 
-  await withTenantDb(tenantRow.tenantId, async (db) => {
+  await withTenantDb(tenantId, async (db) => {
     await db
       .insert(schema.orders)
       .values({
-        tenantId: tenantRow.tenantId,
+        tenantId,
         platformOrderId: orderId,
         platform: 'shopify',
         status,
@@ -42,28 +40,12 @@ async function handleOrdersCreate(
   })
 }
 
-async function findTenantByShopDomain(
-  shopDomain: string,
-): Promise<{ tenantId: string } | null> {
-  const { db } = await import('@patioer/db')
-  const [row] = await db
-    .select({ tenantId: schema.platformCredentials.tenantId })
-    .from(schema.platformCredentials)
-    .where(
-      and(
-        eq(schema.platformCredentials.platform, 'shopify'),
-        eq(schema.platformCredentials.shopDomain, shopDomain),
-      ),
-    )
-    .limit(1)
-  return row ?? null
-}
-
 // --- Route ---
+// IMPORTANT: Do NOT wrap this plugin with fastify-plugin (fp). The custom
+// content-type parser below is intentionally scoped to this encapsulated
+// plugin context so it does not override the default JSON parser globally.
 
 const shopifyWebhookRoute: FastifyPluginAsync = async (app) => {
-  // Parse the body as a raw Buffer so we can verify Shopify's HMAC signature.
-  // This parser is scoped to this plugin and does not affect other routes.
   app.addContentTypeParser('application/json', { parseAs: 'buffer' }, (_req, body, done) => {
     done(null, body)
   })
@@ -102,13 +84,11 @@ const shopifyWebhookRoute: FastifyPluginAsync = async (app) => {
       return reply.code(400).send({ error: 'invalid JSON payload' })
     }
 
-    // Dispatch by topic — extend this switch as new event types are needed
     switch (topic) {
       case 'orders/create':
         await handleOrdersCreate(shopDomain, payload)
         break
       default:
-        // Acknowledge unrecognised topics so Shopify doesn't retry indefinitely
         app.log.info({ topic, shopDomain }, 'unhandled Shopify webhook topic')
     }
 

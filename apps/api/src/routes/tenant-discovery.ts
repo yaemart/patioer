@@ -20,6 +20,17 @@ type RateLimitWindow = {
 
 const rateLimitState = new Map<string, RateLimitWindow>()
 
+const SWEEP_INTERVAL_MS = 60_000
+
+function sweepExpiredEntries(windowMs: number): void {
+  const now = Date.now()
+  for (const [key, state] of rateLimitState) {
+    if (now - state.windowStartMs >= windowMs) {
+      rateLimitState.delete(key)
+    }
+  }
+}
+
 const parsePositiveInt = (value: string | undefined, fallback: number): number => {
   if (!value) return fallback
   const parsed = Number.parseInt(value, 10)
@@ -35,6 +46,17 @@ const safeCompare = (left: string, right: string): boolean => {
 }
 
 const tenantDiscoveryRoute: FastifyPluginAsync = async (app) => {
+  const sweepTimer = setInterval(() => {
+    const windowMs = parsePositiveInt(process.env.TENANT_DISCOVERY_RATE_LIMIT_WINDOW_MS, 60_000)
+    sweepExpiredEntries(windowMs)
+  }, SWEEP_INTERVAL_MS)
+  sweepTimer.unref()
+
+  app.addHook('onClose', () => {
+    clearInterval(sweepTimer)
+    rateLimitState.clear()
+  })
+
   app.get('/api/v1/tenants/resolve', async (request, reply) => {
     const configuredApiKey = process.env.TENANT_DISCOVERY_API_KEY
     if (!configuredApiKey) {

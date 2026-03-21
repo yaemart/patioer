@@ -3,10 +3,9 @@ import { schema } from '@patioer/db'
 import { eq, and } from 'drizzle-orm'
 import { ShopifyHarness } from '@patioer/harness'
 import { decryptToken } from '../lib/crypto.js'
+import { registry } from '../lib/harness-registry.js'
 
 const productsRoute: FastifyPluginAsync = async (app) => {
-  // GET /api/v1/products
-  // Returns products for the authenticated tenant (RLS-enforced via withDb).
   app.get('/api/v1/products', async (request, reply) => {
     if (!request.withDb) {
       return reply.code(401).send({ error: 'x-tenant-id required' })
@@ -15,8 +14,6 @@ const productsRoute: FastifyPluginAsync = async (app) => {
     return reply.send({ products: rows })
   })
 
-  // POST /api/v1/products/sync
-  // Fetches products from Shopify and upserts them into the local DB.
   app.post('/api/v1/products/sync', async (request, reply) => {
     if (!request.withDb || !request.tenantId) {
       return reply.code(401).send({ error: 'x-tenant-id required' })
@@ -27,8 +24,9 @@ const productsRoute: FastifyPluginAsync = async (app) => {
       return reply.code(503).send({ error: 'Shopify integration not configured' })
     }
 
-    const synced = await request.withDb(async (db) => {
-      const [cred] = await db
+    // Step 1 — Read credential inside a short RLS transaction.
+    const cred = await request.withDb(async (db) => {
+      const [row] = await db
         .select()
         .from(schema.platformCredentials)
         .where(
@@ -38,14 +36,28 @@ const productsRoute: FastifyPluginAsync = async (app) => {
           ),
         )
         .limit(1)
+      return row ?? null
+    })
 
-      if (!cred) throw Object.assign(new Error('No Shopify credentials'), { statusCode: 404 })
+    if (!cred) {
+      return reply.code(404).send({ error: 'No Shopify credentials' })
+    }
 
-      const accessToken = decryptToken(cred.accessToken, encryptionKey)
-      const harness = new ShopifyHarness(request.tenantId!, cred.shopDomain, accessToken)
-      const products = await harness.getProducts()
-      const syncedAt = new Date()
+    // Step 2 — Fetch from Shopify OUTSIDE a PG transaction to avoid holding
+    // a PoolClient while waiting on external HTTP (rate-limited at 2 req/s).
+    const accessToken = decryptToken(cred.accessToken, encryptionKey)
+    const registryKey = `${request.tenantId!}:shopify`
+    const harness = registry.getOrCreate(
+      registryKey,
+      () => new ShopifyHarness(request.tenantId!, cred.shopDomain, accessToken),
+    ) as ShopifyHarness
+    const products = await harness.getProducts()
 
+    // Step 3 — Upsert results inside a new short RLS transaction.
+    // TODO: replace sequential inserts with a batched approach once Drizzle
+    // supports onConflictDoUpdate with multi-row values.
+    const syncedAt = new Date()
+    await request.withDb(async (db) => {
       for (const product of products) {
         await db
           .insert(schema.products)
@@ -66,11 +78,9 @@ const productsRoute: FastifyPluginAsync = async (app) => {
             set: { title: product.title, price: String(product.price), syncedAt },
           })
       }
-
-      return products.length
     })
 
-    return reply.send({ synced })
+    return reply.send({ synced: products.length })
   })
 }
 

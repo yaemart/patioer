@@ -1,19 +1,18 @@
 import type { TenantHarness } from './base.harness.js'
 
+/**
+ * Caches one TenantHarness per composite key (typically `tenantId:platform`).
+ * Ensures the TokenBucket rate limiter is shared across requests.
+ */
 export class HarnessRegistry {
-  private readonly harnessByTenant = new Map<string, TenantHarness>()
+  private readonly cache = new Map<string, TenantHarness>()
 
-  register(harness: TenantHarness): void {
-    this.harnessByTenant.set(harness.tenantId, harness)
-  }
-
-  get(tenantId: string): TenantHarness {
-    const harness = this.harnessByTenant.get(tenantId)
-
+  getOrCreate(key: string, factory: () => TenantHarness): TenantHarness {
+    let harness = this.cache.get(key)
     if (!harness) {
-      throw new Error(`Harness not found for tenant: ${tenantId}`)
+      harness = factory()
+      this.cache.set(key, harness)
     }
-
     return harness
   }
 }

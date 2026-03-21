@@ -1,9 +1,9 @@
 import type { TenantHarness } from './base.harness.js'
+import { HarnessError } from './harness-error.js'
 import type {
   Analytics,
   DateRange,
-  GetOrdersOpts,
-  GetProductsOpts,
+  PaginationOpts,
   Order,
   Product,
   Thread,
@@ -37,6 +37,7 @@ interface ShopifyLocation {
 }
 
 // --- Domain mapping helpers ---
+// See Product JSDoc in types.ts for the multi-variant limitation.
 
 const toProduct = (p: ShopifyProduct): Product => ({
   id: String(p.id),
@@ -52,6 +53,9 @@ const toOrder = (o: ShopifyOrder): Order => ({
 })
 
 // --- Token-bucket rate limiter (2 req/s) ---
+// Buckets are shared across all ShopifyHarness instances for the same shop
+// so concurrent requests (e.g. product sync + agent heartbeat) cannot
+// collectively exceed Shopify's 2 req/s sustained limit.
 
 class TokenBucket {
   private tokens: number
@@ -78,8 +82,29 @@ class TokenBucket {
 
     const waitMs = Math.ceil(((1 - this.tokens) / this.refillRatePerSecond) * 1000)
     await new Promise<void>((resolve) => setTimeout(resolve, waitMs))
+    this.lastRefillMs = Date.now()
     this.tokens = 0
   }
+}
+
+const sharedBuckets = new Map<string, TokenBucket>()
+
+function getBucket(shopDomain: string): TokenBucket {
+  let bucket = sharedBuckets.get(shopDomain)
+  if (!bucket) {
+    bucket = new TokenBucket(2, 2)
+    sharedBuckets.set(shopDomain, bucket)
+  }
+  return bucket
+}
+
+// --- Retry with exponential back-off for 429 / 5xx ---
+
+const MAX_RETRIES = 3
+const BASE_DELAY_MS = 500
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 // --- ShopifyHarness ---
@@ -94,28 +119,43 @@ export class ShopifyHarness implements TenantHarness {
     private readonly shopDomain: string,
     private readonly accessToken: string,
   ) {
-    // Shopify REST Admin API standard plan: ~2 requests/second sustained
-    this.bucket = new TokenBucket(2, 2)
+    this.bucket = getBucket(shopDomain)
     this.baseUrl = `https://${shopDomain}/admin/api/${SHOPIFY_API_VERSION}`
   }
 
   private async shopifyFetch<T>(path: string, init?: RequestInit): Promise<T> {
-    await this.bucket.acquire()
-    const res = await fetch(`${this.baseUrl}${path}`, {
-      ...init,
-      headers: {
-        'X-Shopify-Access-Token': this.accessToken,
-        'Content-Type': 'application/json',
-        ...(init?.headers as Record<string, string> | undefined),
-      },
-    })
-    if (!res.ok) {
-      throw new Error(`Shopify API error ${res.status} ${res.statusText} for ${path}`)
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      await this.bucket.acquire()
+      const res = await fetch(`${this.baseUrl}${path}`, {
+        ...init,
+        headers: {
+          'X-Shopify-Access-Token': this.accessToken,
+          'Content-Type': 'application/json',
+          ...(init?.headers as Record<string, string> | undefined),
+        },
+      })
+
+      if (res.ok) {
+        return res.json() as Promise<T>
+      }
+
+      const isRetryable = res.status === 429 || res.status >= 500
+      if (isRetryable && attempt < MAX_RETRIES) {
+        const retryAfterHeader = res.headers.get('retry-after')
+        const delayMs = retryAfterHeader
+          ? parseFloat(retryAfterHeader) * 1000
+          : BASE_DELAY_MS * 2 ** attempt
+        await sleep(delayMs)
+        continue
+      }
+
+      throw new HarnessError('shopify', String(res.status), `Shopify API error ${res.status} ${res.statusText} for ${path}`)
     }
-    return res.json() as Promise<T>
+
+    throw new HarnessError('shopify', 'max_retries', `Shopify API: max retries exceeded for ${path}`)
   }
 
-  async getProducts(opts?: GetProductsOpts): Promise<Product[]> {
+  async getProducts(opts?: PaginationOpts): Promise<Product[]> {
     const params = new URLSearchParams({ limit: String(opts?.limit ?? 50) })
     if (opts?.cursor) params.set('page_info', opts.cursor)
     const data = await this.shopifyFetch<{ products: ShopifyProduct[] }>(
@@ -167,7 +207,7 @@ export class ShopifyHarness implements TenantHarness {
     })
   }
 
-  async getOrders(opts?: GetOrdersOpts): Promise<Order[]> {
+  async getOrders(opts?: PaginationOpts): Promise<Order[]> {
     const params = new URLSearchParams({
       status: 'any',
       limit: String(opts?.limit ?? 50),
@@ -193,16 +233,25 @@ export class ShopifyHarness implements TenantHarness {
   }
 
   async getAnalytics(range: DateRange): Promise<Analytics> {
+    // MVP: fetches at most 250 orders per call (Shopify REST max page size).
+    // Revenue will be under-reported if > 250 paid orders exist in the range.
+    // TODO: implement Link-header pagination to aggregate all pages.
+    const PAGE_LIMIT = 250
     const params = new URLSearchParams({
       status: 'paid',
       created_at_min: range.from.toISOString(),
       created_at_max: range.to.toISOString(),
-      limit: '250',
+      limit: String(PAGE_LIMIT),
       fields: 'total_price',
     })
     const data = await this.shopifyFetch<{ orders: Array<{ total_price: string }> }>(
       `/orders.json?${params}`,
     )
+    if (data.orders.length >= PAGE_LIMIT) {
+      console.warn(
+        `[ShopifyHarness] getAnalytics: hit ${PAGE_LIMIT}-order page limit; revenue may be under-reported`,
+      )
+    }
     const revenue = data.orders.reduce((sum, o) => sum + parseFloat(o.total_price), 0)
     return { revenue, orders: data.orders.length }
   }

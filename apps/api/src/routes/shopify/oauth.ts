@@ -54,8 +54,8 @@ function verifyShopifyHmac(query: Record<string, string>, secret: string): boole
     .map(([k, v]) => `${k}=${v}`)
     .join('&')
   const expected = createHmac('sha256', secret).update(message).digest('hex')
-  const hmacBuf = Buffer.from(hmac)
-  const expectedBuf = Buffer.from(expected)
+  const hmacBuf = Buffer.from(hmac, 'hex')
+  const expectedBuf = Buffer.from(expected, 'hex')
   if (hmacBuf.length !== expectedBuf.length) return false
   return timingSafeEqual(hmacBuf, expectedBuf)
 }
@@ -121,6 +121,10 @@ const shopifyOauthRoute: FastifyPluginAsync = async (app) => {
     const shopParse = shopDomainSchema.safeParse(query.shop)
     if (!shopParse.success) {
       return reply.code(400).send({ error: 'invalid shop domain' })
+    }
+
+    if (typeof query.code !== 'string' || query.code.length === 0) {
+      return reply.code(400).send({ error: 'missing authorization code' })
     }
 
     // Exchange the authorization code for a permanent access token
