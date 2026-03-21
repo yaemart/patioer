@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "packageManager": "pnpm@9.15.0",
   "scripts": {
-    "dev": "pnpm --parallel --filter @patioer/api --filter @patioer/agent-runtime dev",
+    "dev": "concurrently -n api,paperclip -c cyan,magenta \"pnpm --filter @patioer/api dev\" \"pnpm --dir ./paperclip dev\"",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
@@ -13,6 +13,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "latest",
+    "concurrently": "latest",
     "eslint": "latest",
     "globals": "^17.4.0",
     "prettier": "latest",
