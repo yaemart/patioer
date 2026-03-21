@@ -120,11 +120,11 @@ patioer/                          # ElectroOS Monorepo root
 | 1.11 | `docs/adr/0001-paperclip-integration.md` | `docs/adr` | — | 0.5d |
 
 **Sprint 1 验收：**
-- [ ] `pnpm dev` 同时启动 ElectroOS API (3100) + Paperclip (3000)
-- [ ] `GET /api/v1/health` 返回 200
-- [ ] `tenants` 表存在 + RLS policy 生效
-- [ ] `PlatformHarness` 接口有完整 TypeScript 定义
-- [ ] CI pipeline 通过
+- [x] `pnpm dev` 同时启动 ElectroOS API (3100) + Paperclip (3000)
+- [x] `GET /api/v1/health` 返回 200
+- [x] 业务表（`platform_credentials/products/orders/agents/agent_events/approvals`）RLS policy 生效；`tenants` 仅作元数据查找不启用行级过滤
+- [x] `PlatformHarness` 接口有完整 TypeScript 定义
+- [x] CI pipeline 通过
 
 ---
 
