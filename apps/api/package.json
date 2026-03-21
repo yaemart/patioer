@@ -1,0 +1,25 @@
+{
+  "name": "@patioer/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint src --ext .ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@fastify/sensible": "latest",
+    "@patioer/db": "workspace:*",
+    "@patioer/shared": "workspace:*",
+    "dotenv": "latest",
+    "fastify": "latest",
+    "fastify-plugin": "^5.1.0",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "tsx": "latest"
+  }
+}

@@ -1,0 +1,9 @@
+node_modules
+.env
+.env.local
+dist
+coverage
+.DS_Store
+
+# Vendor copy of the Paperclip framework — not part of this repo
+paperclip/

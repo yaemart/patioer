@@ -1,0 +1,23 @@
+{
+  "name": "patioer",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev": "pnpm --parallel --filter @patioer/api --filter @patioer/agent-runtime dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "latest",
+    "eslint": "latest",
+    "globals": "^17.4.0",
+    "prettier": "latest",
+    "typescript": "latest",
+    "typescript-eslint": "^8.57.1",
+    "vitest": "latest"
+  }
+}

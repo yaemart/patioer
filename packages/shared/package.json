@@ -1,0 +1,14 @@
+{
+  "name": "@patioer/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint src --ext .ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "exports": "./src/index.ts",
+  "types": "./src/index.ts"
+}

@@ -1,0 +1,3 @@
+export const PLATFORM_SHOPIFY = 'shopify'
+export const DEFAULT_MONTHLY_BUDGET_USD = 50
+export const PRICE_APPROVAL_THRESHOLD_PERCENT = 15
