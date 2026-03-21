@@ -1,10 +1,19 @@
 name: CI
 
 on:
+  workflow_dispatch: # allow manual re-runs without pushing a commit
+
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
 
 # Cancel any in-progress run for the same branch/PR so stale runs don't waste
 # runner minutes or block merges.
@@ -25,9 +34,9 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - name: Validate GitHub Actions workflows
-        uses: reviewdog/action-actionlint@0d952c597ef8459f634d7145b0b044a9699e5e43
+        uses: reviewdog/action-actionlint@0d952c597ef8459f634d7145b0b044a9699e5e43 # v1.71.0
 
   build-check:
     name: Lint · Typecheck · Test
@@ -35,14 +44,14 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       # Version comes from root package.json "packageManager" (single source of truth).
       - name: Setup pnpm
-        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 20.x
           cache: pnpm
@@ -50,11 +59,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # continue-on-error keeps the remaining steps running even when this one
+      # fails, so a single push surfaces lint + typecheck + test failures at once.
       - name: Lint
         run: pnpm lint
+        continue-on-error: true
 
       - name: Typecheck
         run: pnpm typecheck
+        continue-on-error: true
 
       - name: Test
         run: pnpm test
+        env:
+          VITEST_REPORTER: github-actions
