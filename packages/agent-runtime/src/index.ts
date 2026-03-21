@@ -1,2 +1,5 @@
 export * from './types.js'
 export * from './context.js'
+export * from './paperclip-bridge.errors.js'
+export * from './paperclip-bridge.js'
+export * from './agents/index.js'

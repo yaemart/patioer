@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@fastify/sensible": "latest",
+    "@patioer/agent-runtime": "workspace:*",
     "@patioer/db": "workspace:*",
     "@patioer/harness": "workspace:*",
     "@patioer/shared": "workspace:*",
