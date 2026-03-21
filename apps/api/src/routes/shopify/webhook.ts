@@ -86,7 +86,12 @@ const shopifyWebhookRoute: FastifyPluginAsync = async (app) => {
 
     switch (topic) {
       case 'orders/create':
-        await handleOrdersCreate(shopDomain, payload)
+        try {
+          await handleOrdersCreate(shopDomain, payload)
+        } catch (error) {
+          // Always ack webhook delivery to prevent Shopify retry storms.
+          app.log.error({ error, topic, shopDomain }, 'failed to persist Shopify orders/create webhook')
+        }
         break
       default:
         app.log.info({ topic, shopDomain }, 'unhandled Shopify webhook topic')
