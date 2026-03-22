@@ -6,6 +6,8 @@ import { closeRedisClient } from './lib/redis.js'
 import { gracefulShutdown } from './lib/graceful-shutdown.js'
 import { replayPendingWebhooks } from './lib/webhook-replay.js'
 import { handleWebhookTopic } from './lib/webhook-topic-handler.js'
+import { closeAllQueues, createWorker } from './lib/queue-factory.js'
+import { processWebhookProcessingJob } from './lib/approval-execute-worker.js'
 
 dotenv.config()
 
@@ -20,8 +22,15 @@ if (Number.isNaN(port) || port < 1 || port > 65535) {
 const app = buildServer()
 
 const shutdown = async (): Promise<void> => {
-  const code = await gracefulShutdown(() => app.close(), closeRedisClient)
+  const code = await gracefulShutdown(() => app.close(), closeRedisClient, closeAllQueues)
   process.exit(code)
+}
+
+function startWebhookProcessingWorker(): void {
+  if (process.env.ENABLE_QUEUE_WORKERS === '0') {
+    return
+  }
+  createWorker('webhook-processing', processWebhookProcessingJob, { concurrency: 2 })
 }
 
 process.on('SIGTERM', shutdown)
@@ -31,6 +40,11 @@ app
   .listen({ host: '0.0.0.0', port })
   .then(async () => {
     app.log.info({ port }, 'ElectroOS API started')
+
+    startWebhookProcessingWorker()
+    if (process.env.ENABLE_QUEUE_WORKERS !== '0') {
+      app.log.info('webhook-processing queue worker started (approval.execute, …)')
+    }
 
     const appBaseUrl = process.env.APP_BASE_URL ?? ''
     const bridge = createPaperclipBridgeFromEnv()

@@ -8,7 +8,7 @@ import { HarnessError } from '@patioer/harness'
 import { withTenantDb, schema, type AppDb } from '@patioer/db'
 import { z } from 'zod'
 import { registry } from './harness-registry.js'
-import { createHarness, type SupportedPlatform } from './harness-factory.js'
+import { createHarness } from './harness-factory.js'
 import { resolveFirstCredentialForTenant } from './resolve-credential.js'
 
 const approvalExecutePayloadSchema = z.object({
@@ -72,7 +72,7 @@ async function runPriceUpdateApproved(
       }),
     )
   } catch (err) {
-    throw new Error(err instanceof Error ? err.message : 'harness initialization failed')
+    throw new Error(err instanceof Error ? err.message : 'harness initialization failed', { cause: err })
   }
 
   try {

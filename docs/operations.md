@@ -85,6 +85,23 @@ All variables are documented in `.env.example`. Copy it to `.env` for local deve
 | `PAPERCLIP_MAX_RETRIES` | No | `2` | Max retry attempts on Paperclip failures |
 | `PAPERCLIP_RETRY_BASE_MS` | No | `200` | Base delay for exponential backoff |
 
+### Agent execution (`POST /api/v1/agents/:id/execute`)
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `PAPERCLIP_API_KEY` | **One of** Paperclip or execute key | — | Shared secret for Paperclip heartbeat callbacks (`x-api-key`) |
+| `ELECTROOS_EXECUTE_API_KEY` | No | — | Optional second secret for the **same** `x-api-key` header — use for tenant backends, CI, or MCP so you do not reuse the Paperclip scheduler key |
+
+At least one of `PAPERCLIP_API_KEY` or `ELECTROOS_EXECUTE_API_KEY` must be set for execute to return 200. Both may be set; the incoming `x-api-key` must match **either** value (constant-time compare).
+
+### Queue workers (BullMQ)
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `ENABLE_QUEUE_WORKERS` | No | enabled | Set to `0` to **not** start in-process workers (e.g. unit tests or when a separate worker process consumes Redis) |
+
+When enabled, the API starts a **`webhook-processing`** worker that processes jobs such as **`approval.execute`** (after an operator approves a price change in `PATCH /api/v1/approvals/:id/resolve`). Requires **`REDIS_URL`** reachable at startup.
+
 ### Budget Gate
 
 | Variable | Required | Default | Description |
@@ -237,6 +254,7 @@ http://localhost:3100/api/v1/docs/json
 |-----|-----------|------|
 | System | `GET /api/v1/health` | None |
 | Agents | `GET/POST/PATCH/DELETE /api/v1/agents` | `x-tenant-id` |
+| Agent execute | `POST /api/v1/agents/:id/execute` | `x-api-key` + `x-tenant-id` (see **Agent execution** env above) |
 | Agent Execution | `POST /api/v1/agents/:id/execute` | `x-api-key` + `x-tenant-id` |
 | Approvals | `GET/PATCH /api/v1/approvals` | `x-tenant-id` |
 | Products | `POST /api/v1/products/sync` | `x-tenant-id` |
