@@ -1,4 +1,5 @@
 import {
+  jsonb,
   pgTable,
   text,
   timestamp,
@@ -16,17 +17,20 @@ export const platformCredentials = pgTable(
       .notNull()
       .references(() => tenants.id),
     platform: text('platform').notNull(),
-    shopDomain: text('shop_domain').notNull(),
+    credentialType: text('credential_type').notNull().default('oauth'),
+    shopDomain: text('shop_domain'),
     accessToken: text('access_token').notNull(),
     scopes: text('scopes').array(),
+    region: text('region').notNull().default('global'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>(),
     expiresAt: timestamp('expires_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   },
   (t) => [
-    uniqueIndex('platform_credentials_tenant_platform_domain_idx').on(
+    uniqueIndex('platform_credentials_tenant_platform_idx').on(
       t.tenantId,
       t.platform,
-      t.shopDomain,
+      t.region,
     ),
   ],
 )
