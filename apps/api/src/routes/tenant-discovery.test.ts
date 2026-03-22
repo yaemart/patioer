@@ -34,6 +34,62 @@ afterAll(async () => {
 })
 
 describe('tenant discovery route', () => {
+  it('returns 503 when TENANT_DISCOVERY_API_KEY is not configured', async () => {
+    delete process.env.TENANT_DISCOVERY_API_KEY
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/tenants/resolve?slug=tenant-a',
+      headers: { 'x-discovery-key': 'any-key' },
+    })
+    expect(response.statusCode).toBe(503)
+    expect(response.json()).toEqual({ error: 'tenant discovery is disabled' })
+  })
+
+  it('returns 400 when slug contains invalid characters', async () => {
+    process.env.TENANT_DISCOVERY_API_KEY = 'test-discovery-key-400'
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/tenants/resolve?slug=UPPER_CASE',
+      headers: { 'x-discovery-key': 'test-discovery-key-400' },
+    })
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toEqual({ error: 'invalid slug' })
+  })
+
+  it('returns 400 when slug query parameter is missing', async () => {
+    process.env.TENANT_DISCOVERY_API_KEY = 'test-discovery-key-no-slug'
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/tenants/resolve',
+      headers: { 'x-discovery-key': 'test-discovery-key-no-slug' },
+    })
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toEqual({ error: 'invalid slug' })
+  })
+
+  it('includes retry-after header when rate limit is exceeded', async () => {
+    process.env.TENANT_DISCOVERY_API_KEY = 'test-discovery-key-retry'
+    process.env.TENANT_DISCOVERY_RATE_LIMIT_MAX = '1'
+    process.env.TENANT_DISCOVERY_RATE_LIMIT_WINDOW_MS = '60000'
+    mockedGetTenantPublicBySlug.mockResolvedValue({ id: 'tid', slug: 'slug-a' })
+
+    const req = () =>
+      app.inject({
+        method: 'GET',
+        url: '/api/v1/tenants/resolve?slug=slug-a',
+        headers: {
+          'x-discovery-key': 'test-discovery-key-retry',
+          'x-forwarded-for': '10.0.0.1',
+        },
+      })
+
+    await req()
+    const second = await req()
+    expect(second.statusCode).toBe(429)
+    expect(second.headers['retry-after']).toBeDefined()
+    expect(Number(second.headers['retry-after'])).toBeGreaterThan(0)
+  })
+
   it('rejects unauthenticated requests', async () => {
     const response = await app.inject({
       method: 'GET',
@@ -101,5 +157,45 @@ describe('tenant discovery route', () => {
     expect(second.statusCode).toBe(200)
     expect(third.statusCode).toBe(429)
     expect(third.json()).toEqual({ error: 'rate limit exceeded' })
+  })
+
+  it('sweeps stale rate-limit entries when setInterval fires after 60s', async () => {
+    // Must build a fresh server AFTER vi.useFakeTimers() so the setInterval
+    // inside tenant-discovery route is captured by the fake-timer system.
+    vi.useFakeTimers()
+    process.env.TENANT_DISCOVERY_API_KEY = 'sweep-key'
+    process.env.TENANT_DISCOVERY_RATE_LIMIT_MAX = '1'
+    process.env.TENANT_DISCOVERY_RATE_LIMIT_WINDOW_MS = '120000'
+    mockedGetTenantPublicBySlug.mockResolvedValue({ id: 'tid', slug: 'sl' })
+
+    const sweepApp = buildServer()
+    const headers = {
+      'x-discovery-key': 'sweep-key',
+      'x-forwarded-for': '10.1.2.3',
+    }
+
+    const first = await sweepApp.inject({ method: 'GET', url: '/api/v1/tenants/resolve?slug=sl', headers })
+    expect(first.statusCode).toBe(200)
+
+    const blocked = await sweepApp.inject({ method: 'GET', url: '/api/v1/tenants/resolve?slug=sl', headers })
+    expect(blocked.statusCode).toBe(429)
+
+    // Advance 61 seconds — triggers the setInterval callback (SWEEP_INTERVAL_MS = 60_000).
+    // sweepExpiredEntries deletes entries whose window (120 000ms) has elapsed,
+    // but only 61 000ms have passed, so the entry is NOT deleted yet.
+    vi.advanceTimersByTime(61_000)
+
+    // Still blocked because the rate-limit window (120s) hasn't expired.
+    const stillBlocked = await sweepApp.inject({ method: 'GET', url: '/api/v1/tenants/resolve?slug=sl', headers })
+    expect(stillBlocked.statusCode).toBe(429)
+
+    // Advance past the full window — sweep on next tick removes the stale entry.
+    vi.advanceTimersByTime(70_000)
+
+    const cleared = await sweepApp.inject({ method: 'GET', url: '/api/v1/tenants/resolve?slug=sl', headers })
+    expect(cleared.statusCode).toBe(200)
+
+    await sweepApp.close()
+    vi.useRealTimers()
   })
 })

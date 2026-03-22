@@ -32,7 +32,7 @@ export const withTenantDb = async <T>(
   const client: PoolClient = await pool.connect()
   try {
     await client.query('BEGIN')
-    await client.query('SET LOCAL app.tenant_id = $1', [tenantId])
+    await client.query('SELECT set_config($1, $2, true)', ['app.tenant_id', tenantId])
     const tenantDb: AppDb = drizzle(client, { schema }) as AppDb
     const result = await callback(tenantDb)
     await client.query('COMMIT')

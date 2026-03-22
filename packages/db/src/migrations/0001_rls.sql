@@ -12,6 +12,17 @@ ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE approvals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE webhook_events ENABLE ROW LEVEL SECURITY;
+
+-- FORCE ensures RLS applies even to the table owner / superuser.
+-- Without this, superusers and table owners bypass all policies.
+ALTER TABLE platform_credentials FORCE ROW LEVEL SECURITY;
+ALTER TABLE products FORCE ROW LEVEL SECURITY;
+ALTER TABLE orders FORCE ROW LEVEL SECURITY;
+ALTER TABLE agents FORCE ROW LEVEL SECURITY;
+ALTER TABLE agent_events FORCE ROW LEVEL SECURITY;
+ALTER TABLE approvals FORCE ROW LEVEL SECURITY;
+ALTER TABLE webhook_events FORCE ROW LEVEL SECURITY;
 
 -- Each policy name includes the table name so pg_policies is self-documenting.
 -- The application always calls SET LOCAL app.tenant_id = $1 inside a
@@ -33,4 +44,7 @@ CREATE POLICY tenant_isolation_agent_events ON agent_events
   USING (tenant_id = current_setting('app.tenant_id')::uuid);
 
 CREATE POLICY tenant_isolation_approvals ON approvals
+  USING (tenant_id = current_setting('app.tenant_id')::uuid);
+
+CREATE POLICY tenant_isolation_webhook_events ON webhook_events
   USING (tenant_id = current_setting('app.tenant_id')::uuid);

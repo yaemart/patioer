@@ -9,7 +9,7 @@ export interface SeedAgentsInput {
 
 const DEFAULT_CRON: Record<string, string> = {
   'product-scout': '0 6 * * *',
-  'price-sentinel': '0 */4 * * *',
+  'price-sentinel': '0 * * * *',
   'support-relay': '*/30 * * * *',
 }
 
@@ -117,9 +117,8 @@ async function registerWithPaperclip(input: SeedAgentsInput): Promise<string[]> 
         cron,
         callbackUrl,
       })
+      registered.push(row.type)
     }
-
-    registered.push(row.type)
   }
 
   return registered

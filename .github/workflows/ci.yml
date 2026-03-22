@@ -73,3 +73,8 @@ jobs:
         run: pnpm test
         env:
           VITEST_REPORTER: github-actions
+
+      - name: Coverage check (api)
+        run: pnpm --filter api test:coverage
+        env:
+          VITEST_REPORTER: github-actions

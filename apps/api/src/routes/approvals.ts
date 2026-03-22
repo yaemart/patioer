@@ -138,7 +138,7 @@ const approvalsRoute: FastifyPluginAsync = async (app) => {
       return updated
     })
 
-    if (!result) {
+    if (!result || (Array.isArray(result) && result.length === 0)) {
       return reply.code(409).send({ error: 'approval already resolved' })
     }
 
