@@ -28,7 +28,7 @@ export const buildServer = () => {
       info: {
         title: 'ElectroOS API',
         description:
-          'ElectroOS multi-tenant API: agents, approvals, Shopify / Amazon / TikTok / Shopee OAuth & webhooks, Paperclip execution.',
+          'ElectroOS multi-tenant API: agents, approvals, Shopify / Amazon / TikTok / Shopee OAuth & webhooks, Paperclip execution. Optional header x-platform (shopify|amazon|tiktok|shopee) pins harness credential selection for sync/execute routes.',
         version: '0.1.0',
       },
       servers: [{ url: `http://localhost:${process.env.PORT ?? 3100}` }],

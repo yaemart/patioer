@@ -3,6 +3,8 @@ import { and, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { schema } from '@patioer/db'
 import { enqueueJob } from '../lib/queue-factory.js'
+import { optionalPlatformZod } from '../lib/platform-schema.js'
+import { parseElectroosPlatformFromPayload } from '../lib/resolve-credential.js'
 
 const paramsSchema = z.object({ id: z.string().uuid() })
 
@@ -13,6 +15,8 @@ const listQuerySchema = z.object({
 const resolveBodySchema = z.object({
   status: z.enum(['approved', 'rejected']),
   resolvedBy: z.string().min(1),
+  /** Overrides stored `electroosPlatform` on the approval payload (e.g. legacy rows). */
+  platform: optionalPlatformZod,
 })
 
 const approvalsRoute: FastifyPluginAsync = async (app) => {
@@ -158,12 +162,15 @@ const approvalsRoute: FastifyPluginAsync = async (app) => {
     // pick it up and call the appropriate harness method.
     if (parsedBody.data.status === 'approved') {
       try {
+        const jobPlatform =
+          parsedBody.data.platform ?? parseElectroosPlatformFromPayload(existing.payload)
         await enqueueJob('webhook-processing', 'approval.execute', {
           tenantId: request.tenantId!,
           agentId: existing.agentId,
           approvalId: existing.id,
           action: existing.action,
           payload: existing.payload,
+          ...(jobPlatform ? { platform: jobPlatform } : {}),
         })
       } catch (err) {
         // Non-fatal — the approval is already resolved. Log and continue.

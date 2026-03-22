@@ -8,7 +8,8 @@ import {
 } from '@patioer/harness'
 import { decryptToken } from './crypto.js'
 
-export type SupportedPlatform = 'shopify' | 'amazon' | 'tiktok' | 'shopee'
+export { SUPPORTED_PLATFORMS, type SupportedPlatform } from './supported-platforms.js'
+import type { SupportedPlatform } from './supported-platforms.js'
 
 export interface HarnessCredentialInput {
   accessToken: string

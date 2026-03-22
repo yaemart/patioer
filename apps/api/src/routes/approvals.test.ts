@@ -1,11 +1,18 @@
 import Fastify from 'fastify'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../lib/queue-factory.js', () => ({
   enqueueJob: vi.fn(async () => ({ id: 'job-1' })),
 }))
 
 import approvalsRoute from './approvals.js'
+import { enqueueJob } from '../lib/queue-factory.js'
+
+const enqueueMock = vi.mocked(enqueueJob)
+
+beforeEach(() => {
+  vi.clearAllMocks()
+})
 
 /** RFC-compliant UUIDs — `:id` uses `z.string().uuid()`. */
 const APPROVAL_ID = '6ba7b810-9dad-11d1-80b4-00c04fd430c8'
@@ -365,6 +372,68 @@ describe('approvals route', () => {
     expect(insertedAuditEvents[0]).toMatchObject({
       action: 'approval.resolved.approved',
     })
+    await app.close()
+  })
+
+  it('enqueues approval.execute with platform from electroosPlatform when approved', async () => {
+    const { app } = createApp([
+      [
+        {
+          id: APPROVAL_ID,
+          status: 'pending',
+          agentId: '123e4567-e89b-12d3-a456-426614174001',
+          action: 'price.update',
+          payload: { electroosPlatform: 'tiktok', productId: '1' },
+        },
+      ],
+      { id: APPROVAL_ID, status: 'approved', resolvedBy: 'ops' },
+    ])
+    const response = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/approvals/${APPROVAL_ID}/resolve`,
+      headers: { 'x-tenant-id': '123e4567-e89b-12d3-a456-426614174000' },
+      payload: { status: 'approved', resolvedBy: 'ops' },
+    })
+    expect(response.statusCode).toBe(200)
+    expect(enqueueMock).toHaveBeenCalledWith(
+      'webhook-processing',
+      'approval.execute',
+      expect.objectContaining({
+        tenantId: '123e4567-e89b-12d3-a456-426614174000',
+        platform: 'tiktok',
+        action: 'price.update',
+      }),
+    )
+    await app.close()
+  })
+
+  it('PATCH resolve body platform overrides stored electroosPlatform in enqueue', async () => {
+    const { app } = createApp([
+      [
+        {
+          id: APPROVAL_ID,
+          status: 'pending',
+          agentId: '123e4567-e89b-12d3-a456-426614174001',
+          action: 'price.update',
+          payload: { electroosPlatform: 'tiktok' },
+        },
+      ],
+      { id: APPROVAL_ID, status: 'approved', resolvedBy: 'ops' },
+    ])
+    const response = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/approvals/${APPROVAL_ID}/resolve`,
+      headers: { 'x-tenant-id': '123e4567-e89b-12d3-a456-426614174000' },
+      payload: { status: 'approved', resolvedBy: 'ops', platform: 'amazon' },
+    })
+    expect(response.statusCode).toBe(200)
+    expect(enqueueMock).toHaveBeenCalledWith(
+      'webhook-processing',
+      'approval.execute',
+      expect.objectContaining({
+        platform: 'amazon',
+      }),
+    )
     await app.close()
   })
 })
