@@ -168,7 +168,9 @@ export function buildSupportRelayInput(goalContext: string): SupportRelayRunInpu
 }
 
 const agentsExecuteRoute: FastifyPluginAsync = async (app) => {
-  app.post('/api/v1/agents/:id/execute', async (request, reply) => {
+  app.post('/api/v1/agents/:id/execute', {
+    schema: { tags: ['Agent Execution'], summary: 'Execute an agent', security: [{ apiKey: [], tenantId: [] }] },
+  }, async (request, reply) => {
     if (!verifyPaperclipAuth(request, reply)) {
       return
     }

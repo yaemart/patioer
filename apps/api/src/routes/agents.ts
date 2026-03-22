@@ -18,7 +18,13 @@ const updateAgentBodySchema = z.object({
 const paramsSchema = z.object({ id: z.string().uuid() })
 
 const agentsRoute: FastifyPluginAsync = async (app) => {
-  app.get('/api/v1/agents', async (request, reply) => {
+  app.get('/api/v1/agents', {
+    schema: {
+      tags: ['Agents'],
+      summary: 'List all agents for tenant',
+      security: [{ tenantId: [] }],
+    },
+  }, async (request, reply) => {
     if (!request.withDb || !request.tenantId) {
       return reply.code(401).send({ error: 'x-tenant-id required' })
     }
@@ -28,7 +34,13 @@ const agentsRoute: FastifyPluginAsync = async (app) => {
     return reply.send({ agents: rows })
   })
 
-  app.post('/api/v1/agents', async (request, reply) => {
+  app.post('/api/v1/agents', {
+    schema: {
+      tags: ['Agents'],
+      summary: 'Create a new agent',
+      security: [{ tenantId: [] }],
+    },
+  }, async (request, reply) => {
     if (!request.withDb || !request.tenantId) {
       return reply.code(401).send({ error: 'x-tenant-id required' })
     }
@@ -53,7 +65,13 @@ const agentsRoute: FastifyPluginAsync = async (app) => {
     return reply.code(201).send({ agent: created })
   })
 
-  app.get('/api/v1/agents/:id', async (request, reply) => {
+  app.get('/api/v1/agents/:id', {
+    schema: {
+      tags: ['Agents'],
+      summary: 'Get agent by ID',
+      security: [{ tenantId: [] }],
+    },
+  }, async (request, reply) => {
     if (!request.withDb || !request.tenantId) {
       return reply.code(401).send({ error: 'x-tenant-id required' })
     }
@@ -78,7 +96,13 @@ const agentsRoute: FastifyPluginAsync = async (app) => {
     return reply.send({ agent: row })
   })
 
-  app.patch('/api/v1/agents/:id', async (request, reply) => {
+  app.patch('/api/v1/agents/:id', {
+    schema: {
+      tags: ['Agents'],
+      summary: 'Update agent',
+      security: [{ tenantId: [] }],
+    },
+  }, async (request, reply) => {
     if (!request.withDb || !request.tenantId) {
       return reply.code(401).send({ error: 'x-tenant-id required' })
     }
@@ -119,7 +143,13 @@ const agentsRoute: FastifyPluginAsync = async (app) => {
     return reply.send({ agent: updated })
   })
 
-  app.delete('/api/v1/agents/:id', async (request, reply) => {
+  app.delete('/api/v1/agents/:id', {
+    schema: {
+      tags: ['Agents'],
+      summary: 'Delete agent',
+      security: [{ tenantId: [] }],
+    },
+  }, async (request, reply) => {
     if (!request.withDb || !request.tenantId) {
       return reply.code(401).send({ error: 'x-tenant-id required' })
     }

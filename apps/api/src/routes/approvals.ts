@@ -15,7 +15,9 @@ const resolveBodySchema = z.object({
 })
 
 const approvalsRoute: FastifyPluginAsync = async (app) => {
-  app.get('/api/v1/approvals', async (request, reply) => {
+  app.get('/api/v1/approvals', {
+    schema: { tags: ['Approvals'], summary: 'List approvals (optionally filter by status)', security: [{ tenantId: [] }] },
+  }, async (request, reply) => {
     if (!request.withDb || !request.tenantId) {
       return reply.code(401).send({ error: 'x-tenant-id required' })
     }
@@ -43,7 +45,9 @@ const approvalsRoute: FastifyPluginAsync = async (app) => {
     return reply.send({ approvals: rows })
   })
 
-  app.get('/api/v1/approvals/:id', async (request, reply) => {
+  app.get('/api/v1/approvals/:id', {
+    schema: { tags: ['Approvals'], summary: 'Get approval by ID', security: [{ tenantId: [] }] },
+  }, async (request, reply) => {
     if (!request.withDb || !request.tenantId) {
       return reply.code(401).send({ error: 'x-tenant-id required' })
     }
@@ -71,7 +75,9 @@ const approvalsRoute: FastifyPluginAsync = async (app) => {
     return reply.send({ approval: row })
   })
 
-  app.patch('/api/v1/approvals/:id/resolve', async (request, reply) => {
+  app.patch('/api/v1/approvals/:id/resolve', {
+    schema: { tags: ['Approvals'], summary: 'Resolve an approval (approve or reject)', security: [{ tenantId: [] }] },
+  }, async (request, reply) => {
     if (!request.withDb || !request.tenantId) {
       return reply.code(401).send({ error: 'x-tenant-id required' })
     }
