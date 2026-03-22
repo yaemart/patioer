@@ -265,7 +265,11 @@ async function buildExecutionContext(
               tenantId,
               agentId: executedAgentId,
               action: params.action,
-              payload: params.payload as Record<string, unknown>,
+              payload: {
+                ...(params.payload as Record<string, unknown>),
+                /** Same harness platform as execute route / x-platform resolution. */
+                electroosPlatform: platform,
+              },
               status: 'pending',
             })
           })

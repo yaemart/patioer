@@ -102,6 +102,17 @@ At least one of `PAPERCLIP_API_KEY` or `ELECTROOS_EXECUTE_API_KEY` must be set f
 
 When enabled, the API starts a **`webhook-processing`** worker that processes jobs such as **`approval.execute`** (after an operator approves a price change in `PATCH /api/v1/approvals/:id/resolve`). Requires **`REDIS_URL`** reachable at startup.
 
+### Harness credential selection (multi-platform)
+
+Routes that load a **`TenantHarness`** (`POST /api/v1/products/sync`, `GET /api/v1/orders/platform`, `POST /api/v1/agents/:id/execute`, etc.) resolve `platform_credentials` as follows:
+
+1. **Optional header `x-platform`:** `shopify` \| `amazon` \| `tiktok` \| `shopee` — use **only** that platform’s credential row (if present). Case-insensitive.
+2. **Otherwise:** try in order **`shopify` → `amazon` → `tiktok` → `shopee`** — first tenant row wins.
+
+**Region handling:** Shopify keeps legacy `region IS NULL` rows. Amazon / TikTok / Shopee often use **non-`global`** regions (`na`, `MY`, seller base region, …); the resolver prefers `region = global` when it exists, otherwise picks the **most recently created** row for that tenant + platform.
+
+**Background jobs** (e.g. `approval.execute`) do not receive HTTP headers. The **`approval.execute`** job includes optional **`platform`** when the approval row’s JSON **`electroosPlatform`** was set at request time (agent execute route), or when **`PATCH /api/v1/approvals/:id/resolve`** supplies **`platform`** in the body (overrides stored value for legacy rows). Otherwise the worker falls back to the **default order** above.
+
 ### Budget Gate
 
 | Variable | Required | Default | Description |
@@ -257,8 +268,8 @@ http://localhost:3100/api/v1/docs/json
 | Agent execute | `POST /api/v1/agents/:id/execute` | `x-api-key` + `x-tenant-id` (see **Agent execution** env above) |
 | Agent Execution | `POST /api/v1/agents/:id/execute` | `x-api-key` + `x-tenant-id` |
 | Approvals | `GET/PATCH /api/v1/approvals` | `x-tenant-id` |
-| Products | `POST /api/v1/products/sync` | `x-tenant-id` |
-| Orders | `POST /api/v1/orders` | `x-tenant-id` |
+| Products | `POST /api/v1/products/sync` | `x-tenant-id` (+ optional `x-platform`, see **Harness credential selection**) |
+| Orders | `GET /api/v1/orders/platform` | `x-tenant-id` (+ optional `x-platform`) |
 | Shopify OAuth | `GET /api/v1/shopify/auth`, `GET /api/v1/shopify/callback` | None (OAuth flow) |
 | Shopify Webhooks | `POST /api/v1/webhooks/shopify` | HMAC signature |
 | Amazon OAuth | `GET /api/v1/amazon/auth`, `GET /api/v1/amazon/auth/callback` | None (OAuth flow) |

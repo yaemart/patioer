@@ -27,11 +27,18 @@
 - **`previewPromptForLlmStub`：** LLM stub 不因非法 `prompt` 抛错（`agents-execute.ts`）。
 - **`createHarness`：** 在 `buildExecutionContext` 内 try/catch → **502** + `request.log.warn`。
 
+## 多平台 · `resolveFirstCredential*`
+
+- **默认顺序：** `shopify` → `amazon` → `tiktok` → `shopee`（常量 `DEFAULT_CREDENTIAL_PLATFORM_ORDER`，`resolve-credential.ts`）。
+- **显式选择：** 请求头 **`x-platform: shopify|amazon|tiktok|shopee`**（大小写不敏感）→ 只解析该平台凭据；用于 `resolveHarness` / `resolveFirstCredential` 的路径（含 **`POST .../agents/:id/execute`**）。
+- **Region：** 非 Shopify 平台若不存在 `region=global` 行，则取该 tenant+platform **最新一条** `platform_credentials`（覆盖 Amazon `na`/`eu`/`fe`、TikTok seller region、Shopee 多市场等）。
+
 ## Agent-native 修复（P0 / P1 / P2）
 
 ### P0 · 审批通过后异步执行
 
 - **`PATCH /api/v1/approvals/:id/resolve`** 在 `approved` 时 `enqueueJob('webhook-processing', 'approval.execute', …)`。
+- **`approval.execute` job 的 `platform`：** 与执行路由 harness 一致。`POST .../agents/:id/execute` 在写入 `approvals.payload` 时附带 **`electroosPlatform`**；resolve 时入队 **`platform`**（resolve body 可选 **`platform`** 覆盖存量行）。Worker 对 **`price.update`** 调用 `resolveFirstCredentialForTenant(tenantId, platform)`。
 - **API 进程**在 `server.ts` 中启动 `webhook-processing` **BullMQ Worker**（`ENABLE_QUEUE_WORKERS=0` 可关闭），处理：
   - **`price.update`**：`harness.updatePrice` + `agent_events` `approval.executed`
   - **`support.escalate`**：仅记 `agent_events`（人工在 Inbox 处理；无自动发消息）

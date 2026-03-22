@@ -103,7 +103,37 @@ describe('processApprovalExecuteJob', () => {
     })
 
     expect(mockHarnessUpdatePrice).toHaveBeenCalledWith('42', 19.99)
+    expect(mockResolveFirstCredentialForTenant).toHaveBeenCalledWith(TENANT, null)
     expect(inserts.some((row) => (row as { action?: string }).action === 'approval.executed')).toBe(true)
+  })
+
+  it('passes job platform to resolveFirstCredentialForTenant for price.update', async () => {
+    mockWithTenantDb.mockImplementation(async (_tid: string, cb: (db: unknown) => Promise<unknown>) => {
+      const db = {
+        select: vi.fn().mockReturnValue({
+          from: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue([]),
+            }),
+          }),
+        }),
+        insert: vi.fn().mockReturnValue({
+          values: vi.fn().mockResolvedValue(undefined),
+        }),
+      }
+      return cb(db)
+    })
+
+    await processApprovalExecuteJob({
+      tenantId: TENANT,
+      agentId: AGENT,
+      approvalId: APPROVAL,
+      action: 'price.update',
+      payload: { productId: '42', proposedPrice: 19.99 },
+      platform: 'tiktok',
+    })
+
+    expect(mockResolveFirstCredentialForTenant).toHaveBeenCalledWith(TENANT, 'tiktok')
   })
 
   it('skips when approval.executed already exists', async () => {
