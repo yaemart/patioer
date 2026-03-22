@@ -1,18 +1,23 @@
 import Fastify from 'fastify'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { mockDecryptToken, mockGetOrCreate, mockGetProducts } = vi.hoisted(() => ({
-  mockDecryptToken: vi.fn(),
-  mockGetOrCreate: vi.fn(),
-  mockGetProducts: vi.fn(),
+const {
+  mockResolveHarness,
+  mockHandleHarnessError,
+  mockGetProductsPage,
+} = vi.hoisted(() => ({
+  mockResolveHarness: vi.fn(),
+  mockHandleHarnessError: vi.fn(),
+  mockGetProductsPage: vi.fn(),
 }))
 
-vi.mock('../lib/crypto.js', () => ({ decryptToken: mockDecryptToken }))
-vi.mock('../lib/harness-registry.js', () => ({
-  registry: { getOrCreate: mockGetOrCreate },
+vi.mock('../lib/resolve-harness.js', () => ({
+  resolveHarness: mockResolveHarness,
+  handleHarnessError: mockHandleHarnessError,
 }))
 
 import productsRoute from './products.js'
+import { HarnessError } from '@patioer/harness'
 
 const TENANT_ID = '123e4567-e89b-12d3-a456-426614174000'
 
@@ -39,10 +44,13 @@ function createApp(
 
 beforeEach(() => {
   vi.clearAllMocks()
-  process.env.SHOPIFY_ENCRYPTION_KEY = '0'.repeat(64)
-  mockDecryptToken.mockReturnValue('plain-token')
-  mockGetProducts.mockResolvedValue([])
-  mockGetOrCreate.mockReturnValue({ getProducts: mockGetProducts })
+  mockGetProductsPage.mockResolvedValue({ items: [] })
+  mockResolveHarness.mockResolvedValue({
+    ok: true,
+    harness: { getProductsPage: mockGetProductsPage },
+    platform: 'shopify',
+    registryKey: `${TENANT_ID}:shopify`,
+  })
 })
 
 describe('products route', () => {
@@ -81,14 +89,34 @@ describe('products route', () => {
   })
 
   it('POST /products/sync returns 401 without tenant header', async () => {
+    mockResolveHarness.mockResolvedValueOnce({
+      ok: false, statusCode: 401, body: { error: 'x-tenant-id required' },
+    })
     const app = createApp([], { withTenant: false })
     const response = await app.inject({ method: 'POST', url: '/api/v1/products/sync' })
     expect(response.statusCode).toBe(401)
     await app.close()
   })
 
-  it('POST /products/sync returns 503 when SHOPIFY_ENCRYPTION_KEY is not set', async () => {
-    delete process.env.SHOPIFY_ENCRYPTION_KEY
+  it('POST /products/sync returns 404 when no platform credentials found', async () => {
+    mockResolveHarness.mockResolvedValueOnce({
+      ok: false, statusCode: 404, body: { error: 'No platform credentials found' },
+    })
+    const app = createApp([])
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/products/sync',
+      headers: { 'x-tenant-id': TENANT_ID },
+    })
+    expect(response.statusCode).toBe(404)
+    expect(response.json()).toEqual({ error: 'No platform credentials found' })
+    await app.close()
+  })
+
+  it('POST /products/sync returns 503 when harness creation fails', async () => {
+    mockResolveHarness.mockResolvedValueOnce({
+      ok: false, statusCode: 503, body: { error: 'Platform integration not configured' },
+    })
     const app = createApp([])
     const response = await app.inject({
       method: 'POST',
@@ -96,28 +124,13 @@ describe('products route', () => {
       headers: { 'x-tenant-id': TENANT_ID },
     })
     expect(response.statusCode).toBe(503)
-    expect(response.json()).toEqual({ error: 'Shopify integration not configured' })
-    await app.close()
-  })
-
-  it('POST /products/sync returns 404 when shopify credential is missing', async () => {
-    const app = createApp([null])
-    const response = await app.inject({
-      method: 'POST',
-      url: '/api/v1/products/sync',
-      headers: { 'x-tenant-id': TENANT_ID },
-    })
-    expect(response.statusCode).toBe(404)
-    expect(response.json()).toEqual({ error: 'No Shopify credentials' })
+    expect(response.json()).toEqual({ error: 'Platform integration not configured' })
     await app.close()
   })
 
   it('POST /products/sync returns 0 when harness returns empty products list', async () => {
-    mockGetProducts.mockResolvedValueOnce([])
-    const app = createApp([
-      { accessToken: 'enc', shopDomain: 'demo.myshopify.com' },
-      undefined,
-    ])
+    mockGetProductsPage.mockResolvedValueOnce({ items: [] })
+    const app = createApp([undefined])
     const response = await app.inject({
       method: 'POST',
       url: '/api/v1/products/sync',
@@ -128,23 +141,20 @@ describe('products route', () => {
     await app.close()
   })
 
-  it('POST /products/sync calls harness.getProducts and upserts rows', async () => {
+  it('POST /products/sync calls harness.getProductsPage and upserts rows', async () => {
     const products = [
       { id: 'sp-1', title: 'Widget', price: 9.99 },
       { id: 'sp-2', title: 'Gadget', price: 19.99 },
     ]
-    mockGetProducts.mockResolvedValueOnce(products)
-    const app = createApp([
-      { accessToken: 'enc', shopDomain: 'demo.myshopify.com' },
-      undefined,
-    ])
+    mockGetProductsPage.mockResolvedValueOnce({ items: products })
+    const app = createApp([undefined])
     const response = await app.inject({
       method: 'POST',
       url: '/api/v1/products/sync',
       headers: { 'x-tenant-id': TENANT_ID },
     })
     expect(response.statusCode).toBe(200)
-    expect(mockGetProducts).toHaveBeenCalledOnce()
+    expect(mockGetProductsPage).toHaveBeenCalledOnce()
     await app.close()
   })
 
@@ -154,11 +164,8 @@ describe('products route', () => {
       { id: 'sp-2', title: 'Gadget', price: 19.99 },
       { id: 'sp-3', title: 'Doohickey', price: 4.99 },
     ]
-    mockGetProducts.mockResolvedValueOnce(products)
-    const app = createApp([
-      { accessToken: 'enc', shopDomain: 'demo.myshopify.com' },
-      undefined,
-    ])
+    mockGetProductsPage.mockResolvedValueOnce({ items: products })
+    const app = createApp([undefined])
     const response = await app.inject({
       method: 'POST',
       url: '/api/v1/products/sync',
@@ -174,7 +181,7 @@ describe('products route', () => {
       { id: 'sp-1', title: 'Widget', price: 9.99 },
       { id: 'sp-2', title: 'Gadget', price: 19.99 },
     ]
-    mockGetProducts.mockResolvedValueOnce(shopifyProducts)
+    mockGetProductsPage.mockResolvedValueOnce({ items: shopifyProducts })
 
     const insertedValues: unknown[] = []
     const makeUpsertDb = () => ({
@@ -185,18 +192,11 @@ describe('products route', () => {
         },
       }),
     })
-    const limit = vi.fn().mockResolvedValue([{ accessToken: 'enc', shopDomain: 'shop.myshopify.com' }])
-    const where = vi.fn().mockReturnValue({ limit })
-    const from = vi.fn().mockReturnValue({ where })
-    const credDb = { select: vi.fn().mockReturnValue({ from }) }
 
-    let callIndex = 0
     const app = Fastify({ logger: false })
     app.addHook('onRequest', async (request) => {
       request.tenantId = TENANT_ID
       request.withDb = (async <T>(callback: (db: never) => Promise<T>) => {
-        callIndex += 1
-        if (callIndex === 1) return await callback(credDb as never)
         return await callback(makeUpsertDb() as never)
       }) as never
     })
@@ -215,45 +215,59 @@ describe('products route', () => {
     await app.close()
   })
 
-  it('POST /products/sync invokes ShopifyHarness factory when registry has no cached entry', async () => {
-    mockGetProducts.mockResolvedValueOnce([])
-    let factoryInvoked = false
-    mockGetOrCreate.mockImplementation((_key: string, factory: () => unknown) => {
-      factoryInvoked = true
-      factory()
-      return { getProducts: mockGetProducts }
+  it('POST /products/sync returns 503 and calls handleHarnessError on 401', async () => {
+    const harnessErr = new HarnessError('shopify', '401', 'expired token')
+    mockGetProductsPage.mockRejectedValueOnce(harnessErr)
+    mockHandleHarnessError.mockReturnValueOnce({
+      statusCode: 503,
+      body: { error: 'shopify authorization expired; please reconnect' },
     })
-
-    const limit = vi.fn().mockResolvedValue([{ accessToken: 'enc', shopDomain: 'shop.myshopify.com' }])
-    const where = vi.fn().mockReturnValue({ limit })
-    const from = vi.fn().mockReturnValue({ where })
-    const credDb = { select: vi.fn().mockReturnValue({ from }) }
-    const upsertDb = {
-      insert: vi.fn().mockReturnValue({
-        values: vi.fn().mockReturnValue({
-          onConflictDoUpdate: vi.fn().mockResolvedValue(undefined),
-        }),
-      }),
-    }
-    let callIndex = 0
-    const app = Fastify({ logger: false })
-    app.addHook('onRequest', async (request) => {
-      request.tenantId = TENANT_ID
-      request.withDb = (async <T>(callback: (db: never) => Promise<T>) => {
-        callIndex += 1
-        if (callIndex === 1) return await callback(credDb as never)
-        return await callback(upsertDb as never)
-      }) as never
-    })
-    app.register(productsRoute)
-
+    const app = createApp([undefined])
     const response = await app.inject({
       method: 'POST',
       url: '/api/v1/products/sync',
       headers: { 'x-tenant-id': TENANT_ID },
     })
+    expect(response.statusCode).toBe(503)
+    expect(response.json()).toEqual({ error: 'shopify authorization expired; please reconnect' })
+    expect(mockHandleHarnessError).toHaveBeenCalledWith(
+      harnessErr, 'shopify', `${TENANT_ID}:shopify`, expect.any(String),
+    )
+    await app.close()
+  })
+
+  it('POST /products/sync returns 429 on rate-limit error', async () => {
+    const harnessErr = new HarnessError('shopify', '429', 'too many requests')
+    mockGetProductsPage.mockRejectedValueOnce(harnessErr)
+    mockHandleHarnessError.mockReturnValueOnce({
+      statusCode: 429,
+      body: { error: 'shopify rate limit exceeded; retry later' },
+    })
+    const app = createApp([undefined])
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/products/sync',
+      headers: { 'x-tenant-id': TENANT_ID },
+    })
+    expect(response.statusCode).toBe(429)
+    expect(response.json()).toEqual({ error: 'shopify rate limit exceeded; retry later' })
+    await app.close()
+  })
+
+  it('POST /products/sync forwards cursor/limit and returns nextCursor', async () => {
+    mockGetProductsPage.mockResolvedValueOnce({
+      items: [{ id: 'sp-1', title: 'Widget', price: 9.99 }],
+      nextCursor: 'cursor-next-1',
+    })
+    const app = createApp([undefined])
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/products/sync?cursor=cursor-0&limit=1',
+      headers: { 'x-tenant-id': TENANT_ID },
+    })
     expect(response.statusCode).toBe(200)
-    expect(factoryInvoked).toBe(true)
+    expect(mockGetProductsPage).toHaveBeenCalledWith({ cursor: 'cursor-0', limit: 1 })
+    expect(response.json()).toEqual({ synced: 1, nextCursor: 'cursor-next-1' })
     await app.close()
   })
 })

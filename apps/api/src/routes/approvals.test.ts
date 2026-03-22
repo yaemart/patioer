@@ -1,5 +1,10 @@
 import Fastify from 'fastify'
 import { describe, expect, it, vi } from 'vitest'
+
+vi.mock('../lib/queue-factory.js', () => ({
+  enqueueJob: vi.fn(async () => ({ id: 'job-1' })),
+}))
+
 import approvalsRoute from './approvals.js'
 
 /** RFC-compliant UUIDs — `:id` uses `z.string().uuid()`. */
@@ -170,6 +175,26 @@ describe('approvals route', () => {
     })
     expect(response.statusCode).toBe(200)
     expect(response.json()).toEqual({
+      approval: { id: APPROVAL_ID, status: 'approved', resolvedBy: 'ops' },
+    })
+    await app.close()
+  })
+
+  it('PATCH /approvals/:id/resolve returns approval as object (not array)', async () => {
+    const { app } = createApp([
+      [{ id: APPROVAL_ID, status: 'pending', agentId: '123e4567-e89b-12d3-a456-426614174001' }],
+      [{ id: APPROVAL_ID, status: 'approved', resolvedBy: 'ops' }],
+    ])
+    const response = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/approvals/${APPROVAL_ID}/resolve`,
+      headers: { 'x-tenant-id': '123e4567-e89b-12d3-a456-426614174000' },
+      payload: { status: 'approved', resolvedBy: 'ops' },
+    })
+    expect(response.statusCode).toBe(200)
+    const body = response.json() as { approval: unknown }
+    expect(Array.isArray(body.approval)).toBe(false)
+    expect(body).toEqual({
       approval: { id: APPROVAL_ID, status: 'approved', resolvedBy: 'ops' },
     })
     await app.close()

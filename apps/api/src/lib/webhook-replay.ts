@@ -1,5 +1,5 @@
-import { and, eq, lt } from 'drizzle-orm'
-import { db, withTenantDb, schema } from '@patioer/db'
+import { and, inArray, lt } from 'drizzle-orm'
+import { listTenantIds, withTenantDb, schema } from '@patioer/db'
 import { markWebhookProcessed, markWebhookFailed } from './webhook-dedup.js'
 
 export interface ReplayResult {
@@ -19,18 +19,15 @@ export async function replayPendingWebhooks(
   const limit = options?.limit ?? DEFAULT_LIMIT
   const cutoff = new Date(Date.now() - retryAfterMs)
 
-  // tenants has no RLS (intentionally excluded — see migration ADR-0001).
-  // Enumerate all tenants so we can query webhook_events within each tenant's
-  // RLS context instead of bypassing it with the global db connection.
-  const allTenants = await db.select({ id: schema.tenants.id }).from(schema.tenants)
+  const tenantIds = await listTenantIds()
 
   const result: ReplayResult = { total: 0, processed: 0, failed: 0 }
 
-  for (const tenant of allTenants) {
+  for (const tenantId of tenantIds) {
     const remaining = limit - result.total
     if (remaining <= 0) break
 
-    const pending = await withTenantDb(tenant.id, (tdb) =>
+    const pending = await withTenantDb(tenantId, (tdb) =>
       tdb
         .select({
           id: schema.webhookEvents.id,
@@ -41,7 +38,7 @@ export async function replayPendingWebhooks(
         .from(schema.webhookEvents)
         .where(
           and(
-            eq(schema.webhookEvents.status, 'received'),
+            inArray(schema.webhookEvents.status, ['received', 'received_live']),
             lt(schema.webhookEvents.receivedAt, cutoff),
           ),
         )
@@ -54,7 +51,7 @@ export async function replayPendingWebhooks(
       try {
         await handler(event.topic, event.tenantId, event.payload)
       } catch (err) {
-        await withTenantDb(tenant.id, (tdb) =>
+        await withTenantDb(tenantId, (tdb) =>
           markWebhookFailed(tdb, event.id, err instanceof Error ? err.message : String(err)),
         )
         result.failed += 1
@@ -62,7 +59,7 @@ export async function replayPendingWebhooks(
       }
 
       try {
-        await withTenantDb(tenant.id, (tdb) => markWebhookProcessed(tdb, event.id))
+        await withTenantDb(tenantId, (tdb) => markWebhookProcessed(tdb, event.id))
         result.processed += 1
       } catch {
         // Handler side effects already succeeded; do not overwrite webhook state to `failed`.

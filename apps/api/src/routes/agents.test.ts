@@ -118,6 +118,9 @@ describe('agents route', () => {
 
   it('PATCH /agents/:id updates name status and goalContext', async () => {
     const app = createApp([
+      // 1st call: lookup agent type for goalContext validation
+      [{ type: 'price-sentinel' }],
+      // 2nd call: actual DB update returning the updated row
       [
         {
           id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',

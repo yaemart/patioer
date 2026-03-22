@@ -1,10 +1,8 @@
 import type { FastifyPluginAsync } from 'fastify'
 import { schema } from '@patioer/db'
-import { and, eq, isNull } from 'drizzle-orm'
-import { HarnessError, ShopifyHarness } from '@patioer/harness'
+import { HarnessError } from '@patioer/harness'
 import { z } from 'zod'
-import { decryptToken } from '../lib/crypto.js'
-import { registry } from '../lib/harness-registry.js'
+import { resolveHarness, handleHarnessError } from '../lib/resolve-harness.js'
 
 const platformQuerySchema = z.object({
   cursor: z.string().min(1).optional(),
@@ -12,9 +10,6 @@ const platformQuerySchema = z.object({
 })
 
 const ordersRoute: FastifyPluginAsync = async (app) => {
-  // GET /api/v1/orders
-  // Returns orders for the authenticated tenant (RLS-enforced via withDb).
-  // Orders are written by the Shopify webhook handler; this endpoint is read-only.
   app.get('/api/v1/orders', async (request, reply) => {
     if (!request.withDb) {
       return reply.code(401).send({ error: 'x-tenant-id required' })
@@ -23,67 +18,17 @@ const ordersRoute: FastifyPluginAsync = async (app) => {
     return reply.send({ orders: rows })
   })
 
-  // GET /api/v1/orders/platform
-  // Read-only passthrough to Shopify with cursor pagination.
-  // Does NOT write to local DB; preserves existing /api/v1/orders semantics.
   app.get('/api/v1/orders/platform', async (request, reply) => {
     const parsedQuery = platformQuerySchema.safeParse(request.query)
     if (!parsedQuery.success) {
       return reply.code(400).send({ error: 'invalid query' })
     }
 
-    if (!request.withDb || !request.tenantId) {
-      return reply.code(401).send({ error: 'x-tenant-id required' })
+    const loaded = await resolveHarness(request)
+    if (!loaded.ok) {
+      return reply.code(loaded.statusCode).send(loaded.body)
     }
-
-    const encryptionKey = process.env.SHOPIFY_ENCRYPTION_KEY
-    if (!encryptionKey) {
-      return reply.code(503).send({ error: 'Shopify integration not configured' })
-    }
-
-    const rawCred = await request.withDb(async (db) => {
-      const [globalRow] = await db
-        .select()
-        .from(schema.platformCredentials)
-        .where(
-          and(
-            eq(schema.platformCredentials.tenantId, request.tenantId!),
-            eq(schema.platformCredentials.platform, 'shopify'),
-            eq(schema.platformCredentials.region, 'global'),
-          ),
-        )
-        .limit(1)
-      if (globalRow) return globalRow
-
-      // Backward compatibility for old rows created before region backfill.
-      const [legacyRow] = await db
-        .select()
-        .from(schema.platformCredentials)
-        .where(
-          and(
-            eq(schema.platformCredentials.tenantId, request.tenantId!),
-            eq(schema.platformCredentials.platform, 'shopify'),
-            isNull(schema.platformCredentials.region),
-          ),
-        )
-        .limit(1)
-      return legacyRow ?? null
-    })
-    const cred = Array.isArray(rawCred) ? (rawCred[0] ?? null) : rawCred
-    if (!cred) {
-      return reply.code(404).send({ error: 'No Shopify credentials' })
-    }
-    const shopDomain = cred.shopDomain
-    if (!shopDomain) {
-      return reply.code(503).send({ error: 'Invalid Shopify credentials: shop domain missing' })
-    }
-
-    const accessToken = decryptToken(cred.accessToken, encryptionKey)
-    const registryKey = `${request.tenantId!}:shopify`
-    const harness = registry.getOrCreate(
-      registryKey,
-      () => new ShopifyHarness(request.tenantId!, shopDomain, accessToken),
-    ) as ShopifyHarness
+    const { harness, platform, registryKey } = loaded
 
     try {
       const page = await harness.getOrdersPage({
@@ -98,19 +43,13 @@ const ordersRoute: FastifyPluginAsync = async (app) => {
       if (err instanceof HarnessError) {
         app.log.error(
           { err, tenantId: request.tenantId, code: err.code, platform: err.platform },
-          'Shopify orders passthrough failed',
+          'Orders passthrough failed',
         )
-        if (err.code === '401') {
-          registry.invalidate(registryKey)
-          return reply.code(503).send({ error: 'Shopify authorization expired; please reconnect Shopify' })
-        }
-        if (err.code === '429') {
-          return reply.code(429).send({ error: 'Shopify rate limit exceeded; retry later' })
-        }
-      } else {
-        app.log.error({ err, tenantId: request.tenantId }, 'Shopify orders passthrough failed')
+        const resp = handleHarnessError(err, platform, registryKey, `failed to fetch orders from ${platform}`)
+        return reply.code(resp.statusCode).send(resp.body)
       }
-      return reply.code(502).send({ error: 'failed to fetch orders from Shopify' })
+      app.log.error({ err, tenantId: request.tenantId }, 'Orders passthrough failed')
+      return reply.code(502).send({ error: `failed to fetch orders from ${platform}` })
     }
   })
 }

@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ShopifyHarness } from './shopify.harness.js'
+import { HarnessError } from './harness-error.js'
+import { resetSharedBuckets } from './token-bucket.js'
 
 const mockFetch = vi.fn()
 vi.stubGlobal('fetch', mockFetch)
@@ -9,7 +11,23 @@ function makeHarness() {
 }
 
 function ok(body: unknown) {
-  return { ok: true, status: 200, statusText: 'OK', json: () => Promise.resolve(body) }
+  return {
+    ok: true,
+    status: 200,
+    statusText: 'OK',
+    headers: { get: () => null },
+    json: () => Promise.resolve(body),
+  }
+}
+
+function okWithLink(body: unknown, link: string) {
+  return {
+    ok: true,
+    status: 200,
+    statusText: 'OK',
+    headers: { get: (name: string) => (name.toLowerCase() === 'link' ? link : null) },
+    json: () => Promise.resolve(body),
+  }
 }
 
 function shopifyProduct(id = 1, price = '19.99', inventory = 10, inventoryItemId = 99) {
@@ -22,6 +40,8 @@ function shopifyProduct(id = 1, price = '19.99', inventory = 10, inventoryItemId
 
 afterEach(() => {
   mockFetch.mockReset()
+  resetSharedBuckets()
+  vi.useRealTimers()
 })
 
 describe('ShopifyHarness.getProducts', () => {
@@ -31,7 +51,13 @@ describe('ShopifyHarness.getProducts', () => {
     const products = await makeHarness().getProducts()
 
     expect(products).toHaveLength(1)
-    expect(products[0]).toEqual({ id: '123', title: 'Product 123', price: 19.99, inventory: 10 })
+    expect(products[0]).toEqual({
+      id: '123',
+      title: 'Product 123',
+      price: 19.99,
+      inventory: 10,
+      variantCount: 1,
+    })
     expect(mockFetch).toHaveBeenCalledWith(
       expect.stringContaining('/products.json'),
       expect.objectContaining({
@@ -59,6 +85,20 @@ describe('ShopifyHarness.getProducts', () => {
     mockFetch.mockResolvedValue({ ok: false, status: 404, statusText: 'Not Found' })
     await expect(makeHarness().getProducts()).rejects.toThrow('Shopify API error 404')
   })
+
+  it('returns nextCursor from Shopify Link header', async () => {
+    mockFetch.mockResolvedValue(
+      okWithLink(
+        { products: [shopifyProduct(1)] },
+        '<https://myshop.myshopify.com/admin/api/2024-01/products.json?page_info=abc123&limit=1>; rel="next"',
+      ),
+    )
+
+    const page = await makeHarness().getProductsPage({ limit: 1 })
+
+    expect(page.items).toHaveLength(1)
+    expect(page.nextCursor).toBe('abc123')
+  })
 })
 
 describe('ShopifyHarness.updatePrice', () => {
@@ -80,7 +120,10 @@ describe('ShopifyHarness.updatePrice', () => {
 
   it('throws when product has no variant', async () => {
     mockFetch.mockResolvedValue(ok({ product: { id: 1, title: 'X', variants: [] } }))
-    await expect(makeHarness().updatePrice('1', 9.99)).rejects.toThrow('No variant found')
+    await expect(makeHarness().updatePrice('1', 9.99)).rejects.toMatchObject({
+      type: 'harness_error',
+      code: 'variant_not_found',
+    } satisfies Partial<HarnessError>)
   })
 })
 
@@ -108,7 +151,10 @@ describe('ShopifyHarness.updateInventory', () => {
       .mockResolvedValueOnce(ok({ product: shopifyProduct(5) }))
       .mockResolvedValueOnce(ok({ locations: [] }))
 
-    await expect(makeHarness().updateInventory('5', 10)).rejects.toThrow('No Shopify fulfillment location')
+    await expect(makeHarness().updateInventory('5', 10)).rejects.toMatchObject({
+      type: 'harness_error',
+      code: 'location_not_found',
+    } satisfies Partial<HarnessError>)
   })
 })
 
@@ -132,6 +178,20 @@ describe('ShopifyHarness.getOrders', () => {
     expect(url).toContain('status=any')
     expect(url).toContain('limit=5')
   })
+
+  it('returns nextCursor for order pagination', async () => {
+    mockFetch.mockResolvedValue(
+      okWithLink(
+        { orders: [{ id: 1, financial_status: 'paid', total_price: '9.00' }] },
+        '<https://myshop.myshopify.com/admin/api/2024-01/orders.json?page_info=next-1&limit=1>; rel="next"',
+      ),
+    )
+
+    const page = await makeHarness().getOrdersPage({ limit: 1 })
+
+    expect(page.items).toHaveLength(1)
+    expect(page.nextCursor).toBe('next-1')
+  })
 })
 
 describe('ShopifyHarness.getAnalytics', () => {
@@ -147,12 +207,20 @@ describe('ShopifyHarness.getAnalytics', () => {
 
     expect(analytics.revenue).toBeCloseTo(150.5)
     expect(analytics.orders).toBe(2)
+    expect(analytics.truncated).toBe(false)
   })
 
   it('returns zero analytics when no orders', async () => {
     mockFetch.mockResolvedValue(ok({ orders: [] }))
     const analytics = await makeHarness().getAnalytics({ from: new Date(), to: new Date() })
-    expect(analytics).toEqual({ revenue: 0, orders: 0 })
+    expect(analytics).toEqual({ revenue: 0, orders: 0, truncated: false })
+  })
+
+  it('sets truncated=true when page size cap is hit', async () => {
+    const orders = Array.from({ length: 250 }, () => ({ total_price: '1.00' }))
+    mockFetch.mockResolvedValue(ok({ orders }))
+    const analytics = await makeHarness().getAnalytics({ from: new Date(), to: new Date() })
+    expect(analytics.truncated).toBe(true)
   })
 })
 
@@ -165,8 +233,53 @@ describe('ShopifyHarness.getOpenThreads', () => {
 })
 
 describe('ShopifyHarness.replyToMessage', () => {
-  it('resolves without calling fetch (Shopify Inbox not wired in MVP)', async () => {
-    await expect(makeHarness().replyToMessage('thread-1', 'hello')).resolves.toBeUndefined()
+  it('throws not_implemented HarnessError until Inbox integration is wired', async () => {
+    await expect(makeHarness().replyToMessage('thread-1', 'hello')).rejects.toMatchObject({
+      type: 'harness_error',
+      code: 'not_implemented',
+    } satisfies Partial<HarnessError>)
+    expect(mockFetch).not.toHaveBeenCalled()
+  })
+})
+
+describe('ShopifyHarness retry behavior', () => {
+  it('retries on transient 5xx responses', async () => {
+    vi.useFakeTimers()
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        headers: { get: () => null },
+      })
+      .mockResolvedValueOnce(ok({ products: [] }))
+
+    const task = makeHarness().getProducts()
+    await vi.runAllTimersAsync()
+    const products = await task
+
+    expect(products).toEqual([])
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('retries on network fetch errors before succeeding', async () => {
+    vi.useFakeTimers()
+    mockFetch
+      .mockRejectedValueOnce(new TypeError('network down'))
+      .mockResolvedValueOnce(ok({ products: [] }))
+
+    const task = makeHarness().getProducts()
+    await vi.runAllTimersAsync()
+    const products = await task
+
+    expect(products).toEqual([])
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('Support Relay (Shopify Inbox)', () => {
+  it('Support Relay handles empty thread list gracefully', async () => {
+    expect(await makeHarness().getOpenThreads()).toEqual([])
     expect(mockFetch).not.toHaveBeenCalled()
   })
 })

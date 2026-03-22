@@ -8,18 +8,20 @@ const HIGH_PRICE_THRESHOLD = 10_000
 function classifyProduct(product: {
   id: string
   title: string
-  price: number
-  inventory: number
+  price: number | null
+  inventory: number | null
 }): ScoutedProduct {
+  const price = product.price ?? 0
+  const inventory = product.inventory ?? 0
   let flag: ScoutedProduct['flag'] = 'normal'
-  if (product.inventory <= LOW_INVENTORY_THRESHOLD) flag = 'low_inventory'
-  else if (product.price >= HIGH_PRICE_THRESHOLD) flag = 'high_price'
+  if (inventory <= LOW_INVENTORY_THRESHOLD) flag = 'low_inventory'
+  else if (price >= HIGH_PRICE_THRESHOLD) flag = 'high_price'
 
   return {
     productId: product.id,
     title: product.title,
-    price: product.price,
-    inventory: product.inventory,
+    price,
+    inventory,
     flag,
   }
 }

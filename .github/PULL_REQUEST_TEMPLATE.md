@@ -16,7 +16,8 @@
 - [ ] No new lint warnings (`pnpm lint`)
 - [ ] TypeScript compiles cleanly (`pnpm typecheck`)
 - [ ] Tests pass (`pnpm test`)
-- [ ] Coverage thresholds met (`pnpm --filter api test:coverage`)
+- [ ] API coverage thresholds met (`pnpm --filter api test:coverage`)
+- [ ] Harness coverage thresholds met (`pnpm --filter @patioer/harness test:coverage`) — required when changing `packages/harness`
 
 ### Security
 - [ ] No secrets or credentials committed

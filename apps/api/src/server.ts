@@ -1,7 +1,9 @@
 import dotenv from 'dotenv'
-import { PaperclipBridge } from '@patioer/agent-runtime'
 import { buildServer } from './app.js'
 import { bootstrapActiveAgents } from './lib/agent-bootstrap.js'
+import { createPaperclipBridgeFromEnv } from './lib/paperclip-bridge.js'
+import { closeRedisClient } from './lib/redis.js'
+import { gracefulShutdown } from './lib/graceful-shutdown.js'
 import { replayPendingWebhooks } from './lib/webhook-replay.js'
 import { handleWebhookTopic } from './lib/webhook-topic-handler.js'
 
@@ -17,11 +19,9 @@ if (Number.isNaN(port) || port < 1 || port > 65535) {
 
 const app = buildServer()
 
-const shutdown = (): void => {
-  app
-    .close()
-    .then(() => process.exit(0))
-    .catch(() => process.exit(1))
+const shutdown = async (): Promise<void> => {
+  const code = await gracefulShutdown(() => app.close(), closeRedisClient)
+  process.exit(code)
 }
 
 process.on('SIGTERM', shutdown)
@@ -32,18 +32,10 @@ app
   .then(async () => {
     app.log.info({ port }, 'ElectroOS API started')
 
-    const paperclipUrl = process.env.PAPERCLIP_API_URL
-    const paperclipKey = process.env.PAPERCLIP_API_KEY
     const appBaseUrl = process.env.APP_BASE_URL ?? ''
+    const bridge = createPaperclipBridgeFromEnv()
 
-    if (paperclipUrl && paperclipKey && appBaseUrl) {
-      const bridge = new PaperclipBridge({
-        baseUrl: paperclipUrl,
-        apiKey: paperclipKey,
-        timeoutMs: Number(process.env.PAPERCLIP_TIMEOUT_MS ?? 5000),
-        maxRetries: Number(process.env.PAPERCLIP_MAX_RETRIES ?? 2),
-        retryBaseMs: Number(process.env.PAPERCLIP_RETRY_BASE_MS ?? 200),
-      })
+    if (bridge && appBaseUrl) {
       bootstrapActiveAgents(bridge, appBaseUrl)
         .then((r) => {
           app.log.info(r, 'agent bootstrap complete')

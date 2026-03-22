@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from 'fastify'
 import { and, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { schema } from '@patioer/db'
+import { enqueueJob } from '../lib/queue-factory.js'
 
 const paramsSchema = z.object({ id: z.string().uuid() })
 
@@ -112,7 +113,7 @@ const approvalsRoute: FastifyPluginAsync = async (app) => {
       return reply.code(409).send({ error: 'approval already resolved' })
     }
 
-    const result = await request.withDb(async (db) => {
+    const updatedApproval = await request.withDb(async (db) => {
       const [updated] = await db
         .update(schema.approvals)
         .set({
@@ -141,14 +142,65 @@ const approvalsRoute: FastifyPluginAsync = async (app) => {
         },
       })
 
-      return updated
+      return updated ?? null
     })
 
-    if (!result || (Array.isArray(result) && result.length === 0)) {
+    const normalizedApproval = Array.isArray(updatedApproval)
+      ? (updatedApproval[0] ?? null)
+      : updatedApproval
+
+    if (!normalizedApproval) {
       return reply.code(409).send({ error: 'approval already resolved' })
     }
 
-    return reply.send({ approval: result })
+    // When an approval is approved, enqueue a job so the agent can execute the
+    // approved action asynchronously. The webhook-processing queue worker will
+    // pick it up and call the appropriate harness method.
+    if (parsedBody.data.status === 'approved') {
+      try {
+        await enqueueJob('webhook-processing', 'approval.execute', {
+          tenantId: request.tenantId!,
+          agentId: existing.agentId,
+          approvalId: existing.id,
+          action: existing.action,
+          payload: existing.payload,
+        })
+      } catch (err) {
+        // Non-fatal — the approval is already resolved. Log and continue.
+        request.log.error({ err, approvalId: existing.id }, 'failed to enqueue approved action')
+      }
+    }
+
+    return reply.send({ approval: normalizedApproval })
+  })
+
+  // Allow operators to delete resolved/stale approvals.
+  app.delete('/api/v1/approvals/:id', {
+    schema: { tags: ['Approvals'], summary: 'Delete an approval', security: [{ tenantId: [] }] },
+  }, async (request, reply) => {
+    if (!request.withDb || !request.tenantId) {
+      return reply.code(401).send({ error: 'x-tenant-id required' })
+    }
+    const parsedParams = paramsSchema.safeParse(request.params)
+    if (!parsedParams.success) {
+      return reply.code(400).send({ error: 'invalid approval id' })
+    }
+
+    const [deleted] = await request.withDb((db) =>
+      db
+        .delete(schema.approvals)
+        .where(
+          and(
+            eq(schema.approvals.id, parsedParams.data.id),
+            eq(schema.approvals.tenantId, request.tenantId!),
+          ),
+        )
+        .returning(),
+    )
+    if (!deleted) {
+      return reply.code(404).send({ error: 'approval not found' })
+    }
+    return reply.code(204).send()
   })
 }
 

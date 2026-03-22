@@ -1,63 +1,31 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import type { FastifyPluginAsync } from 'fastify'
-import { withTenantDb, schema, getTenantIdByShopDomain } from '@patioer/db'
+import { withTenantDb, getTenantIdByShopDomain } from '@patioer/db'
 import {
   recordWebhookIfNew,
   markWebhookProcessed,
   markWebhookFailed,
 } from '../../lib/webhook-dedup.js'
+import { handleWebhookTopic } from '../../lib/webhook-topic-handler.js'
 
-// --- Event dispatch ---
-
-async function handleOrdersCreate(
-  shopDomain: string,
-  payload: Record<string, unknown>,
-): Promise<void> {
-  const tenantId = await getTenantIdByShopDomain('shopify', shopDomain)
-  if (!tenantId) {
-    console.warn(`[webhook] orders/create: no tenant for shop ${shopDomain}`)
-    return
-  }
-
-  const orderId = String(payload.id ?? '')
-  const status = String(payload.financial_status ?? 'unknown')
-  const totalPrice = String(payload.total_price ?? '0')
-
-  await withTenantDb(tenantId, async (db) => {
-    await db
-      .insert(schema.orders)
-      .values({
-        tenantId,
-        platformOrderId: orderId,
-        platform: 'shopify',
-        status,
-        totalPrice,
-        items: (payload.line_items as unknown) ?? null,
-      })
-      .onConflictDoUpdate({
-        target: [
-          schema.orders.tenantId,
-          schema.orders.platform,
-          schema.orders.platformOrderId,
-        ],
-        set: { status, totalPrice },
-      })
-  })
-}
+// Known topics that have a handler in webhook-topic-handler.ts.
+// Kept in sync so the webhook route can distinguish "unhandled" from "handled".
+const HANDLED_TOPICS = new Set([
+  'orders/create',
+  'orders/updated',
+  'products/create',
+  'products/update',
+])
 
 // Returns true when the topic was dispatched to a handler, false when unrecognised.
 async function dispatchWebhook(
   topic: string,
-  shopDomain: string,
+  tenantId: string,
   payload: Record<string, unknown>,
 ): Promise<boolean> {
-  switch (topic) {
-    case 'orders/create':
-      await handleOrdersCreate(shopDomain, payload)
-      return true
-    default:
-      return false
-  }
+  if (!HANDLED_TOPICS.has(topic)) return false
+  await handleWebhookTopic(topic, tenantId, payload)
+  return true
 }
 
 // --- Route ---
@@ -132,9 +100,9 @@ const shopifyWebhookRoute: FastifyPluginAsync = async (app) => {
       }
 
       if (eventId) {
-        let handled = false
+        let handled: boolean
         try {
-          handled = await dispatchWebhook(topicStr, shopDomain, payload)
+          handled = await dispatchWebhook(topicStr, tenantId, payload)
           if (!handled) {
             app.log.warn(
               { topic: topicStr, webhookId: webhookIdStr, shopDomain },

@@ -19,10 +19,12 @@
     "@patioer/db": "workspace:*",
     "@patioer/harness": "workspace:*",
     "@patioer/shared": "workspace:*",
+    "bullmq": "^5.71.0",
     "dotenv": "latest",
     "drizzle-orm": "latest",
     "fastify": "latest",
     "fastify-plugin": "^5.1.0",
+    "ioredis": "^5.10.1",
     "zod": "latest"
   },
   "devDependencies": {

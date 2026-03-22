@@ -1,4 +1,4 @@
-import { db, withTenantDb, schema } from '@patioer/db'
+import { listTenantIds, withTenantDb, schema } from '@patioer/db'
 import { eq } from 'drizzle-orm'
 import { PaperclipBridge } from '@patioer/agent-runtime'
 
@@ -19,15 +19,12 @@ export async function bootstrapActiveAgents(
   bridge: PaperclipBridge,
   appBaseUrl: string,
 ): Promise<BootstrapResult> {
-  // tenants has no RLS (intentionally excluded — see migration ADR-0001).
-  // Enumerate all tenants so we can query agents within each tenant's RLS
-  // context instead of bypassing it with the global db connection.
-  const allTenants = await db.select({ id: schema.tenants.id }).from(schema.tenants)
+  const tenantIds = await listTenantIds()
 
   const activeAgents: Array<{ id: string; tenantId: string; type: string; name: string }> = []
 
-  for (const tenant of allTenants) {
-    const agents = await withTenantDb(tenant.id, (tdb) =>
+  for (const tenantId of tenantIds) {
+    const agents = await withTenantDb(tenantId, (tdb) =>
       tdb
         .select({
           id: schema.agents.id,

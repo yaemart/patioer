@@ -124,6 +124,54 @@ describe('PaperclipBridge', () => {
     })
   })
 
+  it('createIssue sends POST to /api/issues with title and description', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ id: 'iss-1', url: 'https://paperclip/issues/1', status: 'open' }),
+    )
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+    const bridge = new PaperclipBridge({ baseUrl: 'http://paperclip.local', apiKey: 'k' })
+    await bridge.createIssue({ title: 'Bug', description: 'details here' })
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://paperclip.local/api/issues',
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.stringContaining('"title":"Bug"'),
+      }),
+    )
+    expect(fetchMock.mock.calls[0][1]?.body).toContain('details here')
+  })
+
+  it('createIssue uses default priority medium when not specified', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ id: 'i', url: 'u', status: 's' }))
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+    const bridge = new PaperclipBridge({ baseUrl: 'http://paperclip.local' })
+    await bridge.createIssue({ title: 'T' })
+    const body = JSON.parse(fetchMock.mock.calls[0][1]?.body as string) as { priority: string }
+    expect(body.priority).toBe('medium')
+  })
+
+  it('createIssue returns issueId and url from response', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse({ id: 'issue-99', url: 'https://x/y', status: 'open' }),
+      ) as typeof fetch
+    const bridge = new PaperclipBridge({ baseUrl: 'http://paperclip.local' })
+    await expect(bridge.createIssue({ title: 'x' })).resolves.toEqual({
+      issueId: 'issue-99',
+      url: 'https://x/y',
+      status: 'open',
+    })
+  })
+
+  it('createIssue throws when Paperclip API returns non-2xx', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse({ error: 'bad' }, 400)) as typeof fetch
+    const bridge = new PaperclipBridge({ baseUrl: 'http://paperclip.local', maxRetries: 0 })
+    await expect(bridge.createIssue({ title: 'x' })).rejects.toMatchObject({
+      code: 'unknown',
+    })
+  })
+
   it('includes api key header when configured', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ id: 'company-1' })) as typeof fetch
     globalThis.fetch = fetchMock

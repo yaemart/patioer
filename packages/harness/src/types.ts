@@ -6,11 +6,22 @@
  * have their additional variant data silently discarded. This is a known MVP
  * trade-off — full multi-variant support is tracked for a future sprint.
  */
+/**
+ * Flattened product representation used across all harness implementations.
+ *
+ * `price` and `inventory` are nullable — Amazon's Catalog Items API does not
+ * return pricing or stock data, so those fields will be `null` until enriched
+ * via the Listings or Inventory APIs.
+ */
 export interface Product {
   id: string
   title: string
-  price: number
-  inventory: number
+  price: number | null
+  inventory: number | null
+  variantCount?: number
+  sku?: string
+  currency?: string
+  platformMeta?: Record<string, unknown>
 }
 
 export interface Order {
@@ -32,9 +43,15 @@ export interface DateRange {
 export interface Analytics {
   revenue: number
   orders: number
+  truncated?: boolean
 }
 
 export interface PaginationOpts {
   cursor?: string
   limit?: number
+}
+
+export interface PaginatedResult<T> {
+  items: T[]
+  nextCursor?: string
 }

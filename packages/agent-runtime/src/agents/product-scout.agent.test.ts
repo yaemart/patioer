@@ -7,10 +7,13 @@ function createMockContext(
   overrides: Partial<AgentContext> = {},
 ): AgentContext {
   const harness = {
+    getProduct: vi.fn().mockResolvedValue(null),
     getProducts: vi.fn().mockResolvedValue(products),
+    getProductsPage: vi.fn(),
     updatePrice: vi.fn(),
     updateInventory: vi.fn(),
     getOrders: vi.fn(),
+    getOrdersPage: vi.fn(),
     replyToMessage: vi.fn(),
     getOpenThreads: vi.fn(),
     getAnalytics: vi.fn(),

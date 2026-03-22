@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
-  mockDbSelect,
+  mockListTenantIds,
   mockWithTenantDb,
   mockEnsureCompany,
   mockEnsureProject,
   mockEnsureAgent,
   mockRegisterHeartbeat,
 } = vi.hoisted(() => ({
-  mockDbSelect: vi.fn(),
+  mockListTenantIds: vi.fn(),
   mockWithTenantDb: vi.fn(),
   mockEnsureCompany: vi.fn(),
   mockEnsureProject: vi.fn(),
@@ -17,12 +17,9 @@ const {
 }))
 
 vi.mock('@patioer/db', () => ({
-  db: {
-    select: mockDbSelect,
-  },
+  listTenantIds: mockListTenantIds,
   withTenantDb: mockWithTenantDb,
   schema: {
-    tenants: { id: 'id' },
     agents: {
       id: 'id',
       tenantId: 'tenantId',
@@ -57,14 +54,11 @@ function makeBridge(): PaperclipBridge {
 
 /**
  * Sets up the two-level DB mock:
- *  1. global db.select().from()  → [{id: TENANT_ID}]  (tenants, no RLS)
+ *  1. listTenantIds()            → [TENANT_ID]        (tenants, no RLS)
  *  2. withTenantDb callback      → agents list         (per-tenant, RLS)
  */
 function setupMocks(agents: unknown[]) {
-  // tenants query: db.select({id}).from(tenants) — no .where()
-  mockDbSelect.mockReturnValue({
-    from: vi.fn().mockResolvedValue([{ id: TENANT_ID }]),
-  })
+  mockListTenantIds.mockResolvedValue([TENANT_ID])
 
   // agents query inside withTenantDb callback
   mockWithTenantDb.mockImplementation(async (_tid: string, cb: (db: unknown) => Promise<unknown>) => {

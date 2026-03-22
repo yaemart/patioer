@@ -98,7 +98,7 @@ const shopifyOauthRoute: FastifyPluginAsync = async (app) => {
   app.get('/api/v1/shopify/callback', async (request, reply) => {
     const clientId = process.env.SHOPIFY_CLIENT_ID
     const clientSecret = process.env.SHOPIFY_CLIENT_SECRET
-    const encryptionKey = process.env.SHOPIFY_ENCRYPTION_KEY
+    const encryptionKey = process.env.CRED_ENCRYPTION_KEY ?? process.env.SHOPIFY_ENCRYPTION_KEY
     if (!clientId || !clientSecret || !encryptionKey) {
       return reply.code(503).send({ error: 'Shopify OAuth not configured' })
     }

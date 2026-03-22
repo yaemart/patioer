@@ -1,6 +1,7 @@
 import type {
   Analytics,
   DateRange,
+  PaginatedResult,
   PaginationOpts,
   Order,
   Product,
@@ -11,6 +12,8 @@ export interface TenantHarness {
   readonly tenantId: string
   readonly platformId: string
 
+  getProduct(productId: string): Promise<Product | null>
+  getProductsPage(opts?: PaginationOpts): Promise<PaginatedResult<Product>>
   getProducts(opts?: PaginationOpts): Promise<Product[]>
   updatePrice(productId: string, price: number): Promise<void>
 
@@ -26,6 +29,7 @@ export interface TenantHarness {
    */
   updateInventory(productId: string, qty: number): Promise<void>
 
+  getOrdersPage(opts?: PaginationOpts): Promise<PaginatedResult<Order>>
   getOrders(opts?: PaginationOpts): Promise<Order[]>
 
   replyToMessage(threadId: string, body: string): Promise<void>

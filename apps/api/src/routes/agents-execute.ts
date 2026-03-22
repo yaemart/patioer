@@ -1,8 +1,8 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify'
 import { z } from 'zod'
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { schema } from '@patioer/db'
-import { HarnessError, ShopifyHarness } from '@patioer/harness'
+import { HarnessError } from '@patioer/harness'
 import {
   createAgentContext,
   runPriceSentinel,
@@ -13,9 +13,11 @@ import {
   type SupportRelayRunInput,
 } from '@patioer/agent-runtime'
 import type { PaperclipBridge } from '@patioer/agent-runtime'
-import { decryptToken } from '../lib/crypto.js'
 import { registry } from '../lib/harness-registry.js'
+import { createHarness, type SupportedPlatform } from '../lib/harness-factory.js'
+import { resolveFirstCredential } from '../lib/resolve-credential.js'
 import { createPaperclipBridgeFromEnv } from '../lib/paperclip-bridge.js'
+import { createIssueForAgentTicket } from '../lib/agent-paperclip-ticket.js'
 import { verifyPaperclipAuth } from '../lib/paperclip-auth.js'
 
 const paramsSchema = z.object({ id: z.string().uuid() })
@@ -35,6 +37,28 @@ interface ExecuteAgentResponse {
 export interface BudgetStatus {
   exceeded: boolean
   remaining: number
+}
+
+const LLM_STUB_PREVIEW_MAX = 80
+
+/**
+ * Safe preview string for the execute-route LLM stub — avoids throwing when
+ * `params` or `prompt` is missing, null, or not a string (agents may pass invalid data).
+ */
+export function previewPromptForLlmStub(params: unknown): string {
+  if (params === null || params === undefined || typeof params !== 'object') {
+    return ''
+  }
+  const raw = (params as { prompt?: unknown }).prompt
+  if (raw === null || raw === undefined) return ''
+  if (typeof raw === 'string') {
+    return raw.length <= LLM_STUB_PREVIEW_MAX ? raw : raw.slice(0, LLM_STUB_PREVIEW_MAX)
+  }
+  try {
+    return String(raw).slice(0, LLM_STUB_PREVIEW_MAX)
+  } catch {
+    return ''
+  }
 }
 
 let _bridgeInstance: PaperclipBridge | null = null
@@ -153,13 +177,12 @@ export function buildSupportRelayInput(goalContext: string): SupportRelayRunInpu
 
 type AgentContext = ReturnType<typeof createAgentContext>
 type ExecutionLoadResult =
-  | { ok: true; agentRow: { id: string; type: string; goalContext: string | null }; ctx: AgentContext }
+  | { ok: true; agentRow: { id: string; type: string; goalContext: string | null }; ctx: AgentContext; platform: SupportedPlatform }
   | { ok: false; statusCode: number; body: { error: string } }
 
 async function buildExecutionContext(
   request: FastifyRequest,
   agentId: string,
-  encryptionKey: string,
 ): Promise<ExecutionLoadResult> {
   if (!request.withDb || !request.tenantId) {
     return { ok: false, statusCode: 401, body: { error: 'x-tenant-id required' } }
@@ -177,53 +200,40 @@ async function buildExecutionContext(
     return { ok: false, statusCode: 404, body: { error: 'agent not found' } }
   }
 
-  const rawCred = await request.withDb(async (db) => {
-    const [globalRow] = await db
-      .select()
-      .from(schema.platformCredentials)
-      .where(
-        and(
-          eq(schema.platformCredentials.tenantId, request.tenantId!),
-          eq(schema.platformCredentials.platform, 'shopify'),
-          eq(schema.platformCredentials.region, 'global'),
-        ),
-      )
-      .limit(1)
-    if (globalRow) return globalRow
-
-    // Backward compatibility for old rows created before region backfill.
-    const [legacyRow] = await db
-      .select()
-      .from(schema.platformCredentials)
-      .where(
-        and(
-          eq(schema.platformCredentials.tenantId, request.tenantId!),
-          eq(schema.platformCredentials.platform, 'shopify'),
-          isNull(schema.platformCredentials.region),
-        ),
-      )
-      .limit(1)
-    return legacyRow ?? null
-  })
-  const cred = Array.isArray(rawCred) ? (rawCred[0] ?? null) : rawCred
-  if (!cred) {
-    return { ok: false, statusCode: 404, body: { error: 'No Shopify credentials' } }
-  }
-  const shopDomain = cred.shopDomain
-  if (!shopDomain) {
+  const resolved = await resolveFirstCredential(request)
+  if (!resolved) {
     return {
       ok: false,
-      statusCode: 503,
-      body: { error: 'Invalid Shopify credentials: shop domain missing' },
+      statusCode: 404,
+      body: { error: 'No platform credentials found' },
     }
   }
 
-  const accessToken = decryptToken(cred.accessToken, encryptionKey)
-  const registryKey = `${request.tenantId}:shopify`
-  const harness = registry.getOrCreate(
-    registryKey,
-    () => new ShopifyHarness(request.tenantId!, shopDomain, accessToken),
-  )
+  const { cred, platform } = resolved
+  const registryKey = `${request.tenantId}:${platform}`
+
+  let harness: ReturnType<typeof createHarness>
+  try {
+    harness = registry.getOrCreate(registryKey, () =>
+      createHarness(request.tenantId!, platform, {
+        accessToken: cred.accessToken,
+        shopDomain: cred.shopDomain,
+        region: cred.region,
+        metadata: cred.metadata,
+      }),
+    )
+  } catch (err) {
+    // createHarness can throw (missing CRED_ENCRYPTION_KEY, invalid Amazon metadata, etc.).
+    // Catch here so the route handler's try/catch (HarnessError / agent execution) is not bypassed.
+    request.log.warn({ err, registryKey, platform }, 'createHarness failed during agent execution load')
+    return {
+      ok: false,
+      statusCode: 502,
+      body: {
+        error: err instanceof Error ? err.message : 'harness initialization failed',
+      },
+    }
+  }
 
   const ctx = createAgentContext(
     {
@@ -263,19 +273,31 @@ async function buildExecutionContext(
       },
       tickets: {
         createTicket: async (tenantId, executedAgentId, params) => {
+          const bridge = getBridge()
+          const paperclip = await createIssueForAgentTicket(bridge, tenantId, executedAgentId, params)
           await request.withDb!(async (db) => {
             await db.insert(schema.agentEvents).values({
               tenantId,
               agentId: executedAgentId,
               action: 'ticket.create',
-              payload: params as unknown as Record<string, unknown>,
+              payload: {
+                title: params.title,
+                body: params.body,
+                ...paperclip,
+              } as Record<string, unknown>,
             })
           })
+          if (paperclip.paperclipError) {
+            request.log.warn(
+              { err: paperclip.paperclipError, tenantId, agentId: executedAgentId },
+              'Paperclip createIssue failed; ticket.create audit event still recorded',
+            )
+          }
         },
       },
       llm: {
         complete: async (params, _context) => ({
-          text: `[LLM stub] No model configured. Prompt: ${params.prompt.slice(0, 80)}`,
+          text: `[LLM stub] No model configured. Prompt: ${previewPromptForLlmStub(params)}`,
         }),
       },
     },
@@ -289,6 +311,7 @@ async function buildExecutionContext(
       goalContext: agentRow.goalContext,
     },
     ctx,
+    platform,
   }
 }
 
@@ -332,6 +355,16 @@ async function executeAgentByType(
         ...(warnings.length > 0 ? { warnings } : {}),
       }
     }
+    case 'ads-optimizer':
+    case 'inventory-guard': {
+      await ctx.logAction('agent.execute.stub', { type: agentRow.type })
+      return {
+        ok: true,
+        agentId: agentRow.id,
+        executedAt: new Date().toISOString(),
+        warnings: [`${agentRow.type} runtime not yet implemented — scheduled for Sprint 3`],
+      }
+    }
     default:
       return null
   }
@@ -353,15 +386,11 @@ const agentsExecuteRoute: FastifyPluginAsync = async (app) => {
     }
 
     const agentId = parsedParams.data.id
-    const encryptionKey = process.env.SHOPIFY_ENCRYPTION_KEY
-    if (!encryptionKey) {
-      return reply.code(503).send({ error: 'Shopify integration not configured' })
-    }
-    const loaded = await buildExecutionContext(request, agentId, encryptionKey)
+    const loaded = await buildExecutionContext(request, agentId)
     if (!loaded.ok) {
       return reply.code(loaded.statusCode).send(loaded.body)
     }
-    const { agentRow, ctx } = loaded
+    const { agentRow, ctx, platform } = loaded
 
     try {
       const budget = await getBudgetStatus(request.tenantId, agentRow.id)
@@ -377,18 +406,23 @@ const agentsExecuteRoute: FastifyPluginAsync = async (app) => {
     } catch (error) {
       if (error instanceof HarnessError) {
         if (error.code === '401') {
-          registry.invalidate(`${request.tenantId}:shopify`)
+          registry.invalidate(`${request.tenantId}:${platform}`)
         }
         await ctx.logAction('agent.execute.harness_error', {
           platform: error.platform,
           code: error.code,
           message: error.message,
         })
-        const httpStatus = error.code === '429' ? 429 : error.code === '401' ? 503 : 502
+        const httpStatus =
+          error.code === '429' ? 429 :
+          error.code === '401' ? 503 :
+          error.code === 'not_implemented' ? 501 :
+          error.code === 'network_error' || error.code === 'max_retries' ? 503 :
+          502
         return reply.code(httpStatus).send({
           error:
             error.code === '401'
-              ? 'Shopify authorization expired; please reconnect Shopify'
+              ? `${platform} authorization expired; please reconnect`
               : 'platform error',
           platform: error.platform,
           code: error.code,

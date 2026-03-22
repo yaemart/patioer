@@ -43,6 +43,20 @@ export interface BudgetStatus {
   exceeded: boolean
 }
 
+export interface PaperclipIssuePayload {
+  title: string
+  description?: string
+  priority?: 'low' | 'medium' | 'high'
+  agentId?: string
+  context?: Record<string, unknown>
+}
+
+export interface PaperclipIssueResult {
+  issueId: string
+  url: string
+  status: string
+}
+
 export class PaperclipBridge {
   constructor(private readonly options: PaperclipBridgeOptions) {}
 
@@ -80,6 +94,29 @@ export class PaperclipBridge {
       callback_url: input.callbackUrl,
     })
     return { id: this.normalizeId(payload, 'heartbeat') }
+  }
+
+  async createIssue(payload: PaperclipIssuePayload): Promise<PaperclipIssueResult> {
+    const responseBody = await this.requestJson<unknown>('POST', '/api/issues', {
+      title: payload.title,
+      description: payload.description ?? '',
+      priority: payload.priority ?? 'medium',
+      metadata: {
+        ...(payload.agentId !== undefined ? { agentId: payload.agentId } : {}),
+        ...payload.context,
+      },
+    })
+    const data = this.asRecord(responseBody)
+    const id = data.id
+    const url = data.url
+    const status = data.status
+    if (typeof id !== 'string' || typeof url !== 'string' || typeof status !== 'string') {
+      throw new PaperclipBridgeError('Paperclip issue response missing id, url, or status', {
+        code: 'invalid_response',
+        details: responseBody,
+      })
+    }
+    return { issueId: id, url, status }
   }
 
   async getBudgetStatus(companyId: string, agentId: string): Promise<BudgetStatus> {
