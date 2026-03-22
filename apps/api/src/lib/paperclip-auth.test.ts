@@ -22,8 +22,8 @@ describe('verifyPaperclipAuth', () => {
     const previous = process.env.PAPERCLIP_API_KEY
     delete process.env.PAPERCLIP_API_KEY
     const reply = createReplyMock()
-    const ok = verifyPaperclipAuth(createRequestMock('k'), reply)
-    expect(ok).toBe(false)
+    const authReply = verifyPaperclipAuth(createRequestMock('k'), reply)
+    expect(authReply).toBe(reply)
     expect(reply.code).toHaveBeenCalledWith(503)
     process.env.PAPERCLIP_API_KEY = previous
   })
@@ -31,24 +31,24 @@ describe('verifyPaperclipAuth', () => {
   it('returns false when x-api-key header is missing', () => {
     process.env.PAPERCLIP_API_KEY = 'k1'
     const reply = createReplyMock()
-    const ok = verifyPaperclipAuth(createRequestMock(), reply)
-    expect(ok).toBe(false)
+    const authReply = verifyPaperclipAuth(createRequestMock(), reply)
+    expect(authReply).toBe(reply)
     expect(reply.code).toHaveBeenCalledWith(401)
   })
 
   it('returns false when x-api-key mismatches', () => {
     process.env.PAPERCLIP_API_KEY = 'k1'
     const reply = createReplyMock()
-    const ok = verifyPaperclipAuth(createRequestMock('k2'), reply)
-    expect(ok).toBe(false)
+    const authReply = verifyPaperclipAuth(createRequestMock('k2'), reply)
+    expect(authReply).toBe(reply)
     expect(reply.code).toHaveBeenCalledWith(401)
   })
 
-  it('returns true when x-api-key matches exactly', () => {
+  it('returns null when x-api-key matches exactly', () => {
     process.env.PAPERCLIP_API_KEY = 'k1'
     const reply = createReplyMock()
-    const ok = verifyPaperclipAuth(createRequestMock('k1'), reply)
-    expect(ok).toBe(true)
+    const authReply = verifyPaperclipAuth(createRequestMock('k1'), reply)
+    expect(authReply).toBeNull()
     expect(reply.code).not.toHaveBeenCalled()
   })
 })

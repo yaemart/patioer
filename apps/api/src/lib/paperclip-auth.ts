@@ -7,23 +7,26 @@ function constantTimeEqual(a: string, b: string): boolean {
   return timingSafeEqual(ha, hb)
 }
 
-export function verifyPaperclipAuth(request: FastifyRequest, reply: FastifyReply): boolean {
+export function verifyPaperclipAuth(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): FastifyReply | null {
   const apiKey = process.env.PAPERCLIP_API_KEY
   if (!apiKey) {
-    void reply.code(503).send({ error: 'paperclip auth not configured' })
-    return false
+    reply.code(503).send({ error: 'paperclip auth not configured' })
+    return reply
   }
 
   const incoming = request.headers['x-api-key']
   if (typeof incoming !== 'string' || incoming.length === 0) {
-    void reply.code(401).send({ error: 'unauthorized' })
-    return false
+    reply.code(401).send({ error: 'unauthorized' })
+    return reply
   }
 
   if (!constantTimeEqual(incoming, apiKey)) {
-    void reply.code(401).send({ error: 'unauthorized' })
-    return false
+    reply.code(401).send({ error: 'unauthorized' })
+    return reply
   }
 
-  return true
+  return null
 }
