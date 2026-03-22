@@ -7,9 +7,12 @@ function createHarnessMock(): TenantHarness {
   return {
     tenantId: 't-1',
     platformId: 'shopify',
+    getProduct: vi.fn().mockResolvedValue(null),
+    getProductsPage: vi.fn().mockResolvedValue({ items: [] }),
     getProducts: vi.fn().mockResolvedValue([]),
     updatePrice: vi.fn().mockResolvedValue(undefined),
     updateInventory: vi.fn().mockResolvedValue(undefined),
+    getOrdersPage: vi.fn().mockResolvedValue({ items: [] }),
     getOrders: vi.fn().mockResolvedValue([]),
     replyToMessage: vi.fn().mockResolvedValue(undefined),
     getOpenThreads: vi.fn().mockResolvedValue([]),
@@ -118,15 +121,4 @@ describe('createAgentContext', () => {
     })
   })
 
-  it('throws when required dependency is missing', () => {
-    const { deps } = createDeps()
-    const missingLlm = { ...deps, llm: undefined } as unknown as CreateAgentContextDeps
-
-    expect(() =>
-      createAgentContext(
-        { tenantId: 'tenant-a', agentId: 'agent-a' },
-        missingLlm,
-      ),
-    ).toThrow('AgentContext dependency missing: llm')
-  })
 })

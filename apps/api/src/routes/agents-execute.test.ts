@@ -6,19 +6,21 @@ const {
   mockRunProductScout,
   mockRunSupportRelay,
   mockCreateAgentContext,
-  mockDecryptToken,
+  mockCreateHarness,
   mockGetOrCreate,
   mockPaperclipEnsureCompany,
   mockPaperclipGetBudgetStatus,
+  mockResolveFirstCredential,
 } = vi.hoisted(() => ({
     mockRunPriceSentinel: vi.fn(),
     mockRunProductScout: vi.fn(),
     mockRunSupportRelay: vi.fn(),
     mockCreateAgentContext: vi.fn(),
-    mockDecryptToken: vi.fn(),
+    mockCreateHarness: vi.fn(),
     mockGetOrCreate: vi.fn(),
     mockPaperclipEnsureCompany: vi.fn(),
     mockPaperclipGetBudgetStatus: vi.fn(),
+    mockResolveFirstCredential: vi.fn(),
   }))
 
 vi.mock('@patioer/agent-runtime', () => ({
@@ -36,13 +38,17 @@ vi.mock('@patioer/agent-runtime', () => ({
   },
 }))
 
-vi.mock('../lib/crypto.js', () => ({
-  decryptToken: mockDecryptToken,
+vi.mock('../lib/harness-factory.js', () => ({
+  createHarness: mockCreateHarness,
+}))
+vi.mock('../lib/resolve-credential.js', () => ({
+  resolveFirstCredential: mockResolveFirstCredential,
 }))
 
 vi.mock('../lib/harness-registry.js', () => ({
   registry: {
     getOrCreate: mockGetOrCreate,
+    invalidate: vi.fn(),
   },
 }))
 
@@ -86,16 +92,24 @@ beforeEach(() => {
   _resetCachesForTesting()
   process.env.PAPERCLIP_API_KEY = 'paperclip-key'
   process.env.PAPERCLIP_API_URL = 'http://paperclip.local'
+  process.env.CRED_ENCRYPTION_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
   process.env.SHOPIFY_ENCRYPTION_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
   mockRunPriceSentinel.mockReset()
   mockRunProductScout.mockReset()
   mockRunSupportRelay.mockReset()
   mockCreateAgentContext.mockReset()
-  mockDecryptToken.mockReset()
+  mockCreateHarness.mockReset()
   mockGetOrCreate.mockReset()
+  mockResolveFirstCredential.mockReset()
   mockPaperclipEnsureCompany.mockReset()
   mockPaperclipGetBudgetStatus.mockReset()
-  mockDecryptToken.mockReturnValue('token')
+  mockResolveFirstCredential.mockResolvedValue({
+    cred: { accessToken: 'enc', shopDomain: 'demo.myshopify.com', region: 'global', metadata: null },
+    platform: 'shopify',
+  })
+  mockCreateHarness.mockReturnValue({
+    updatePrice: vi.fn().mockResolvedValue(undefined),
+  })
   mockGetOrCreate.mockReturnValue({
     updatePrice: vi.fn().mockResolvedValue(undefined),
   })
@@ -180,10 +194,14 @@ describe('buildSupportRelayInput', () => {
 })
 
 describe('agents execute route', () => {
-  it('returns 503 when SHOPIFY_ENCRYPTION_KEY is not configured', async () => {
-    delete process.env.SHOPIFY_ENCRYPTION_KEY
+  it('returns 502 when createHarness throws (e.g. encryption key missing)', async () => {
+    mockGetOrCreate.mockImplementation((_key: string, factory: () => unknown) => factory())
+    mockCreateHarness.mockImplementation(() => {
+      throw new Error('CRED_ENCRYPTION_KEY not configured')
+    })
     const app = createApp([
       [{ id: '123e4567-e89b-12d3-a456-426614174001', type: 'price-sentinel', goalContext: '' }],
+      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com', region: 'global', metadata: null, platform: 'shopify' }],
     ])
     const response = await app.inject({
       method: 'POST',
@@ -193,8 +211,8 @@ describe('agents execute route', () => {
         'x-tenant-id': '123e4567-e89b-12d3-a456-426614174000',
       },
     })
-    expect(response.statusCode).toBe(503)
-    expect(response.json()).toEqual({ error: 'Shopify integration not configured' })
+    expect(response.statusCode).toBe(502)
+    expect(response.json()).toEqual({ error: 'CRED_ENCRYPTION_KEY not configured' })
     await app.close()
   })
 
@@ -236,10 +254,10 @@ describe('agents execute route', () => {
     await app.close()
   })
 
-  it('returns 404 when shopify credential is missing', async () => {
+  it('returns 404 when no platform credential is found', async () => {
+    mockResolveFirstCredential.mockResolvedValueOnce(null)
     const app = createApp([
       [{ id: '123e4567-e89b-12d3-a456-426614174001', type: 'price-sentinel', goalContext: '' }],
-      [],
     ])
     const response = await app.inject({
       method: 'POST',
@@ -250,14 +268,14 @@ describe('agents execute route', () => {
       },
     })
     expect(response.statusCode).toBe(404)
-    expect(response.json()).toEqual({ error: 'No Shopify credentials' })
+    expect(response.json().error).toMatch(/No platform credentials found/)
     await app.close()
   })
 
   it('returns 501 when agent type is not implemented', async () => {
     const app = createApp([
       [{ id: '123e4567-e89b-12d3-a456-426614174001', type: 'unknown-future-agent', goalContext: '' }],
-      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com' }],
+      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com', region: 'global', metadata: null, platform: 'shopify' }],
     ])
     const response = await app.inject({
       method: 'POST',
@@ -283,7 +301,7 @@ describe('agents execute route', () => {
           goalContext: JSON.stringify({ proposals: [] }),
         },
       ],
-      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com' }],
+      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com', region: 'global', metadata: null, platform: 'shopify' }],
     ])
     const response = await app.inject({
       method: 'POST',
@@ -308,7 +326,7 @@ describe('agents execute route', () => {
     mockRunPriceSentinel.mockRejectedValueOnce(new Error('boom'))
     const app = createApp([
       [{ id: '123e4567-e89b-12d3-a456-426614174001', type: 'price-sentinel', goalContext: '' }],
-      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com' }],
+      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com', region: 'global', metadata: null, platform: 'shopify' }],
     ])
     const response = await app.inject({
       method: 'POST',
@@ -334,7 +352,7 @@ describe('agents execute route', () => {
     )
     const app = createApp([
       [{ id: '123e4567-e89b-12d3-a456-426614174001', type: 'price-sentinel', goalContext: '' }],
-      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com' }],
+      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com', region: 'global', metadata: null, platform: 'shopify' }],
     ])
     const response = await app.inject({
       method: 'POST',
@@ -365,7 +383,7 @@ describe('agents execute route', () => {
     )
     const app = createApp([
       [{ id: '123e4567-e89b-12d3-a456-426614174001', type: 'price-sentinel', goalContext: '' }],
-      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com' }],
+      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com', region: 'global', metadata: null, platform: 'shopify' }],
     ])
     const response = await app.inject({
       method: 'POST',
@@ -393,7 +411,7 @@ describe('agents execute route', () => {
     })
     const app = createApp([
       [{ id: '123e4567-e89b-12d3-a456-426614174001', type: 'price-sentinel', goalContext: '' }],
-      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com' }],
+      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com', region: 'global', metadata: null, platform: 'shopify' }],
       undefined,
     ])
     const response = await app.inject({
@@ -419,7 +437,7 @@ describe('agents execute route', () => {
     })
     const app = createApp([
       [{ id: '123e4567-e89b-12d3-a456-426614174001', type: 'price-sentinel', goalContext: '' }],
-      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com' }],
+      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com', region: 'global', metadata: null, platform: 'shopify' }],
       undefined,
     ])
     const response = await app.inject({
@@ -443,7 +461,7 @@ describe('agents execute route', () => {
     })
     const app = createApp([
       [{ id: '123e4567-e89b-12d3-a456-426614174001', type: 'price-sentinel', goalContext: '' }],
-      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com' }],
+      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com', region: 'global', metadata: null, platform: 'shopify' }],
     ])
     const response = await app.inject({
       method: 'POST',
@@ -467,7 +485,7 @@ describe('agents execute route', () => {
     })
     const app = createApp([
       [{ id: '123e4567-e89b-12d3-a456-426614174001', type: 'price-sentinel', goalContext: '' }],
-      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com' }],
+      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com', region: 'global', metadata: null, platform: 'shopify' }],
       undefined,
     ])
     const response = await app.inject({
@@ -487,7 +505,7 @@ describe('agents execute route', () => {
     mockPaperclipEnsureCompany.mockRejectedValueOnce(new Error('paperclip unavailable'))
     const app = createApp([
       [{ id: '123e4567-e89b-12d3-a456-426614174001', type: 'price-sentinel', goalContext: '' }],
-      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com' }],
+      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com', region: 'global', metadata: null, platform: 'shopify' }],
       undefined,
     ])
     const response = await app.inject({
@@ -508,7 +526,7 @@ describe('agents execute route', () => {
     mockPaperclipEnsureCompany.mockRejectedValueOnce(new Error('paperclip unavailable'))
     const app = createApp([
       [{ id: '123e4567-e89b-12d3-a456-426614174001', type: 'price-sentinel', goalContext: '' }],
-      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com' }],
+      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com', region: 'global', metadata: null, platform: 'shopify' }],
     ])
     const response = await app.inject({
       method: 'POST',
@@ -532,7 +550,7 @@ describe('agents execute route', () => {
           goalContext: JSON.stringify({ maxProducts: 10 }),
         },
       ],
-      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com' }],
+      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com', region: 'global', metadata: null, platform: 'shopify' }],
     ])
     const response = await app.inject({
       method: 'POST',
@@ -563,7 +581,7 @@ describe('agents execute route', () => {
           goalContext: JSON.stringify({ policy: 'auto_reply_non_refund' }),
         },
       ],
-      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com' }],
+      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com', region: 'global', metadata: null, platform: 'shopify' }],
     ])
     const response = await app.inject({
       method: 'POST',
@@ -593,7 +611,7 @@ describe('agents execute route', () => {
           goalContext: '',
         },
       ],
-      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com' }],
+      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com', region: 'global', metadata: null, platform: 'shopify' }],
     ])
     const response = await app.inject({
       method: 'POST',

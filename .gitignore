@@ -1,6 +1,7 @@
 node_modules
 .env
 .env.local
+.env.staging.local
 dist
 coverage
 .DS_Store

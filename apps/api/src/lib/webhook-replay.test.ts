@@ -1,20 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { mockDbSelect, mockWithTenantDb, mockMarkWebhookProcessed, mockMarkWebhookFailed } =
+const { mockListTenantIds, mockWithTenantDb, mockMarkWebhookProcessed, mockMarkWebhookFailed } =
   vi.hoisted(() => ({
-    mockDbSelect: vi.fn(),
+    mockListTenantIds: vi.fn(),
     mockWithTenantDb: vi.fn(),
     mockMarkWebhookProcessed: vi.fn(),
     mockMarkWebhookFailed: vi.fn(),
   }))
 
 vi.mock('@patioer/db', () => ({
-  db: {
-    select: mockDbSelect,
-  },
+  listTenantIds: mockListTenantIds,
   withTenantDb: mockWithTenantDb,
   schema: {
-    tenants: { id: 'id' },
     webhookEvents: {
       id: 'id',
       tenantId: 'tenantId',
@@ -27,6 +24,7 @@ vi.mock('@patioer/db', () => ({
   eq: vi.fn(),
   and: vi.fn(),
   lt: vi.fn(),
+  inArray: vi.fn(),
 }))
 
 vi.mock('./webhook-dedup.js', () => ({
@@ -47,15 +45,12 @@ const PENDING_EVENT = {
 
 /**
  * Sets up the two-level DB mock:
- *  1. global db.select().from()    → [{id: TENANT_ID}]  (tenants, no RLS)
+ *  1. listTenantIds()              → [TENANT_ID]        (tenants, no RLS)
  *  2. withTenantDb SELECT callback  → events list        (per-tenant, RLS)
  *  3. withTenantDb mark* callbacks  → markWebhookProcessed/Failed are mocked
  */
 function setupMocks(events: unknown[]) {
-  // tenants query: db.select({id}).from(tenants)
-  mockDbSelect.mockReturnValue({
-    from: vi.fn().mockResolvedValue([{ id: TENANT_ID }]),
-  })
+  mockListTenantIds.mockResolvedValue([TENANT_ID])
 
   // SELECT chain for webhook_events inside withTenantDb
   const selectChain = {
@@ -187,14 +182,10 @@ describe('replayPendingWebhooks', () => {
 
   it('stops processing additional tenants once global limit is reached', async () => {
     // Two tenants, limit=1 — only the first tenant's event should be processed
-    mockDbSelect.mockReturnValue({
-      from: vi.fn().mockResolvedValue([{ id: 'tenant-a' }, { id: 'tenant-b' }]),
-    })
+    mockListTenantIds.mockResolvedValue(['tenant-a', 'tenant-b'])
 
-    let callCount = 0
     mockWithTenantDb.mockImplementation(
       async (_tid: string, cb: (db: unknown) => Promise<unknown>) => {
-        callCount++
         const selectChain = {
           from: vi.fn().mockReturnThis(),
           where: vi.fn().mockReturnThis(),

@@ -2,9 +2,11 @@ import { createHmac } from 'node:crypto'
 import Fastify from 'fastify'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { mockWithTenantDb, mockEncryptToken } = vi.hoisted(() => ({
+const { mockWithTenantDb, mockEncryptToken, mockInvalidateRegistry, mockOnConflictDoUpdate } = vi.hoisted(() => ({
   mockWithTenantDb: vi.fn(),
   mockEncryptToken: vi.fn(),
+  mockInvalidateRegistry: vi.fn(),
+  mockOnConflictDoUpdate: vi.fn(),
 }))
 
 vi.mock('@patioer/db', () => ({
@@ -13,6 +15,7 @@ vi.mock('@patioer/db', () => ({
     platformCredentials: {
       tenantId: 'tenantId',
       platform: 'platform',
+      region: 'region',
       shopDomain: 'shopDomain',
     },
   },
@@ -20,6 +23,9 @@ vi.mock('@patioer/db', () => ({
 
 vi.mock('../../lib/crypto.js', () => ({
   encryptToken: mockEncryptToken,
+}))
+vi.mock('../../lib/harness-registry.js', () => ({
+  registry: { invalidate: mockInvalidateRegistry },
 }))
 
 import shopifyOauthRoute from './oauth.js'
@@ -33,7 +39,8 @@ function buildValidCallbackHmac(
   params: Record<string, string>,
   secret: string,
 ): string {
-  const { hmac: _ignored, ...rest } = params
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { hmac: _hmac, ...rest } = params
   const message = Object.entries(rest)
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([k, v]) => `${k}=${v}`)
@@ -68,11 +75,14 @@ beforeEach(() => {
   process.env.APP_BASE_URL = APP_BASE_URL
   process.env.SHOPIFY_ENCRYPTION_KEY = ENCRYPTION_KEY
   mockEncryptToken.mockReturnValue('encrypted-token')
+  mockInvalidateRegistry.mockReset()
+  mockOnConflictDoUpdate.mockReset()
+  mockOnConflictDoUpdate.mockResolvedValue(undefined)
   mockWithTenantDb.mockImplementation(async (_tid: string, cb: (db: unknown) => Promise<unknown>) => {
     const db = {
       insert: vi.fn().mockReturnValue({
         values: vi.fn().mockReturnValue({
-          onConflictDoUpdate: vi.fn().mockResolvedValue(undefined),
+          onConflictDoUpdate: mockOnConflictDoUpdate,
         }),
       }),
     }
@@ -259,6 +269,13 @@ describe('GET /api/v1/shopify/callback', () => {
     expect(response.json()).toEqual({ ok: true })
     expect(mockEncryptToken).toHaveBeenCalledWith('raw-token', ENCRYPTION_KEY)
     expect(mockWithTenantDb).toHaveBeenCalledOnce()
+    expect(mockOnConflictDoUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: ['tenantId', 'platform', 'region'],
+        set: expect.objectContaining({ shopDomain: 'demo.myshopify.com' }),
+      }),
+    )
+    expect(mockInvalidateRegistry).toHaveBeenCalledWith('123e4567-e89b-12d3-a456-426614174000:shopify')
     vi.unstubAllGlobals()
     await app.close()
   })

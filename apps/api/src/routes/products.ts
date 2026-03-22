@@ -1,9 +1,13 @@
 import type { FastifyPluginAsync } from 'fastify'
 import { schema } from '@patioer/db'
-import { eq, and } from 'drizzle-orm'
-import { ShopifyHarness } from '@patioer/harness'
-import { decryptToken } from '../lib/crypto.js'
-import { registry } from '../lib/harness-registry.js'
+import { HarnessError } from '@patioer/harness'
+import { z } from 'zod'
+import { resolveHarness, handleHarnessError } from '../lib/resolve-harness.js'
+
+const syncQuerySchema = z.object({
+  cursor: z.string().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(250).optional(),
+})
 
 const productsRoute: FastifyPluginAsync = async (app) => {
   app.get('/api/v1/products', async (request, reply) => {
@@ -15,58 +19,47 @@ const productsRoute: FastifyPluginAsync = async (app) => {
   })
 
   app.post('/api/v1/products/sync', async (request, reply) => {
-    if (!request.withDb || !request.tenantId) {
-      return reply.code(401).send({ error: 'x-tenant-id required' })
+    const parsedQuery = syncQuerySchema.safeParse(request.query)
+    if (!parsedQuery.success) {
+      return reply.code(400).send({ error: 'invalid query' })
     }
 
-    const encryptionKey = process.env.SHOPIFY_ENCRYPTION_KEY
-    if (!encryptionKey) {
-      return reply.code(503).send({ error: 'Shopify integration not configured' })
+    const loaded = await resolveHarness(request)
+    if (!loaded.ok) {
+      return reply.code(loaded.statusCode).send(loaded.body)
     }
+    const { harness, platform, registryKey } = loaded
 
-    // Step 1 — Read credential inside a short RLS transaction.
-    const cred = await request.withDb(async (db) => {
-      const [row] = await db
-        .select()
-        .from(schema.platformCredentials)
-        .where(
-          and(
-            eq(schema.platformCredentials.tenantId, request.tenantId!),
-            eq(schema.platformCredentials.platform, 'shopify'),
-          ),
+    let page
+    try {
+      page = await harness.getProductsPage({
+        cursor: parsedQuery.data.cursor,
+        limit: parsedQuery.data.limit,
+      })
+    } catch (err) {
+      if (err instanceof HarnessError) {
+        app.log.error(
+          { err, tenantId: request.tenantId, code: err.code, platform: err.platform },
+          'Product sync failed',
         )
-        .limit(1)
-      return row ?? null
-    })
-
-    if (!cred) {
-      return reply.code(404).send({ error: 'No Shopify credentials' })
+        const resp = handleHarnessError(err, platform, registryKey, `failed to fetch products from ${platform}`)
+        return reply.code(resp.statusCode).send(resp.body)
+      }
+      app.log.error({ err, tenantId: request.tenantId }, 'Product sync failed')
+      return reply.code(502).send({ error: `failed to fetch products from ${platform}` })
     }
 
-    // Step 2 — Fetch from Shopify OUTSIDE a PG transaction to avoid holding
-    // a PoolClient while waiting on external HTTP (rate-limited at 2 req/s).
-    const accessToken = decryptToken(cred.accessToken, encryptionKey)
-    const registryKey = `${request.tenantId!}:shopify`
-    const harness = registry.getOrCreate(
-      registryKey,
-      () => new ShopifyHarness(request.tenantId!, cred.shopDomain, accessToken),
-    ) as ShopifyHarness
-    const products = await harness.getProducts()
-
-    // Step 3 — Upsert results inside a new short RLS transaction.
-    // TODO: replace sequential inserts with a batched approach once Drizzle
-    // supports onConflictDoUpdate with multi-row values.
     const syncedAt = new Date()
-    await request.withDb(async (db) => {
-      for (const product of products) {
+    await request.withDb!(async (db) => {
+      for (const product of page.items) {
         await db
           .insert(schema.products)
           .values({
             tenantId: request.tenantId!,
             platformProductId: product.id,
-            platform: 'shopify',
+            platform,
             title: product.title,
-            price: String(product.price),
+            price: product.price != null ? String(product.price) : null,
             syncedAt,
           })
           .onConflictDoUpdate({
@@ -75,12 +68,15 @@ const productsRoute: FastifyPluginAsync = async (app) => {
               schema.products.platform,
               schema.products.platformProductId,
             ],
-            set: { title: product.title, price: String(product.price), syncedAt },
+            set: { title: product.title, price: product.price != null ? String(product.price) : null, syncedAt },
           })
       }
     })
 
-    return reply.send({ synced: products.length })
+    return reply.send({
+      synced: page.items.length,
+      ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+    })
   })
 }
 

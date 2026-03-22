@@ -11,6 +11,8 @@ export const agentTypeEnum = pgEnum('agent_type', [
   'product-scout',
   'price-sentinel',
   'support-relay',
+  'ads-optimizer',
+  'inventory-guard',
 ])
 
 export const agentStatusEnum = pgEnum('agent_status', [

@@ -1,0 +1,99 @@
+services:
+  postgres:
+    image: postgres:14
+    container_name: patioer-staging-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: patioer_staging
+    ports:
+      - '${POSTGRES_PORT:-5433}:5432'
+    volumes:
+      - staging_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d patioer_staging']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    image: node:20-alpine
+    container_name: patioer-staging-migrate
+    working_dir: /workspace
+    command: >-
+      sh -c "
+        corepack enable &&
+        pnpm install &&
+        pnpm --filter @patioer/db db:push &&
+        pnpm tsx scripts/apply-rls.ts
+      "
+    volumes:
+      - ./:/workspace
+      - staging_node_modules:/workspace/node_modules
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/patioer_staging
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  seed:
+    image: node:20-alpine
+    container_name: patioer-staging-seed
+    working_dir: /workspace
+    command: sh -c "corepack enable && pnpm install && pnpm tsx scripts/staging-seed.ts"
+    volumes:
+      - ./:/workspace
+      - staging_node_modules:/workspace/node_modules
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/patioer_staging
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  api:
+    image: node:20-alpine
+    container_name: patioer-staging-api
+    working_dir: /workspace
+    command: sh -c "corepack enable && pnpm install && pnpm --filter @patioer/api dev"
+    volumes:
+      - ./:/workspace
+      - staging_node_modules:/workspace/node_modules
+    env_file: .env.staging
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/patioer_staging
+      PORT: '3100'
+      PAPERCLIP_API_URL: http://paperclip:3000
+      NODE_ENV: staging
+    ports:
+      - '${API_PORT:-3100}:3100'
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:3100/api/v1/health || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  paperclip:
+    image: node:20-alpine
+    container_name: patioer-staging-paperclip
+    working_dir: /workspace/paperclip
+    command: sh -c "corepack enable && pnpm install && pnpm dev"
+    volumes:
+      - ./:/workspace
+      - staging_node_modules:/workspace/node_modules
+      - staging_paperclip_node_modules:/workspace/paperclip/node_modules
+    ports:
+      - '${PAPERCLIP_PORT:-3000}:3000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  staging_postgres_data:
+  staging_node_modules:
+  staging_paperclip_node_modules:

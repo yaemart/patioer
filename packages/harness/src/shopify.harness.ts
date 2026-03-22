@@ -1,8 +1,10 @@
 import type { TenantHarness } from './base.harness.js'
-import { HarnessError } from './harness-error.js'
+import { HarnessError, httpStatusToCode } from './harness-error.js'
+import { TokenBucket, getSharedBucket, jitteredBackoff, sleep } from './token-bucket.js'
 import type {
   Analytics,
   DateRange,
+  PaginatedResult,
   PaginationOpts,
   Order,
   Product,
@@ -10,8 +12,6 @@ import type {
 } from './types.js'
 
 const SHOPIFY_API_VERSION = '2024-01'
-
-// --- Internal Shopify REST response types ---
 
 interface ShopifyVariant {
   id: number
@@ -36,14 +36,12 @@ interface ShopifyLocation {
   id: number
 }
 
-// --- Domain mapping helpers ---
-// See Product JSDoc in types.ts for the multi-variant limitation.
-
 const toProduct = (p: ShopifyProduct): Product => ({
   id: String(p.id),
   title: p.title,
   price: parseFloat(p.variants[0]?.price ?? '0'),
   inventory: p.variants[0]?.inventory_quantity ?? 0,
+  variantCount: p.variants.length,
 })
 
 const toOrder = (o: ShopifyOrder): Order => ({
@@ -52,60 +50,9 @@ const toOrder = (o: ShopifyOrder): Order => ({
   totalPrice: parseFloat(o.total_price),
 })
 
-// --- Token-bucket rate limiter (2 req/s) ---
-// Buckets are shared across all ShopifyHarness instances for the same shop
-// so concurrent requests (e.g. product sync + agent heartbeat) cannot
-// collectively exceed Shopify's 2 req/s sustained limit.
-
-class TokenBucket {
-  private tokens: number
-  private lastRefillMs: number
-
-  constructor(
-    private readonly capacity: number,
-    private readonly refillRatePerSecond: number,
-  ) {
-    this.tokens = capacity
-    this.lastRefillMs = Date.now()
-  }
-
-  async acquire(): Promise<void> {
-    while (true) {
-      const now = Date.now()
-      const elapsed = (now - this.lastRefillMs) / 1000
-      this.tokens = Math.min(this.capacity, this.tokens + elapsed * this.refillRatePerSecond)
-      this.lastRefillMs = now
-
-      if (this.tokens >= 1) {
-        this.tokens -= 1
-        return
-      }
-
-      const waitMs = Math.ceil(((1 - this.tokens) / this.refillRatePerSecond) * 1000)
-      await new Promise<void>((resolve) => setTimeout(resolve, waitMs))
-    }
-  }
-}
-
-const sharedBuckets = new Map<string, TokenBucket>()
-
-function getBucket(shopDomain: string): TokenBucket {
-  let bucket = sharedBuckets.get(shopDomain)
-  if (!bucket) {
-    bucket = new TokenBucket(2, 2)
-    sharedBuckets.set(shopDomain, bucket)
-  }
-  return bucket
-}
-
-// --- Retry with exponential back-off for 429 / 5xx ---
-
 const MAX_RETRIES = 3
 const BASE_DELAY_MS = 500
-
-async function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
+const FETCH_TIMEOUT_MS = 15_000
 
 // --- ShopifyHarness ---
 
@@ -119,49 +66,115 @@ export class ShopifyHarness implements TenantHarness {
     private readonly shopDomain: string,
     private readonly accessToken: string,
   ) {
-    this.bucket = getBucket(shopDomain)
+    this.bucket = getSharedBucket(shopDomain, { capacity: 2, refillRatePerSecond: 2 })
     this.baseUrl = `https://${shopDomain}/admin/api/${SHOPIFY_API_VERSION}`
   }
 
   private async shopifyFetch<T>(path: string, init?: RequestInit): Promise<T> {
+    const result = await this.shopifyFetchWithMeta<T>(path, init)
+    return result.data
+  }
+
+  private async shopifyFetchWithMeta<T>(
+    path: string,
+    init?: RequestInit,
+  ): Promise<{ data: T; headers: Headers }> {
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       await this.bucket.acquire()
-      const res = await fetch(`${this.baseUrl}${path}`, {
-        ...init,
-        headers: {
-          'X-Shopify-Access-Token': this.accessToken,
-          'Content-Type': 'application/json',
-          ...(init?.headers as Record<string, string> | undefined),
-        },
-      })
+      let res: Response
+      try {
+        res = await fetch(`${this.baseUrl}${path}`, {
+          ...init,
+          signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+          headers: {
+            'X-Shopify-Access-Token': this.accessToken,
+            'Content-Type': 'application/json',
+            ...(init?.headers as Record<string, string> | undefined),
+          },
+        })
+      } catch (error) {
+        const isNetworkError = error instanceof Error
+        if (isNetworkError && attempt < MAX_RETRIES) {
+          await sleep(jitteredBackoff(attempt, BASE_DELAY_MS))
+          continue
+        }
+        throw new HarnessError(
+          'shopify',
+          'network_error',
+          `Shopify network error for ${path}: ${error instanceof Error ? error.message : String(error)}`,
+        )
+      }
 
       if (res.ok) {
-        return res.json() as Promise<T>
+        let data: T
+        try {
+          data = (await res.json()) as T
+        } catch {
+          throw new HarnessError('shopify', 'json_parse_error', `Shopify returned non-JSON response for ${path}`)
+        }
+        return { data, headers: res.headers }
       }
 
       const isRetryable = res.status === 429 || res.status >= 500
       if (isRetryable && attempt < MAX_RETRIES) {
         const retryAfterHeader = res.headers.get('retry-after')
-        const delayMs = retryAfterHeader
-          ? parseFloat(retryAfterHeader) * 1000
-          : BASE_DELAY_MS * 2 ** attempt
+        const retryAfterSeconds = retryAfterHeader ? Number(retryAfterHeader) : Number.NaN
+        const delayMs =
+          Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0
+            ? retryAfterSeconds * 1000
+            : jitteredBackoff(attempt, BASE_DELAY_MS)
         await sleep(delayMs)
         continue
       }
 
-      throw new HarnessError('shopify', String(res.status), `Shopify API error ${res.status} ${res.statusText} for ${path}`)
+      throw new HarnessError('shopify', httpStatusToCode(res.status), `Shopify API error ${res.status} ${res.statusText} for ${path}`)
     }
 
     throw new HarnessError('shopify', 'max_retries', `Shopify API: max retries exceeded for ${path}`)
   }
 
-  async getProducts(opts?: PaginationOpts): Promise<Product[]> {
+  private extractNextCursor(linkHeader: string | null): string | undefined {
+    if (!linkHeader) return undefined
+    const parts = linkHeader.split(',')
+    const next = parts.find((part) => part.includes('rel="next"'))
+    if (!next) return undefined
+    const match = next.match(/<([^>]+)>/)
+    if (!match) return undefined
+    try {
+      const url = new URL(match[1]!)
+      return url.searchParams.get('page_info') ?? undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  async getProduct(productId: string): Promise<Product | null> {
+    try {
+      const data = await this.shopifyFetch<{ product: ShopifyProduct }>(
+        `/products/${productId}.json`,
+      )
+      return toProduct(data.product)
+    } catch (err) {
+      if (err instanceof HarnessError && err.code === '404') return null
+      throw err
+    }
+  }
+
+  async getProductsPage(opts?: PaginationOpts): Promise<PaginatedResult<Product>> {
     const params = new URLSearchParams({ limit: String(opts?.limit ?? 50) })
     if (opts?.cursor) params.set('page_info', opts.cursor)
-    const data = await this.shopifyFetch<{ products: ShopifyProduct[] }>(
+    const { data, headers } = await this.shopifyFetchWithMeta<{ products: ShopifyProduct[] }>(
       `/products.json?${params}`,
     )
-    return data.products.map(toProduct)
+    return {
+      items: data.products.map(toProduct),
+      nextCursor: this.extractNextCursor(headers.get('link')),
+    }
+  }
+
+  async getProducts(opts?: PaginationOpts): Promise<Product[]> {
+    const page = await this.getProductsPage(opts)
+    return page.items
   }
 
   async updatePrice(productId: string, price: number): Promise<void> {
@@ -171,7 +184,7 @@ export class ShopifyHarness implements TenantHarness {
     )
     const variantId = data.product.variants[0]?.id
     if (!variantId) {
-      throw new Error(`No variant found for product ${productId}`)
+      throw new HarnessError('shopify', 'variant_not_found', `No variant found for product ${productId}`)
     }
     await this.shopifyFetch(`/variants/${variantId}.json`, {
       method: 'PUT',
@@ -185,7 +198,7 @@ export class ShopifyHarness implements TenantHarness {
     )
     const variant = productData.product.variants[0]
     if (!variant) {
-      throw new Error(`No variant found for product ${productId}`)
+      throw new HarnessError('shopify', 'variant_not_found', `No variant found for product ${productId}`)
     }
 
     // Resolve default fulfillment location
@@ -194,7 +207,7 @@ export class ShopifyHarness implements TenantHarness {
     )
     const locationId = locationData.locations[0]?.id
     if (!locationId) {
-      throw new Error('No Shopify fulfillment location found')
+      throw new HarnessError('shopify', 'location_not_found', 'No Shopify fulfillment location found')
     }
 
     await this.shopifyFetch('/inventory_levels/set.json', {
@@ -207,28 +220,39 @@ export class ShopifyHarness implements TenantHarness {
     })
   }
 
-  async getOrders(opts?: PaginationOpts): Promise<Order[]> {
+  async getOrdersPage(opts?: PaginationOpts): Promise<PaginatedResult<Order>> {
     const params = new URLSearchParams({
       status: 'any',
       limit: String(opts?.limit ?? 50),
     })
     if (opts?.cursor) params.set('page_info', opts.cursor)
-    const data = await this.shopifyFetch<{ orders: ShopifyOrder[] }>(`/orders.json?${params}`)
-    return data.orders.map(toOrder)
+    const { data, headers } = await this.shopifyFetchWithMeta<{ orders: ShopifyOrder[] }>(
+      `/orders.json?${params}`,
+    )
+    return {
+      items: data.orders.map(toOrder),
+      nextCursor: this.extractNextCursor(headers.get('link')),
+    }
+  }
+
+  async getOrders(opts?: PaginationOpts): Promise<Order[]> {
+    const page = await this.getOrdersPage(opts)
+    return page.items
   }
 
   async replyToMessage(_threadId: string, _body: string): Promise<void> {
     // Shopify Inbox is a separate product outside the standard REST Admin API.
     // Full implementation requires the Shopify Inbox OAuth scope + dedicated integration.
-    console.warn(
-      `[ShopifyHarness] replyToMessage: Shopify Inbox API not wired in MVP (thread=${_threadId})`,
+    throw new HarnessError(
+      'shopify',
+      'not_implemented',
+      `Shopify Inbox API not wired in MVP (thread=${_threadId})`,
     )
   }
 
   async getOpenThreads(): Promise<Thread[]> {
     // Shopify Inbox is a separate product outside the standard REST Admin API.
     // Full implementation requires the Shopify Inbox OAuth scope + dedicated integration.
-    console.warn('[ShopifyHarness] getOpenThreads: Shopify Inbox API not wired in MVP')
     return []
   }
 
@@ -247,12 +271,11 @@ export class ShopifyHarness implements TenantHarness {
     const data = await this.shopifyFetch<{ orders: Array<{ total_price: string }> }>(
       `/orders.json?${params}`,
     )
-    if (data.orders.length >= PAGE_LIMIT) {
-      console.warn(
-        `[ShopifyHarness] getAnalytics: hit ${PAGE_LIMIT}-order page limit; revenue may be under-reported`,
-      )
-    }
     const revenue = data.orders.reduce((sum, o) => sum + parseFloat(o.total_price), 0)
-    return { revenue, orders: data.orders.length }
+    return {
+      revenue,
+      orders: data.orders.length,
+      truncated: data.orders.length >= PAGE_LIMIT,
+    }
   }
 }

@@ -12,6 +12,13 @@ import ordersRoute from './routes/orders.js'
 import agentsRoute from './routes/agents.js'
 import approvalsRoute from './routes/approvals.js'
 import agentsExecuteRoute from './routes/agents-execute.js'
+import amazonOAuthRoute from './routes/amazon/oauth.js'
+import amazonWebhookRoute from './routes/amazon/webhook.js'
+import tikTokOAuthRoute from './routes/tiktok/oauth.js'
+import tikTokWebhookRoute from './routes/tiktok/webhook.js'
+import shopeeOAuthRoute from './routes/shopee/oauth.js'
+import shopeeWebhookRoute from './routes/shopee/webhook.js'
+import platformCredentialsRoute from './routes/platform-credentials.js'
 
 export const buildServer = () => {
   const app = Fastify({ logger: true })
@@ -20,7 +27,8 @@ export const buildServer = () => {
     openapi: {
       info: {
         title: 'ElectroOS API',
-        description: 'Multi-tenant agent management API for Shopify stores',
+        description:
+          'ElectroOS multi-tenant API: agents, approvals, Shopify / Amazon / TikTok / Shopee OAuth & webhooks, Paperclip execution.',
         version: '0.1.0',
       },
       servers: [{ url: `http://localhost:${process.env.PORT ?? 3100}` }],
@@ -45,6 +53,13 @@ export const buildServer = () => {
   app.register(agentsRoute)
   app.register(approvalsRoute)
   app.register(agentsExecuteRoute)
+  app.register(amazonOAuthRoute)
+  app.register(amazonWebhookRoute)
+  app.register(tikTokOAuthRoute)
+  app.register(tikTokWebhookRoute)
+  app.register(shopeeOAuthRoute, { prefix: '/api/v1/shopee' })
+  app.register(shopeeWebhookRoute)
+  app.register(platformCredentialsRoute)
 
   return app
 }

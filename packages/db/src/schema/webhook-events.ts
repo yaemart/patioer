@@ -13,9 +13,10 @@ export const webhookEvents = pgTable(
   {
     id:           uuid('id').defaultRandom().primaryKey(),
     tenantId:     uuid('tenant_id').notNull().references(() => tenants.id),
+    platform:     text('platform').notNull().default('shopify'),
     webhookId:    text('webhook_id').notNull(),
     topic:        text('topic').notNull(),
-    shopDomain:   text('shop_domain').notNull(),
+    shopDomain:   text('shop_domain'),
     payload:      jsonb('payload').notNull(),
     status:       text('status').notNull().default('received'),
     errorMessage: text('error_message'),

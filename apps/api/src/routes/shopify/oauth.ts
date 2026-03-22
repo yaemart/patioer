@@ -3,6 +3,7 @@ import type { FastifyPluginAsync } from 'fastify'
 import { z } from 'zod'
 import { withTenantDb, schema } from '@patioer/db'
 import { encryptToken } from '../../lib/crypto.js'
+import { registry } from '../../lib/harness-registry.js'
 
 const SHOPIFY_SCOPES =
   'read_products,write_products,read_inventory,write_inventory,read_orders'
@@ -97,7 +98,7 @@ const shopifyOauthRoute: FastifyPluginAsync = async (app) => {
   app.get('/api/v1/shopify/callback', async (request, reply) => {
     const clientId = process.env.SHOPIFY_CLIENT_ID
     const clientSecret = process.env.SHOPIFY_CLIENT_SECRET
-    const encryptionKey = process.env.SHOPIFY_ENCRYPTION_KEY
+    const encryptionKey = process.env.CRED_ENCRYPTION_KEY ?? process.env.SHOPIFY_ENCRYPTION_KEY
     if (!clientId || !clientSecret || !encryptionKey) {
       return reply.code(503).send({ error: 'Shopify OAuth not configured' })
     }
@@ -128,41 +129,62 @@ const shopifyOauthRoute: FastifyPluginAsync = async (app) => {
     }
 
     // Exchange the authorization code for a permanent access token
-    const tokenRes = await fetch(`https://${shopParse.data}/admin/oauth/access_token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, code: query.code }),
-    })
+    let tokenRes: Response
+    try {
+      tokenRes = await fetch(`https://${shopParse.data}/admin/oauth/access_token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, code: query.code }),
+      })
+    } catch (err) {
+      app.log.error({ err, shop: shopParse.data }, 'Shopify token exchange network error')
+      return reply.code(502).send({ error: 'failed to reach Shopify' })
+    }
     if (!tokenRes.ok) {
       return reply.code(502).send({ error: 'failed to exchange OAuth token' })
     }
-    const tokenData = (await tokenRes.json()) as { access_token: string; scope: string }
+
+    let tokenData: { access_token: string; scope: string }
+    try {
+      tokenData = (await tokenRes.json()) as { access_token: string; scope: string }
+    } catch {
+      return reply.code(502).send({ error: 'invalid token response from Shopify' })
+    }
 
     const encryptedToken = encryptToken(tokenData.access_token, encryptionKey)
 
     // Persist encrypted credentials — use withTenantDb for RLS isolation
-    await withTenantDb(statePayload.tenantId, async (db) => {
-      await db
-        .insert(schema.platformCredentials)
-        .values({
-          tenantId: statePayload.tenantId,
-          platform: 'shopify',
-          shopDomain: shopParse.data,
-          accessToken: encryptedToken,
-          scopes: tokenData.scope.split(','),
-        })
-        .onConflictDoUpdate({
-          target: [
-            schema.platformCredentials.tenantId,
-            schema.platformCredentials.platform,
-            schema.platformCredentials.shopDomain,
-          ],
-          set: {
+    try {
+      await withTenantDb(statePayload.tenantId, async (db) => {
+        await db
+          .insert(schema.platformCredentials)
+          .values({
+            tenantId: statePayload.tenantId,
+            platform: 'shopify',
+            region: 'global',
+            shopDomain: shopParse.data,
             accessToken: encryptedToken,
             scopes: tokenData.scope.split(','),
-          },
-        })
-    })
+          })
+          .onConflictDoUpdate({
+            target: [
+              schema.platformCredentials.tenantId,
+              schema.platformCredentials.platform,
+              schema.platformCredentials.region,
+            ],
+            set: {
+              shopDomain: shopParse.data,
+              accessToken: encryptedToken,
+              scopes: tokenData.scope.split(','),
+            },
+          })
+      })
+    } catch (err) {
+      app.log.error({ err, tenantId: statePayload.tenantId }, 'failed to persist OAuth credentials')
+      return reply.code(500).send({ error: 'failed to save credentials' })
+    }
+
+    registry.invalidate(`${statePayload.tenantId}:shopify`)
 
     return reply.send({ ok: true })
   })

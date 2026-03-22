@@ -3,14 +3,65 @@ import { and, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { schema } from '@patioer/db'
 
+// Must stay in sync with DB agentTypeEnum in packages/db/src/schema/agents.ts.
+const AGENT_TYPES = [
+  'product-scout',
+  'price-sentinel',
+  'support-relay',
+  'ads-optimizer',
+  'inventory-guard',
+] as const
+
+export type AgentType = (typeof AGENT_TYPES)[number]
+
+// Per-type goalContext validation. Each agent type defines what JSON
+// shape its goalContext should have. Optional fields are lenient so
+// callers can omit them and get defaults at execution time.
+const goalContextSchemas: Partial<Record<AgentType, z.ZodTypeAny>> = {
+  'price-sentinel': z.object({
+    proposals: z.array(z.object({
+      productId: z.string(),
+      currentPrice: z.number(),
+      newPrice: z.number(),
+      reason: z.string().optional(),
+    })).optional(),
+    approvalThresholdPercent: z.number().optional(),
+  }).passthrough(),
+  'product-scout': z.object({
+    maxProducts: z.number().int().positive().optional(),
+  }).passthrough(),
+  'support-relay': z.object({
+    autoReplyPolicy: z.enum(['auto_reply_non_refund', 'all_manual']).optional(),
+  }).passthrough(),
+}
+
+function validateGoalContext(type: AgentType, raw: string | undefined | null): { ok: true; value: string | null } | { ok: false; error: string } {
+  if (!raw) return { ok: true, value: null }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return { ok: false, error: 'goalContext must be valid JSON' }
+  }
+  const typeSchema = goalContextSchemas[type]
+  if (typeSchema) {
+    const result = typeSchema.safeParse(parsed)
+    if (!result.success) {
+      return { ok: false, error: `goalContext validation failed for ${type}: ${result.error.issues.map((i) => i.message).join(', ')}` }
+    }
+  }
+  return { ok: true, value: raw }
+}
+
 const createAgentBodySchema = z.object({
   name: z.string().min(1),
-  type: z.enum(['product-scout', 'price-sentinel', 'support-relay']),
+  type: z.enum(AGENT_TYPES),
   goalContext: z.string().optional(),
 })
 
 const updateAgentBodySchema = z.object({
   name: z.string().min(1).optional(),
+  type: z.enum(AGENT_TYPES).optional(),
   status: z.enum(['active', 'suspended', 'error']).optional(),
   goalContext: z.string().optional(),
 })
@@ -49,6 +100,11 @@ const agentsRoute: FastifyPluginAsync = async (app) => {
       return reply.code(400).send({ error: 'invalid request body' })
     }
 
+    const gcResult = validateGoalContext(parsedBody.data.type, parsedBody.data.goalContext)
+    if (!gcResult.ok) {
+      return reply.code(400).send({ error: gcResult.error })
+    }
+
     const [created] = await request.withDb((db) =>
       db
         .insert(schema.agents)
@@ -56,7 +112,7 @@ const agentsRoute: FastifyPluginAsync = async (app) => {
           tenantId: request.tenantId!,
           name: parsedBody.data.name,
           type: parsedBody.data.type,
-          goalContext: parsedBody.data.goalContext ?? null,
+          goalContext: gcResult.value,
           status: 'active',
         })
         .returning(),
@@ -115,8 +171,34 @@ const agentsRoute: FastifyPluginAsync = async (app) => {
       return reply.code(400).send({ error: 'invalid request body' })
     }
 
+    // If goalContext is being updated, we need the agent type to validate against.
+    // Use the type from body (if switching type) or fetch existing row.
+    let validatedGoalContext: string | null | undefined
+    if (typeof parsedBody.data.goalContext !== 'undefined') {
+      let agentType: AgentType | null = parsedBody.data.type ?? null
+      if (!agentType) {
+        const [existing] = await request.withDb!((db) =>
+          db.select({ type: schema.agents.type })
+            .from(schema.agents)
+            .where(and(eq(schema.agents.id, parsedParams.data.id), eq(schema.agents.tenantId, request.tenantId!)))
+            .limit(1),
+        )
+        agentType = existing?.type as AgentType ?? null
+      }
+      if (agentType) {
+        const gcResult = validateGoalContext(agentType, parsedBody.data.goalContext)
+        if (!gcResult.ok) {
+          return reply.code(400).send({ error: gcResult.error })
+        }
+        validatedGoalContext = gcResult.value
+      } else {
+        validatedGoalContext = parsedBody.data.goalContext || null
+      }
+    }
+
     const patch: {
       name?: string
+      type?: AgentType
       status?: 'active' | 'suspended' | 'error'
       goalContext?: string | null
       updatedAt: Date
@@ -125,8 +207,9 @@ const agentsRoute: FastifyPluginAsync = async (app) => {
     }
 
     if (typeof parsedBody.data.name !== 'undefined') patch.name = parsedBody.data.name
+    if (typeof parsedBody.data.type !== 'undefined') patch.type = parsedBody.data.type
     if (typeof parsedBody.data.status !== 'undefined') patch.status = parsedBody.data.status
-    if (typeof parsedBody.data.goalContext !== 'undefined') patch.goalContext = parsedBody.data.goalContext
+    if (typeof validatedGoalContext !== 'undefined') patch.goalContext = validatedGoalContext
 
     const [updated] = await request.withDb((db) =>
       db

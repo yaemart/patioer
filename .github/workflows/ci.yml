@@ -53,21 +53,17 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 20.x
+          node-version: 22.x
           cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # continue-on-error keeps the remaining steps running even when this one
-      # fails, so a single push surfaces lint + typecheck + test failures at once.
       - name: Lint
         run: pnpm lint
-        continue-on-error: true
 
       - name: Typecheck
         run: pnpm typecheck
-        continue-on-error: true
 
       - name: Test
         run: pnpm test
@@ -76,5 +72,10 @@ jobs:
 
       - name: Coverage check (api)
         run: pnpm --filter api test:coverage
+        env:
+          VITEST_REPORTER: github-actions
+
+      - name: Coverage check (harness)
+        run: pnpm --filter @patioer/harness test:coverage
         env:
           VITEST_REPORTER: github-actions

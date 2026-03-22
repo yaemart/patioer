@@ -44,6 +44,7 @@ export async function seedTenantData(
       .values({
         tenantId,
         platform: 'shopify',
+        region: 'global',
         shopDomain: `${label}.myshopify.com`,
         accessToken: `enc-token-${label}`,
       })
