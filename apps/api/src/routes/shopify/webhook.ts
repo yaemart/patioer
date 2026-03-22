@@ -1,6 +1,11 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import type { FastifyPluginAsync } from 'fastify'
 import { withTenantDb, schema, getTenantIdByShopDomain } from '@patioer/db'
+import {
+  recordWebhookIfNew,
+  markWebhookProcessed,
+  markWebhookFailed,
+} from '../../lib/webhook-dedup.js'
 
 // --- Event dispatch ---
 
@@ -40,6 +45,21 @@ async function handleOrdersCreate(
   })
 }
 
+// Returns true when the topic was dispatched to a handler, false when unrecognised.
+async function dispatchWebhook(
+  topic: string,
+  shopDomain: string,
+  payload: Record<string, unknown>,
+): Promise<boolean> {
+  switch (topic) {
+    case 'orders/create':
+      await handleOrdersCreate(shopDomain, payload)
+      return true
+    default:
+      return false
+  }
+}
+
 // --- Route ---
 // IMPORTANT: Do NOT wrap this plugin with fastify-plugin (fp). The custom
 // content-type parser below is intentionally scoped to this encapsulated
@@ -72,6 +92,7 @@ const shopifyWebhookRoute: FastifyPluginAsync = async (app) => {
 
     const topic = request.headers['x-shopify-topic']
     const shopDomain = request.headers['x-shopify-shop-domain']
+    const webhookId = request.headers['x-shopify-webhook-id']
 
     if (typeof shopDomain !== 'string') {
       return reply.code(400).send({ error: 'missing shop domain header' })
@@ -84,17 +105,61 @@ const shopifyWebhookRoute: FastifyPluginAsync = async (app) => {
       return reply.code(400).send({ error: 'invalid JSON payload' })
     }
 
-    switch (topic) {
-      case 'orders/create':
+    const topicStr = typeof topic === 'string' ? topic : 'unknown'
+    const webhookIdStr = typeof webhookId === 'string' ? webhookId : `${shopDomain}:${topicStr}:${Date.now()}`
+
+    const tenantId = await getTenantIdByShopDomain('shopify', shopDomain)
+    if (tenantId && webhookIdStr) {
+      // Wrap in try-catch: although recordWebhookIfNew is now atomic (ON CONFLICT
+      // DO NOTHING), unexpected DB errors (connection loss, etc.) must not surface
+      // as 500s to Shopify — Shopify retries on any non-2xx, so we return 200 and
+      // log the failure for ops investigation.
+      let dedupResult: { duplicate: boolean; eventId?: string }
+      try {
+        dedupResult = await withTenantDb(tenantId, (db) =>
+          recordWebhookIfNew(db, { webhookId: webhookIdStr, topic: topicStr, shopDomain, tenantId }, payload),
+        )
+      } catch (err) {
+        app.log.warn({ err, webhookId: webhookIdStr }, 'webhook dedup failed — skipping to avoid double-processing')
+        return reply.code(200).send({ ok: true })
+      }
+
+      const { duplicate, eventId } = dedupResult
+
+      if (duplicate) {
+        app.log.info({ webhookId: webhookIdStr }, 'duplicate webhook, skipping')
+        return reply.code(200).send({ ok: true, duplicate: true })
+      }
+
+      if (eventId) {
+        let handled = false
         try {
-          await handleOrdersCreate(shopDomain, payload)
-        } catch (error) {
-          // Always ack webhook delivery to prevent Shopify retry storms.
-          app.log.error({ error, topic, shopDomain }, 'failed to persist Shopify orders/create webhook')
+          handled = await dispatchWebhook(topicStr, shopDomain, payload)
+          if (!handled) {
+            app.log.warn(
+              { topic: topicStr, webhookId: webhookIdStr, shopDomain },
+              'unhandled webhook topic — marking processed to prevent replay accumulation',
+            )
+          }
+        } catch (err) {
+          await withTenantDb(tenantId, (db) =>
+            markWebhookFailed(db, eventId, err instanceof Error ? err.message : String(err)),
+          )
+          app.log.error({ err, webhookId: webhookIdStr }, 'webhook processing failed')
+          return reply.code(200).send({ ok: true })
         }
-        break
-      default:
-        app.log.info({ topic, shopDomain }, 'unhandled Shopify webhook topic')
+
+        try {
+          await withTenantDb(tenantId, (db) => markWebhookProcessed(db, eventId))
+        } catch (err) {
+          app.log.error(
+            { err, webhookId: webhookIdStr, handled, topic: topicStr },
+            'webhook handled but failed to mark processed; leaving as received for retry',
+          )
+        }
+      }
+    } else {
+      app.log.info({ topic: topicStr, shopDomain }, 'unhandled Shopify webhook topic')
     }
 
     return reply.code(200).send({ ok: true })

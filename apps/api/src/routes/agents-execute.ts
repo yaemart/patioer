@@ -111,6 +111,10 @@ export async function onBudgetExceeded(
 ): Promise<void> {
   if (!request.withDb) return
   await request.withDb(async (db) => {
+    await db
+      .update(schema.agents)
+      .set({ status: 'suspended' })
+      .where(and(eq(schema.agents.id, agentId), eq(schema.agents.tenantId, tenantId)))
     await db.insert(schema.agentEvents).values({
       tenantId,
       agentId,
@@ -164,9 +168,11 @@ export function buildSupportRelayInput(goalContext: string): SupportRelayRunInpu
 }
 
 const agentsExecuteRoute: FastifyPluginAsync = async (app) => {
-  app.post('/api/v1/agents/:id/execute', async (request, reply) => {
+  app.post('/api/v1/agents/:id/execute', {
+    schema: { tags: ['Agent Execution'], summary: 'Execute an agent', security: [{ apiKey: [], tenantId: [] }] },
+  }, async (request, reply) => {
     if (!verifyPaperclipAuth(request, reply)) {
-      return reply
+      return
     }
     if (!request.withDb || !request.tenantId) {
       return reply.code(401).send({ error: 'x-tenant-id required' })
@@ -224,9 +230,9 @@ const agentsExecuteRoute: FastifyPluginAsync = async (app) => {
         agentId: agentRow.id,
       },
       {
-        harness: { getHarness: () => harness },
+        harness: { getHarness: (_tenantId, _agentId) => harness },
         budget: {
-          isExceeded: async () => (await getBudgetStatus(request.tenantId!, agentRow.id)).exceeded,
+          isExceeded: async (tenantId, agentId) => (await getBudgetStatus(tenantId, agentId)).exceeded,
         },
         audit: {
           logAction: async (tenantId, id, action, payload) => {
@@ -266,7 +272,9 @@ const agentsExecuteRoute: FastifyPluginAsync = async (app) => {
           },
         },
         llm: {
-          complete: async () => ({ text: '' }),
+          complete: async (params, _context) => ({
+            text: `[LLM stub] No model configured. Prompt: ${params.prompt.slice(0, 80)}`,
+          }),
         },
       },
     )

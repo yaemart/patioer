@@ -1,5 +1,7 @@
 import Fastify from 'fastify'
 import sensible from '@fastify/sensible'
+import swagger from '@fastify/swagger'
+import swaggerUi from '@fastify/swagger-ui'
 import tenantPlugin from './plugins/tenant.js'
 import healthRoute from './routes/health.js'
 import tenantDiscoveryRoute from './routes/tenant-discovery.js'
@@ -13,6 +15,24 @@ import agentsExecuteRoute from './routes/agents-execute.js'
 
 export const buildServer = () => {
   const app = Fastify({ logger: true })
+
+  app.register(swagger, {
+    openapi: {
+      info: {
+        title: 'ElectroOS API',
+        description: 'Multi-tenant agent management API for Shopify stores',
+        version: '0.1.0',
+      },
+      servers: [{ url: `http://localhost:${process.env.PORT ?? 3100}` }],
+      components: {
+        securitySchemes: {
+          apiKey: { type: 'apiKey', name: 'x-api-key', in: 'header' },
+          tenantId: { type: 'apiKey', name: 'x-tenant-id', in: 'header' },
+        },
+      },
+    },
+  })
+  app.register(swaggerUi, { routePrefix: '/api/v1/docs' })
 
   app.register(sensible)
   app.register(tenantPlugin)

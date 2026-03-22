@@ -45,8 +45,12 @@ describe.skipIf(!isIntegration)('agents RLS cross-tenant isolation', () => {
   })
 
   afterAll(async () => {
-    await db.delete(schema.agents).where(eq(schema.agents.tenantId, tenantAId))
-    await db.delete(schema.agents).where(eq(schema.agents.tenantId, tenantBId))
+    await withTenantDb(tenantAId, (tdb) =>
+      tdb.delete(schema.agents).where(eq(schema.agents.tenantId, tenantAId)),
+    )
+    await withTenantDb(tenantBId, (tdb) =>
+      tdb.delete(schema.agents).where(eq(schema.agents.tenantId, tenantBId)),
+    )
     await db.delete(schema.tenants).where(eq(schema.tenants.id, tenantAId))
     await db.delete(schema.tenants).where(eq(schema.tenants.id, tenantBId))
     await pool.end()

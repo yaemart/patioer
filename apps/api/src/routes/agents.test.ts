@@ -34,6 +34,38 @@ describe('agents route', () => {
     await app.close()
   })
 
+  it('GET /agents returns 200 with agent list', async () => {
+    const app = createApp([
+      [
+        { id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', name: 'Scout', type: 'product-scout', status: 'active' },
+      ],
+    ])
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/agents',
+      headers: { 'x-tenant-id': '123e4567-e89b-12d3-a456-426614174000' },
+    })
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({
+      agents: [{ id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', name: 'Scout' }],
+    })
+    await app.close()
+  })
+
+  it('GET /agents/:id returns 200 with agent data when found', async () => {
+    const app = createApp([
+      [{ id: '123e4567-e89b-12d3-a456-426614174001', name: 'Scout', type: 'product-scout', status: 'active' }],
+    ])
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/agents/123e4567-e89b-12d3-a456-426614174001',
+      headers: { 'x-tenant-id': '123e4567-e89b-12d3-a456-426614174000' },
+    })
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({ agent: { id: '123e4567-e89b-12d3-a456-426614174001' } })
+    await app.close()
+  })
+
   it('POST /agents creates agent with default active status', async () => {
     const app = createApp([
       [
@@ -109,6 +141,32 @@ describe('agents route', () => {
     await app.close()
   })
 
+  it('PATCH /agents/:id returns 400 for invalid body', async () => {
+    const app = createApp([])
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/api/v1/agents/123e4567-e89b-12d3-a456-426614174001',
+      headers: { 'x-tenant-id': '123e4567-e89b-12d3-a456-426614174000' },
+      payload: { status: 'invalid-status' },
+    })
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toEqual({ error: 'invalid request body' })
+    await app.close()
+  })
+
+  it('PATCH /agents/:id returns 404 when agent does not exist', async () => {
+    const app = createApp([[]])
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/api/v1/agents/123e4567-e89b-12d3-a456-426614174001',
+      headers: { 'x-tenant-id': '123e4567-e89b-12d3-a456-426614174000' },
+      payload: { name: 'Ghost Agent' },
+    })
+    expect(response.statusCode).toBe(404)
+    expect(response.json()).toEqual({ error: 'agent not found' })
+    await app.close()
+  })
+
   it('DELETE /agents/:id returns 204 and removes row', async () => {
     const app = createApp([
       [{ id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' }],
@@ -119,6 +177,30 @@ describe('agents route', () => {
       headers: { 'x-tenant-id': '123e4567-e89b-12d3-a456-426614174000' },
     })
     expect(response.statusCode).toBe(204)
+    await app.close()
+  })
+
+  it('DELETE /agents/:id returns 400 for non-UUID id', async () => {
+    const app = createApp([])
+    const response = await app.inject({
+      method: 'DELETE',
+      url: '/api/v1/agents/not-a-uuid',
+      headers: { 'x-tenant-id': '123e4567-e89b-12d3-a456-426614174000' },
+    })
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toEqual({ error: 'invalid agent id' })
+    await app.close()
+  })
+
+  it('DELETE /agents/:id returns 404 when agent does not exist', async () => {
+    const app = createApp([[]])
+    const response = await app.inject({
+      method: 'DELETE',
+      url: '/api/v1/agents/123e4567-e89b-12d3-a456-426614174001',
+      headers: { 'x-tenant-id': '123e4567-e89b-12d3-a456-426614174000' },
+    })
+    expect(response.statusCode).toBe(404)
+    expect(response.json()).toEqual({ error: 'agent not found' })
     await app.close()
   })
 

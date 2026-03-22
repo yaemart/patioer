@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
   mockRunPriceSentinel,
+  mockRunProductScout,
+  mockRunSupportRelay,
   mockCreateAgentContext,
   mockDecryptToken,
   mockGetOrCreate,
@@ -10,6 +12,8 @@ const {
   mockPaperclipGetBudgetStatus,
 } = vi.hoisted(() => ({
     mockRunPriceSentinel: vi.fn(),
+    mockRunProductScout: vi.fn(),
+    mockRunSupportRelay: vi.fn(),
     mockCreateAgentContext: vi.fn(),
     mockDecryptToken: vi.fn(),
     mockGetOrCreate: vi.fn(),
@@ -20,6 +24,8 @@ const {
 vi.mock('@patioer/agent-runtime', () => ({
   createAgentContext: mockCreateAgentContext,
   runPriceSentinel: mockRunPriceSentinel,
+  runProductScout: mockRunProductScout,
+  runSupportRelay: mockRunSupportRelay,
   PaperclipBridge: class {
     async ensureCompany(...args: unknown[]) {
       return await mockPaperclipEnsureCompany(...args)
@@ -43,6 +49,9 @@ vi.mock('../lib/harness-registry.js', () => ({
 import { HarnessError } from '@patioer/harness'
 import agentsExecuteRoute, {
   buildPriceSentinelInput,
+  buildProductScoutInput,
+  buildSupportRelayInput,
+  getBudgetStatus,
   onBudgetExceeded,
   _resetCachesForTesting,
 } from './agents-execute.js'
@@ -79,6 +88,8 @@ beforeEach(() => {
   process.env.PAPERCLIP_API_URL = 'http://paperclip.local'
   process.env.SHOPIFY_ENCRYPTION_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
   mockRunPriceSentinel.mockReset()
+  mockRunProductScout.mockReset()
+  mockRunSupportRelay.mockReset()
   mockCreateAgentContext.mockReset()
   mockDecryptToken.mockReset()
   mockGetOrCreate.mockReset()
@@ -92,6 +103,8 @@ beforeEach(() => {
     logAction: vi.fn().mockResolvedValue(undefined),
   })
   mockRunPriceSentinel.mockResolvedValue({ decisions: [] })
+  mockRunProductScout.mockResolvedValue({ scouted: [] })
+  mockRunSupportRelay.mockResolvedValue({ relayed: [] })
   mockPaperclipEnsureCompany.mockResolvedValue({ id: 'company-1' })
   mockPaperclipGetBudgetStatus.mockResolvedValue({
     exceeded: false,
@@ -127,7 +140,64 @@ describe('buildPriceSentinelInput', () => {
   })
 })
 
+describe('buildProductScoutInput', () => {
+  it('returns maxProducts when goalContext contains valid json', () => {
+    const input = buildProductScoutInput(JSON.stringify({ maxProducts: 50 }))
+    expect(input).toEqual({ maxProducts: 50 })
+  })
+
+  it('returns empty object when goalContext is empty', () => {
+    const input = buildProductScoutInput('')
+    expect(input).toEqual({})
+  })
+
+  it('returns empty object when goalContext has no maxProducts field', () => {
+    const input = buildProductScoutInput(JSON.stringify({ foo: 'bar' }))
+    expect(input).toEqual({ maxProducts: undefined })
+  })
+})
+
+describe('buildSupportRelayInput', () => {
+  it('returns auto_reply_non_refund policy from goalContext', () => {
+    const input = buildSupportRelayInput(JSON.stringify({ policy: 'auto_reply_non_refund' }))
+    expect(input).toEqual({ autoReplyPolicy: 'auto_reply_non_refund' })
+  })
+
+  it('returns all_manual policy from goalContext', () => {
+    const input = buildSupportRelayInput(JSON.stringify({ policy: 'all_manual' }))
+    expect(input).toEqual({ autoReplyPolicy: 'all_manual' })
+  })
+
+  it('returns empty when policy is unknown', () => {
+    const input = buildSupportRelayInput(JSON.stringify({ policy: 'other' }))
+    expect(input).toEqual({})
+  })
+
+  it('returns empty on invalid json', () => {
+    const input = buildSupportRelayInput('{bad')
+    expect(input).toEqual({})
+  })
+})
+
 describe('agents execute route', () => {
+  it('returns 503 when SHOPIFY_ENCRYPTION_KEY is not configured', async () => {
+    delete process.env.SHOPIFY_ENCRYPTION_KEY
+    const app = createApp([
+      [{ id: '123e4567-e89b-12d3-a456-426614174001', type: 'price-sentinel', goalContext: '' }],
+    ])
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/agents/123e4567-e89b-12d3-a456-426614174001/execute',
+      headers: {
+        'x-api-key': 'paperclip-key',
+        'x-tenant-id': '123e4567-e89b-12d3-a456-426614174000',
+      },
+    })
+    expect(response.statusCode).toBe(503)
+    expect(response.json()).toEqual({ error: 'Shopify integration not configured' })
+    await app.close()
+  })
+
   it('returns 401 when x-api-key is missing', async () => {
     const app = createApp([])
     const response = await app.inject({
@@ -451,20 +521,112 @@ describe('agents execute route', () => {
     expect(response.statusCode).toBe(200)
     await app.close()
   })
+
+  it('executes product-scout and returns 200 with scouted products', async () => {
+    mockRunProductScout.mockResolvedValueOnce({ scouted: [{ productId: 'prod-1', title: 'Widget' }] })
+    const app = createApp([
+      [
+        {
+          id: '123e4567-e89b-12d3-a456-426614174001',
+          type: 'product-scout',
+          goalContext: JSON.stringify({ maxProducts: 10 }),
+        },
+      ],
+      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com' }],
+    ])
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/agents/123e4567-e89b-12d3-a456-426614174001/execute',
+      headers: {
+        'x-api-key': 'paperclip-key',
+        'x-tenant-id': '123e4567-e89b-12d3-a456-426614174000',
+      },
+    })
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({
+      ok: true,
+      agentId: '123e4567-e89b-12d3-a456-426614174001',
+      scouted: [{ productId: 'prod-1', title: 'Widget' }],
+    })
+    await app.close()
+  })
+
+  it('executes support-relay and returns 200 with relayed threads', async () => {
+    mockRunSupportRelay.mockResolvedValueOnce({
+      relayed: [{ threadId: 'th-1', reply: 'Hello!' }],
+    })
+    const app = createApp([
+      [
+        {
+          id: '123e4567-e89b-12d3-a456-426614174001',
+          type: 'support-relay',
+          goalContext: JSON.stringify({ policy: 'auto_reply_non_refund' }),
+        },
+      ],
+      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com' }],
+    ])
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/agents/123e4567-e89b-12d3-a456-426614174001/execute',
+      headers: {
+        'x-api-key': 'paperclip-key',
+        'x-tenant-id': '123e4567-e89b-12d3-a456-426614174000',
+      },
+    })
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({
+      ok: true,
+      agentId: '123e4567-e89b-12d3-a456-426614174001',
+      relayed: [{ threadId: 'th-1', reply: 'Hello!' }],
+    })
+    expect(response.json().warnings).toBeUndefined()
+    await app.close()
+  })
+
+  it('executes support-relay and includes warning when no threads found', async () => {
+    mockRunSupportRelay.mockResolvedValueOnce({ relayed: [] })
+    const app = createApp([
+      [
+        {
+          id: '123e4567-e89b-12d3-a456-426614174001',
+          type: 'support-relay',
+          goalContext: '',
+        },
+      ],
+      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com' }],
+    ])
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/agents/123e4567-e89b-12d3-a456-426614174001/execute',
+      headers: {
+        'x-api-key': 'paperclip-key',
+        'x-tenant-id': '123e4567-e89b-12d3-a456-426614174000',
+      },
+    })
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({ ok: true, relayed: [] })
+    expect(response.json().warnings).toHaveLength(1)
+    expect(response.json().warnings[0]).toContain('Shopify Inbox')
+    await app.close()
+  })
 })
 
 describe('onBudgetExceeded', () => {
-  it('writes expected audit action and payload', async () => {
+  it('suspends agent and writes audit event', async () => {
     const values = vi.fn().mockResolvedValue(undefined)
     const insert = vi.fn().mockReturnValue({ values })
+    const set = vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) })
+    const update = vi.fn().mockReturnValue({ set })
     const request = {
-      withDb: async <T>(callback: (db: { insert: typeof insert }) => Promise<T>) => {
-        return await callback({ insert })
+      withDb: async <T>(callback: (db: { insert: typeof insert; update: typeof update }) => Promise<T>) => {
+        return await callback({ insert, update })
       },
     } as unknown as Parameters<typeof onBudgetExceeded>[0]
 
     await onBudgetExceeded(request, 't-1', 'a-1', { remaining: 0 })
 
+    expect(update).toHaveBeenCalledTimes(1)
+    expect(set).toHaveBeenCalledWith({ status: 'suspended' })
     expect(insert).toHaveBeenCalledTimes(1)
     expect(values).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -474,5 +636,46 @@ describe('onBudgetExceeded', () => {
         payload: { remaining: 0 },
       }),
     )
+  })
+})
+
+describe('getBudgetStatus', () => {
+  it('returns not-exceeded when PAPERCLIP_API_URL is not configured', async () => {
+    delete process.env.PAPERCLIP_API_URL
+    const status = await getBudgetStatus('t-1', 'a-1')
+    expect(status.exceeded).toBe(false)
+    expect(status.remaining).toBe(Number.POSITIVE_INFINITY)
+  })
+
+  it('returns exceeded=true and remaining=0 when AGENT_BUDGET_FORCE_EXCEEDED=1', async () => {
+    process.env.AGENT_BUDGET_FORCE_EXCEEDED = '1'
+    const status = await getBudgetStatus('t-1', 'a-1')
+    expect(status).toEqual({ exceeded: true, remaining: 0 })
+  })
+
+  it('returns cached result within TTL window without calling bridge again', async () => {
+    mockPaperclipEnsureCompany.mockResolvedValue({ id: 'co-1' })
+    mockPaperclipGetBudgetStatus.mockResolvedValue({
+      exceeded: false,
+      remainingUsd: 50,
+      limitUsd: 100,
+      usedUsd: 50,
+    })
+    const first = await getBudgetStatus('t-cache', 'a-cache')
+    const second = await getBudgetStatus('t-cache', 'a-cache')
+    expect(first).toEqual(second)
+    expect(mockPaperclipGetBudgetStatus).toHaveBeenCalledTimes(1)
+  })
+
+  it('returns independent cache entries per agent', async () => {
+    mockPaperclipEnsureCompany.mockResolvedValue({ id: 'co-1' })
+    mockPaperclipGetBudgetStatus
+      .mockResolvedValueOnce({ exceeded: false, remainingUsd: 80, limitUsd: 100, usedUsd: 20 })
+      .mockResolvedValueOnce({ exceeded: true, remainingUsd: 0, limitUsd: 100, usedUsd: 100 })
+    const a1 = await getBudgetStatus('t-multi', 'a-1')
+    const a2 = await getBudgetStatus('t-multi', 'a-2')
+    expect(a1.exceeded).toBe(false)
+    expect(a2.exceeded).toBe(true)
+    expect(mockPaperclipGetBudgetStatus).toHaveBeenCalledTimes(2)
   })
 })

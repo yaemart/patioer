@@ -35,11 +35,15 @@ describe('RLS migration safety', () => {
       'agents',
       'agent_events',
       'approvals',
+      'webhook_events',
     ]
 
     for (const tableName of businessTables) {
       expect(sql).toContain(
         `ALTER TABLE ${tableName} ENABLE ROW LEVEL SECURITY;`,
+      )
+      expect(sql).toContain(
+        `ALTER TABLE ${tableName} FORCE ROW LEVEL SECURITY;`,
       )
       expect(sql).toContain(
         `CREATE POLICY tenant_isolation_${tableName} ON ${tableName}`,
