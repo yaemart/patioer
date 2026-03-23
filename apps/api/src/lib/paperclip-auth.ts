@@ -22,25 +22,27 @@ function matchesAnyConfiguredKey(incoming: string): boolean {
  * - `PAPERCLIP_API_KEY` — Paperclip scheduler / heartbeat callbacks
  * - `ELECTROOS_EXECUTE_API_KEY` — tenant backends, automation, or MCP (same header; separate secret)
  */
-export function verifyAgentExecuteAuth(
+export async function verifyAgentExecuteAuth(
   request: FastifyRequest,
   reply: FastifyReply,
-): FastifyReply | null {
+): Promise<FastifyReply | null> {
   const paperclip = process.env.PAPERCLIP_API_KEY
   const tenantExecute = process.env.ELECTROOS_EXECUTE_API_KEY
   if (!paperclip && !tenantExecute) {
-    reply.code(503).send({ error: 'agent execute auth not configured (set PAPERCLIP_API_KEY and/or ELECTROOS_EXECUTE_API_KEY)' })
+    await reply.code(503).send({
+      error: 'agent execute auth not configured (set PAPERCLIP_API_KEY and/or ELECTROOS_EXECUTE_API_KEY)',
+    })
     return reply
   }
 
   const incoming = request.headers['x-api-key']
   if (typeof incoming !== 'string' || incoming.length === 0) {
-    reply.code(401).send({ error: 'unauthorized' })
+    await reply.code(401).send({ error: 'unauthorized' })
     return reply
   }
 
   if (!matchesAnyConfiguredKey(incoming)) {
-    reply.code(401).send({ error: 'unauthorized' })
+    await reply.code(401).send({ error: 'unauthorized' })
     return reply
   }
 

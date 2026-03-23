@@ -14,6 +14,8 @@ export interface SeedResult {
   eventId: string
   approvalId: string
   credentialId: string
+  adsCampaignId: string
+  inventoryLevelId: string
 }
 
 const suffix = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
@@ -71,6 +73,32 @@ export async function seedTenantData(
       })
       .returning()
 
+    const [adsCampaign] = await tdb
+      .insert(schema.adsCampaigns)
+      .values({
+        tenantId,
+        platform: 'shopify',
+        platformCampaignId: `camp-${label}`,
+        name: `Campaign ${label}`,
+        status: 'active',
+        dailyBudget: '100.00',
+        totalSpend: '0',
+        roas: '2.50',
+      })
+      .returning()
+
+    const [inventoryLevel] = await tdb
+      .insert(schema.inventoryLevels)
+      .values({
+        tenantId,
+        productId: product!.id,
+        platform: 'shopify',
+        quantity: 12,
+        safetyThreshold: 10,
+        status: 'normal',
+      })
+      .returning()
+
     const [order] = await tdb
       .insert(schema.orders)
       .values({
@@ -110,6 +138,8 @@ export async function seedTenantData(
       eventId: event!.id,
       approvalId: approval!.id,
       credentialId: cred!.id,
+      adsCampaignId: adsCampaign!.id,
+      inventoryLevelId: inventoryLevel!.id,
     }
   })
 }
@@ -122,6 +152,8 @@ export async function teardownTwoTenants(fixture: TenantFixture): Promise<void> 
       await tdb.delete(schema.approvals).where(eq(schema.approvals.tenantId, tenantId))
       await tdb.delete(schema.agentEvents).where(eq(schema.agentEvents.tenantId, tenantId))
       await tdb.delete(schema.agents).where(eq(schema.agents.tenantId, tenantId))
+      await tdb.delete(schema.inventoryLevels).where(eq(schema.inventoryLevels.tenantId, tenantId))
+      await tdb.delete(schema.adsCampaigns).where(eq(schema.adsCampaigns.tenantId, tenantId))
       await tdb.delete(schema.products).where(eq(schema.products.tenantId, tenantId))
       await tdb.delete(schema.orders).where(eq(schema.orders.tenantId, tenantId))
       await tdb

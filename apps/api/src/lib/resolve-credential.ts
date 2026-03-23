@@ -37,7 +37,7 @@ export function readPreferredPlatformFromRequest(request: FastifyRequest): Suppo
   return PLATFORM_SET.has(normalized) ? (normalized as SupportedPlatform) : null
 }
 
-async function queryCredentialForPlatform(
+export async function queryCredentialForPlatform(
   db: AppDb,
   tenantId: string,
   platform: SupportedPlatform,
@@ -159,4 +159,20 @@ export async function resolveFirstCredential(
   const explicit = resolveExplicitPlatform(request, preferredPlatform)
 
   return request.withDb(async (db) => resolveFirstCredentialFromDb(db, request.tenantId!, explicit))
+}
+
+/**
+ * Platforms that have at least one credential row for this tenant, in
+ * {@link DEFAULT_CREDENTIAL_PLATFORM_ORDER} order.
+ */
+export async function listEnabledPlatformsFromDb(
+  db: AppDb,
+  tenantId: string,
+): Promise<SupportedPlatform[]> {
+  const out: SupportedPlatform[] = []
+  for (const platform of DEFAULT_CREDENTIAL_PLATFORM_ORDER) {
+    const cred = await queryCredentialForPlatform(db, tenantId, platform)
+    if (cred) out.push(platform)
+  }
+  return out
 }

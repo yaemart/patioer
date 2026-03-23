@@ -7,6 +7,7 @@ import {
   type TenantHarness,
 } from '@patioer/harness'
 import { decryptToken } from './crypto.js'
+import { parseAmazonRegion } from './amazon-region.js'
 
 export { SUPPORTED_PLATFORMS, type SupportedPlatform } from './supported-platforms.js'
 import type { SupportedPlatform } from './supported-platforms.js'
@@ -16,17 +17,6 @@ export interface HarnessCredentialInput {
   shopDomain?: string | null
   region?: string | null
   metadata?: Record<string, unknown> | null
-}
-
-const VALID_AMAZON_REGIONS = ['na', 'eu', 'fe'] as const
-type AmazonRegion = (typeof VALID_AMAZON_REGIONS)[number]
-
-function parseAmazonRegion(raw: string | null | undefined): AmazonRegion {
-  const normalized = (raw ?? 'na').toLowerCase()
-  if (!VALID_AMAZON_REGIONS.includes(normalized as AmazonRegion)) {
-    throw new Error(`Invalid Amazon region: "${raw}". Must be one of: na, eu, fe`)
-  }
-  return normalized as AmazonRegion
 }
 
 function parseAmazonMeta(raw: Record<string, unknown> | null | undefined): {
@@ -70,16 +60,13 @@ function parseShopeeMarket(raw: string | null | undefined): ShopeeMarket {
  * the stored credential and delegating to the platform-specific constructor.
  *
  * Requires CRED_ENCRYPTION_KEY env var (32-byte AES-256 key as 64-char hex).
- * For backward compatibility, Shopify also accepts SHOPIFY_ENCRYPTION_KEY.
  */
 export function createHarness(
   tenantId: string,
   platform: SupportedPlatform,
   credential: HarnessCredentialInput,
 ): TenantHarness {
-  // Support both unified key and legacy per-platform key
-  const encKey =
-    process.env.CRED_ENCRYPTION_KEY ?? process.env.SHOPIFY_ENCRYPTION_KEY
+  const encKey = process.env.CRED_ENCRYPTION_KEY
   if (!encKey) {
     throw new Error('CRED_ENCRYPTION_KEY not configured')
   }
@@ -96,6 +83,9 @@ export function createHarness(
     case 'amazon': {
       const meta = parseAmazonMeta(credential.metadata)
       const region = parseAmazonRegion(credential.region)
+      // AMAZON_USE_SANDBOX defaults to true (sandbox) when unset.
+      // Explicitly set to the string "false" to enable production endpoints.
+      const useSandbox = process.env.AMAZON_USE_SANDBOX !== 'false'
       return new AmazonHarness(tenantId, {
         clientId: meta.clientId,
         clientSecret: meta.clientSecret,
@@ -103,6 +93,7 @@ export function createHarness(
         region,
         sellerId: meta.sellerId,
         marketplaceId: meta.marketplaceId,
+        useSandbox,
       })
     }
 

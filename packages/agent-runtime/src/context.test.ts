@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { TenantHarness } from '@patioer/harness'
+import type { MarketContext } from '@patioer/market'
 import { createAgentContext } from './context.js'
 import type { CreateAgentContextDeps } from './types.js'
 
@@ -25,6 +26,7 @@ function createDeps() {
   const deps: CreateAgentContextDeps = {
     harness: {
       getHarness: vi.fn().mockReturnValue(harness),
+      getEnabledPlatforms: vi.fn().mockReturnValue(['shopify']),
     },
     budget: {
       isExceeded: vi.fn().mockResolvedValue(false),
@@ -56,7 +58,9 @@ describe('createAgentContext', () => {
     expect(ctx.tenantId).toBe('tenant-a')
     expect(ctx.agentId).toBe('agent-a')
     expect(ctx.getHarness()).toBe(harness)
-    expect(deps.harness.getHarness).toHaveBeenCalledWith('tenant-a', 'agent-a')
+    expect(ctx.getEnabledPlatforms()).toEqual(['shopify'])
+    expect(deps.harness.getHarness).toHaveBeenCalledWith('tenant-a', 'agent-a', undefined)
+    expect(deps.harness.getEnabledPlatforms).toHaveBeenCalledWith('tenant-a', 'agent-a')
   })
 
   it('delegates budget checks to BudgetPort', async () => {
@@ -119,6 +123,41 @@ describe('createAgentContext', () => {
       tenantId: 'tenant-a',
       agentId: 'agent-a',
     })
+  })
+
+  it('forwards optional platform key to HarnessPort', () => {
+    const { deps, harness } = createDeps()
+    const amazonHarness = { ...harness, platformId: 'amazon' }
+    vi.mocked(deps.harness.getHarness).mockImplementation((_t: string, _a: string, p?: string) =>
+      p === 'amazon' ? amazonHarness : harness,
+    )
+    const ctx = createAgentContext(
+      { tenantId: 'tenant-a', agentId: 'agent-a' },
+      deps,
+    )
+    expect(ctx.getHarness()).toBe(harness)
+    expect(ctx.getHarness('amazon')).toBe(amazonHarness)
+    expect(deps.harness.getHarness).toHaveBeenCalledWith('tenant-a', 'agent-a', undefined)
+    expect(deps.harness.getHarness).toHaveBeenCalledWith('tenant-a', 'agent-a', 'amazon')
+  })
+
+  it('exposes getMarket when deps.market is set (agent-native parity)', () => {
+    const market: MarketContext = {
+      convertPrice: vi.fn(),
+      calculateTax: vi.fn(),
+      checkCompliance: vi.fn(),
+      isProhibited: vi.fn(),
+      getRequiredCertifications: vi.fn(),
+    }
+    const { deps } = createDeps()
+    const ctx = createAgentContext(
+      { tenantId: 'tenant-a', agentId: 'agent-a' },
+      { ...deps, market },
+    )
+
+    expect(ctx.getMarket).toBeDefined()
+    expect(ctx.getMarket?.()).toBe(market)
+    expect(ctx.market).toBe(market)
   })
 
 })

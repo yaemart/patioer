@@ -1,6 +1,8 @@
 import type { TenantHarness } from './base.harness.js'
 import { HarnessError, httpStatusToCode } from './harness-error.js'
 import { TokenBucket, getSharedBucket, jitteredBackoff, sleep } from './token-bucket.js'
+import type { HarnessAdsCampaign } from './ads.types.js'
+import type { HarnessInventoryLevel } from './inventory.types.js'
 import type {
   Analytics,
   DateRange,
@@ -172,9 +174,11 @@ export class ShopifyHarness implements TenantHarness {
     }
   }
 
-  async getProducts(opts?: PaginationOpts): Promise<Product[]> {
+  async getProducts(opts?: PaginationOpts): Promise<Product[] & { truncated?: boolean }> {
     const page = await this.getProductsPage(opts)
-    return page.items
+    const items = page.items as Product[] & { truncated?: boolean }
+    if (page.nextCursor !== undefined) items.truncated = true
+    return items
   }
 
   async updatePrice(productId: string, price: number): Promise<void> {
@@ -251,9 +255,11 @@ export class ShopifyHarness implements TenantHarness {
   }
 
   async getOpenThreads(): Promise<Thread[]> {
-    // Shopify Inbox is a separate product outside the standard REST Admin API.
-    // Full implementation requires the Shopify Inbox OAuth scope + dedicated integration.
-    return []
+    throw new HarnessError(
+      'shopify',
+      'not_implemented',
+      'Shopify Inbox API not wired — getOpenThreads requires dedicated Inbox OAuth scope',
+    )
   }
 
   async getAnalytics(range: DateRange): Promise<Analytics> {
@@ -277,5 +283,58 @@ export class ShopifyHarness implements TenantHarness {
       orders: data.orders.length,
       truncated: data.orders.length >= PAGE_LIMIT,
     }
+  }
+
+  /**
+   * Inventory levels via Shopify Inventory API (location-aware).
+   * Fetches the default fulfillment location, then queries inventory_levels
+   * for each product's first variant's inventory_item_id.
+   */
+  async getInventoryLevels(productIds?: string[]): Promise<HarnessInventoryLevel[]> {
+    const locationData = await this.shopifyFetch<{ locations: ShopifyLocation[] }>('/locations.json')
+    const locationId = locationData.locations[0]?.id
+    if (!locationId) return []
+
+    const params = new URLSearchParams({ limit: '250' })
+    if (productIds && productIds.length > 0) {
+      params.set('product_ids', productIds.join(','))
+    }
+    const productsData = await this.shopifyFetch<{ products: ShopifyProduct[] }>(
+      `/products.json?${params}&fields=id,variants`,
+    )
+
+    const itemIdToProductId = new Map<number, string>()
+    for (const p of productsData.products) {
+      const variant = p.variants[0]
+      if (variant) itemIdToProductId.set(variant.inventory_item_id, String(p.id))
+    }
+
+    if (itemIdToProductId.size === 0) return []
+
+    const inventoryItemIds = [...itemIdToProductId.keys()].join(',')
+    const invData = await this.shopifyFetch<{
+      inventory_levels: Array<{ inventory_item_id: number; available: number | null }>
+    }>(`/inventory_levels.json?location_ids=${locationId}&inventory_item_ids=${inventoryItemIds}`)
+
+    return invData.inventory_levels.map((row) => ({
+      platformProductId: itemIdToProductId.get(row.inventory_item_id) ?? String(row.inventory_item_id),
+      quantity: row.available ?? 0,
+    }))
+  }
+
+  async getAdsCampaigns(): Promise<HarnessAdsCampaign[]> {
+    throw new HarnessError(
+      'shopify',
+      'not_implemented',
+      'Shopify does not expose a native Ads API — getAdsCampaigns requires Marketing Engagements integration',
+    )
+  }
+
+  async updateAdsBudget(_campaignId: string, _dailyBudgetUsd: number): Promise<void> {
+    throw new HarnessError(
+      'shopify',
+      'not_implemented',
+      'Shopify does not expose a native Ads API — updateAdsBudget requires Marketing Engagements integration',
+    )
   }
 }

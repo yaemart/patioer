@@ -34,7 +34,7 @@ vi.mock('@patioer/agent-runtime', () => ({
   },
 }))
 
-import { defaultAgentSpecs, seedDefaultAgents } from './agents.seed.js'
+import { defaultAgentSpecs, seedDefaultAgents } from './seed-default-agents.js'
 
 let savedEnv: Record<string, string | undefined>
 
@@ -73,13 +73,13 @@ beforeEach(() => {
       }
       if (callCount === 2) {
         fakeDb.select.mockReturnValueOnce({
-          from: vi.fn().mockReturnValue({
-            where: vi.fn().mockResolvedValue([
-              { id: 'a1', type: 'product-scout', name: 'Product Scout' },
-              { id: 'a2', type: 'price-sentinel', name: 'Price Sentinel' },
-              { id: 'a3', type: 'support-relay', name: 'Support Relay' },
-            ]),
-          }),
+          from: vi.fn().mockResolvedValue([
+            { id: 'a1', type: 'product-scout', name: 'Product Scout' },
+            { id: 'a2', type: 'price-sentinel', name: 'Price Sentinel' },
+            { id: 'a3', type: 'support-relay', name: 'Support Relay' },
+            { id: 'a4', type: 'ads-optimizer', name: 'Ads Optimizer' },
+            { id: 'a5', type: 'inventory-guard', name: 'Inventory Guard' },
+          ]),
         })
       }
       return await callback(fakeDb)
@@ -95,11 +95,17 @@ afterEach(() => {
 })
 
 describe('seedDefaultAgents', () => {
-  it('creates three default agents for empty tenant', async () => {
+  it('creates five default agents for empty tenant', async () => {
     delete process.env.PAPERCLIP_API_URL
     delete process.env.PAPERCLIP_API_KEY
     const result = await seedDefaultAgents({ tenantId: 'tenant-1' })
-    expect(result.created).toEqual(['product-scout', 'price-sentinel', 'support-relay'])
+    expect(result.created).toEqual([
+      'product-scout',
+      'price-sentinel',
+      'support-relay',
+      'ads-optimizer',
+      'inventory-guard',
+    ])
     expect(result.skipped).toEqual([])
     expect(result.registered).toEqual([])
   })
@@ -110,18 +116,78 @@ describe('seedDefaultAgents', () => {
     mockWithTenantDb.mockImplementation(
       async (_tenantId: string, callback: (db: unknown) => Promise<unknown>) => {
         fakeDb.select.mockReturnValueOnce({
-          from: vi.fn().mockResolvedValue([{ type: 'product-scout' }, { type: 'support-relay' }]),
+          from: vi.fn().mockResolvedValue([
+            { type: 'product-scout' },
+            { type: 'support-relay' },
+            { type: 'ads-optimizer' },
+          ]),
         })
         return await callback(fakeDb)
       },
     )
     const result = await seedDefaultAgents({ tenantId: 'tenant-1' })
-    expect(result.created).toEqual(['price-sentinel'])
-    expect(result.skipped).toEqual(['product-scout', 'support-relay'])
+    expect(result.created).toEqual(['price-sentinel', 'inventory-guard'])
+    expect(result.skipped).toEqual(['product-scout', 'support-relay', 'ads-optimizer'])
   })
 
   it('throws when tenantId is missing', async () => {
     await expect(seedDefaultAgents({ tenantId: '' })).rejects.toThrow('tenantId is required')
+  })
+
+  it('dryRun reports would-create types without insert or Paperclip', async () => {
+    delete process.env.PAPERCLIP_API_URL
+    delete process.env.PAPERCLIP_API_KEY
+    mockWithTenantDb.mockReset()
+    mockWithTenantDb.mockImplementation(
+      async (_tenantId: string, callback: (db: unknown) => Promise<unknown>) => {
+        fakeDb.select.mockReturnValueOnce({
+          from: vi.fn().mockResolvedValue([]),
+        })
+        return await callback(fakeDb)
+      },
+    )
+    const insertSpy = vi.spyOn(fakeDb, 'insert')
+    const result = await seedDefaultAgents({ tenantId: 'tenant-1', dryRun: true })
+    expect(result.dryRun).toBe(true)
+    expect(result.registered).toEqual([])
+    expect(result.created).toEqual([
+      'product-scout',
+      'price-sentinel',
+      'support-relay',
+      'ads-optimizer',
+      'inventory-guard',
+    ])
+    expect(result.skipped).toEqual([])
+    expect(insertSpy).not.toHaveBeenCalled()
+    expect(mockPaperclipBridge.ensureCompany).not.toHaveBeenCalled()
+  })
+
+  it('is idempotent: all five types skipped when rows already exist', async () => {
+    delete process.env.PAPERCLIP_API_URL
+    mockWithTenantDb.mockReset()
+    mockWithTenantDb.mockImplementation(
+      async (_tenantId: string, callback: (db: unknown) => Promise<unknown>) => {
+        fakeDb.select.mockReturnValueOnce({
+          from: vi.fn().mockResolvedValue([
+            { type: 'product-scout' },
+            { type: 'price-sentinel' },
+            { type: 'support-relay' },
+            { type: 'ads-optimizer' },
+            { type: 'inventory-guard' },
+          ]),
+        })
+        return await callback(fakeDb)
+      },
+    )
+    const result = await seedDefaultAgents({ tenantId: 'tenant-1' })
+    expect(result.created).toEqual([])
+    expect(result.skipped).toEqual([
+      'product-scout',
+      'price-sentinel',
+      'support-relay',
+      'ads-optimizer',
+      'inventory-guard',
+    ])
   })
 
   it('registers agents with Paperclip when configured', async () => {
@@ -130,11 +196,17 @@ describe('seedDefaultAgents', () => {
     process.env.APP_BASE_URL = 'http://app.local'
 
     const result = await seedDefaultAgents({ tenantId: 'tenant-1' })
-    expect(result.registered).toEqual(['product-scout', 'price-sentinel', 'support-relay'])
+    expect(result.registered).toEqual([
+      'product-scout',
+      'price-sentinel',
+      'support-relay',
+      'ads-optimizer',
+      'inventory-guard',
+    ])
     expect(mockPaperclipBridge.ensureCompany).toHaveBeenCalledOnce()
     expect(mockPaperclipBridge.ensureProject).toHaveBeenCalledOnce()
-    expect(mockPaperclipBridge.ensureAgent).toHaveBeenCalledTimes(3)
-    expect(mockPaperclipBridge.registerHeartbeat).toHaveBeenCalledTimes(3)
+    expect(mockPaperclipBridge.ensureAgent).toHaveBeenCalledTimes(5)
+    expect(mockPaperclipBridge.registerHeartbeat).toHaveBeenCalledTimes(5)
   })
 
   it('skips Paperclip registration when env is not configured', async () => {
@@ -157,8 +229,14 @@ describe('seedDefaultAgents', () => {
 })
 
 describe('defaultAgentSpecs', () => {
-  it('returns three defaults in stable order', () => {
+  it('returns five defaults in stable order', () => {
     const specs = defaultAgentSpecs()
-    expect(specs.map((s) => s.type)).toEqual(['product-scout', 'price-sentinel', 'support-relay'])
+    expect(specs.map((s) => s.type)).toEqual([
+      'product-scout',
+      'price-sentinel',
+      'support-relay',
+      'ads-optimizer',
+      'inventory-guard',
+    ])
   })
 })

@@ -14,7 +14,11 @@ export interface TenantHarness {
 
   getProduct(productId: string): Promise<Product | null>
   getProductsPage(opts?: PaginationOpts): Promise<PaginatedResult<Product>>
-  getProducts(opts?: PaginationOpts): Promise<Product[]>
+  /**
+   * Returns a single page of products. When the result is truncated (more products available),
+   * the returned array has `.truncated = true`. Use `getProductsPage` with cursors for full iteration.
+   */
+  getProducts(opts?: PaginationOpts): Promise<Product[] & { truncated?: boolean }>
   updatePrice(productId: string, price: number): Promise<void>
 
   /**
@@ -35,5 +39,8 @@ export interface TenantHarness {
   replyToMessage(threadId: string, body: string): Promise<void>
   getOpenThreads(): Promise<Thread[]>
 
+  /**
+   * Revenue and order counts for `range`. See {@link Analytics} for the meaning of `truncated`.
+   */
   getAnalytics(range: DateRange): Promise<Analytics>
 }

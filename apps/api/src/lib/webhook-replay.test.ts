@@ -1,12 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { mockListTenantIds, mockWithTenantDb, mockMarkWebhookProcessed, mockMarkWebhookFailed } =
-  vi.hoisted(() => ({
-    mockListTenantIds: vi.fn(),
-    mockWithTenantDb: vi.fn(),
-    mockMarkWebhookProcessed: vi.fn(),
-    mockMarkWebhookFailed: vi.fn(),
-  }))
+const {
+  mockListTenantIds,
+  mockWithTenantDb,
+  mockMarkWebhookProcessed,
+  mockMarkWebhookFailed,
+  mockHandleWebhookTopic,
+  mockDispatchWebhook,
+} = vi.hoisted(() => ({
+  mockListTenantIds: vi.fn(),
+  mockWithTenantDb: vi.fn(),
+  mockMarkWebhookProcessed: vi.fn(),
+  mockMarkWebhookFailed: vi.fn(),
+  mockHandleWebhookTopic: vi.fn(),
+  mockDispatchWebhook: vi.fn(),
+}))
 
 vi.mock('@patioer/db', () => ({
   listTenantIds: mockListTenantIds,
@@ -15,6 +23,7 @@ vi.mock('@patioer/db', () => ({
     webhookEvents: {
       id: 'id',
       tenantId: 'tenantId',
+      platform: 'platform',
       topic: 'topic',
       payload: 'payload',
       status: 'status',
@@ -32,27 +41,34 @@ vi.mock('./webhook-dedup.js', () => ({
   markWebhookFailed: mockMarkWebhookFailed,
 }))
 
+vi.mock('./webhook-topic-handler.js', () => ({
+  handleWebhookTopic: mockHandleWebhookTopic,
+  dispatchWebhook: mockDispatchWebhook,
+}))
+
 import { replayPendingWebhooks } from './webhook-replay.js'
 
 const TENANT_ID = 'tttttttt-tttt-tttt-tttt-tttttttttttt'
 
-const PENDING_EVENT = {
+const SHOPIFY_EVENT = {
   id: 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee',
   tenantId: TENANT_ID,
+  platform: 'shopify',
   topic: 'orders/create',
   payload: { id: 42 },
 }
 
-/**
- * Sets up the two-level DB mock:
- *  1. listTenantIds()              → [TENANT_ID]        (tenants, no RLS)
- *  2. withTenantDb SELECT callback  → events list        (per-tenant, RLS)
- *  3. withTenantDb mark* callbacks  → markWebhookProcessed/Failed are mocked
- */
+const AMAZON_EVENT = {
+  id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+  tenantId: TENANT_ID,
+  platform: 'amazon',
+  topic: 'amazon:ORDER_CHANGE',
+  payload: { orderId: '123' },
+}
+
 function setupMocks(events: unknown[]) {
   mockListTenantIds.mockResolvedValue([TENANT_ID])
 
-  // SELECT chain for webhook_events inside withTenantDb
   const selectChain = {
     from: vi.fn().mockReturnThis(),
     where: vi.fn().mockReturnThis(),
@@ -71,117 +87,100 @@ beforeEach(() => {
   vi.clearAllMocks()
   mockMarkWebhookProcessed.mockResolvedValue(undefined)
   mockMarkWebhookFailed.mockResolvedValue(undefined)
+  mockHandleWebhookTopic.mockResolvedValue(undefined)
+  mockDispatchWebhook.mockResolvedValue(undefined)
 })
 
 describe('replayPendingWebhooks', () => {
-  it('processes received webhooks older than retryAfterMs', async () => {
-    setupMocks([PENDING_EVENT])
-    const handler = vi.fn().mockResolvedValue(undefined)
+  it('dispatches shopify events via handleWebhookTopic', async () => {
+    setupMocks([SHOPIFY_EVENT])
 
-    const result = await replayPendingWebhooks(handler, { retryAfterMs: 60_000 })
+    const result = await replayPendingWebhooks({ retryAfterMs: 60_000 })
 
-    expect(handler).toHaveBeenCalledOnce()
-    expect(handler).toHaveBeenCalledWith('orders/create', PENDING_EVENT.tenantId, PENDING_EVENT.payload)
-    expect(result.total).toBe(1)
-    expect(result.processed).toBe(1)
-    expect(result.failed).toBe(0)
+    expect(mockHandleWebhookTopic).toHaveBeenCalledOnce()
+    expect(mockHandleWebhookTopic).toHaveBeenCalledWith('orders/create', TENANT_ID, SHOPIFY_EVENT.payload)
+    expect(mockDispatchWebhook).not.toHaveBeenCalled()
+    expect(result).toEqual({ total: 1, processed: 1, failed: 0 })
   })
 
-  it('skips already-processed webhooks (returns empty from query)', async () => {
+  it('dispatches non-shopify events via dispatchWebhook', async () => {
+    setupMocks([AMAZON_EVENT])
+
+    const result = await replayPendingWebhooks()
+
+    expect(mockDispatchWebhook).toHaveBeenCalledOnce()
+    expect(mockDispatchWebhook).toHaveBeenCalledWith(
+      expect.objectContaining({
+        platform: 'amazon',
+        topic: 'amazon:ORDER_CHANGE',
+        tenantId: TENANT_ID,
+      }),
+    )
+    expect(mockHandleWebhookTopic).not.toHaveBeenCalled()
+    expect(result).toEqual({ total: 1, processed: 1, failed: 0 })
+  })
+
+  it('returns empty result when no pending events', async () => {
     setupMocks([])
-    const handler = vi.fn()
 
-    const result = await replayPendingWebhooks(handler)
+    const result = await replayPendingWebhooks()
 
-    expect(handler).not.toHaveBeenCalled()
-    expect(result.total).toBe(0)
-    expect(result.processed).toBe(0)
+    expect(mockHandleWebhookTopic).not.toHaveBeenCalled()
+    expect(mockDispatchWebhook).not.toHaveBeenCalled()
+    expect(result).toEqual({ total: 0, processed: 0, failed: 0 })
   })
 
   it('marks replayed webhook as processed on success', async () => {
-    setupMocks([PENDING_EVENT])
-    const handler = vi.fn().mockResolvedValue(undefined)
+    setupMocks([SHOPIFY_EVENT])
 
-    await replayPendingWebhooks(handler)
+    await replayPendingWebhooks()
 
     expect(mockMarkWebhookProcessed).toHaveBeenCalledOnce()
-    expect(mockMarkWebhookProcessed).toHaveBeenCalledWith(
-      expect.anything(),
-      PENDING_EVENT.id,
-    )
+    expect(mockMarkWebhookProcessed).toHaveBeenCalledWith(expect.anything(), SHOPIFY_EVENT.id)
   })
 
   it('marks replayed webhook as failed on handler error', async () => {
-    setupMocks([PENDING_EVENT])
-    const handler = vi.fn().mockRejectedValue(new Error('handler boom'))
+    setupMocks([SHOPIFY_EVENT])
+    mockHandleWebhookTopic.mockRejectedValueOnce(new Error('handler boom'))
 
-    const result = await replayPendingWebhooks(handler)
+    const result = await replayPendingWebhooks()
 
     expect(result.failed).toBe(1)
     expect(result.processed).toBe(0)
     expect(mockMarkWebhookFailed).toHaveBeenCalledOnce()
-    expect(mockMarkWebhookFailed).toHaveBeenCalledWith(
-      expect.anything(),
-      PENDING_EVENT.id,
-      'handler boom',
-    )
+    expect(mockMarkWebhookFailed).toHaveBeenCalledWith(expect.anything(), SHOPIFY_EVENT.id, 'handler boom')
   })
 
   it('does not mark webhook failed when handler succeeds but markWebhookProcessed fails', async () => {
-    setupMocks([PENDING_EVENT])
-    const handler = vi.fn().mockResolvedValue(undefined)
+    setupMocks([SHOPIFY_EVENT])
     mockMarkWebhookProcessed.mockRejectedValueOnce(new Error('status write failed'))
 
-    const result = await replayPendingWebhooks(handler)
+    const result = await replayPendingWebhooks()
 
-    expect(handler).toHaveBeenCalledOnce()
+    expect(mockHandleWebhookTopic).toHaveBeenCalledOnce()
     expect(mockMarkWebhookFailed).not.toHaveBeenCalled()
-    expect(result.processed).toBe(0)
-    expect(result.failed).toBe(1)
+    expect(result).toEqual({ total: 1, processed: 0, failed: 1 })
   })
 
   it('passes remaining capacity as limit to the per-tenant query', async () => {
-    const { selectChain } = setupMocks([PENDING_EVENT])
-    const handler = vi.fn().mockResolvedValue(undefined)
+    const { selectChain } = setupMocks([SHOPIFY_EVENT])
 
-    await replayPendingWebhooks(handler, { limit: 10 })
+    await replayPendingWebhooks({ limit: 10 })
 
     expect(selectChain.limit).toHaveBeenCalledWith(10)
   })
 
-  it('returns correct ReplayResult counts across multiple events', async () => {
-    const events = [
-      { ...PENDING_EVENT, id: 'id-1' },
-      { ...PENDING_EVENT, id: 'id-2' },
-      { ...PENDING_EVENT, id: 'id-3' },
-    ]
-    setupMocks(events)
+  it('handles mixed-platform events in a single batch', async () => {
+    setupMocks([SHOPIFY_EVENT, AMAZON_EVENT])
 
-    const handler = vi
-      .fn()
-      .mockResolvedValueOnce(undefined)
-      .mockRejectedValueOnce(new Error('fail'))
-      .mockResolvedValueOnce(undefined)
+    const result = await replayPendingWebhooks()
 
-    const result = await replayPendingWebhooks(handler)
-
-    expect(result.total).toBe(3)
-    expect(result.processed).toBe(2)
-    expect(result.failed).toBe(1)
-  })
-
-  it('queries webhook_events inside withTenantDb (RLS-enforced context)', async () => {
-    setupMocks([PENDING_EVENT])
-    const handler = vi.fn().mockResolvedValue(undefined)
-
-    await replayPendingWebhooks(handler)
-
-    // First withTenantDb call must use the correct tenant ID (SELECT)
-    expect(mockWithTenantDb).toHaveBeenCalledWith(TENANT_ID, expect.any(Function))
+    expect(mockHandleWebhookTopic).toHaveBeenCalledOnce()
+    expect(mockDispatchWebhook).toHaveBeenCalledOnce()
+    expect(result).toEqual({ total: 2, processed: 2, failed: 0 })
   })
 
   it('stops processing additional tenants once global limit is reached', async () => {
-    // Two tenants, limit=1 — only the first tenant's event should be processed
     mockListTenantIds.mockResolvedValue(['tenant-a', 'tenant-b'])
 
     mockWithTenantDb.mockImplementation(
@@ -189,16 +188,15 @@ describe('replayPendingWebhooks', () => {
         const selectChain = {
           from: vi.fn().mockReturnThis(),
           where: vi.fn().mockReturnThis(),
-          limit: vi.fn().mockResolvedValue([PENDING_EVENT]),
+          limit: vi.fn().mockResolvedValue([SHOPIFY_EVENT]),
         }
         return await cb({ select: vi.fn().mockReturnValue(selectChain) })
       },
     )
 
-    const handler = vi.fn().mockResolvedValue(undefined)
-    const result = await replayPendingWebhooks(handler, { limit: 1 })
+    const result = await replayPendingWebhooks({ limit: 1 })
 
     expect(result.total).toBe(1)
-    expect(handler).toHaveBeenCalledOnce()
+    expect(mockHandleWebhookTopic).toHaveBeenCalledOnce()
   })
 })

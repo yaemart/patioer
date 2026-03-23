@@ -33,42 +33,42 @@ describe('verifyAgentExecuteAuth', () => {
     else delete process.env.ELECTROOS_EXECUTE_API_KEY
   })
 
-  it('returns 503 when neither PAPERCLIP_API_KEY nor ELECTROOS_EXECUTE_API_KEY is set', () => {
+  it('returns 503 when neither PAPERCLIP_API_KEY nor ELECTROOS_EXECUTE_API_KEY is set', async () => {
     const reply = createReplyMock()
-    const authReply = verifyAgentExecuteAuth(createRequestMock('k'), reply)
+    const authReply = await verifyAgentExecuteAuth(createRequestMock('k'), reply)
     expect(authReply).toBe(reply)
     expect(reply.code).toHaveBeenCalledWith(503)
   })
 
-  it('returns 401 when x-api-key header is missing', () => {
+  it('returns 401 when x-api-key header is missing', async () => {
     process.env.PAPERCLIP_API_KEY = 'k1'
     const reply = createReplyMock()
-    const authReply = verifyAgentExecuteAuth(createRequestMock(), reply)
+    const authReply = await verifyAgentExecuteAuth(createRequestMock(), reply)
     expect(authReply).toBe(reply)
     expect(reply.code).toHaveBeenCalledWith(401)
   })
 
-  it('returns 401 when x-api-key mismatches both keys', () => {
+  it('returns 401 when x-api-key mismatches both keys', async () => {
     process.env.PAPERCLIP_API_KEY = 'k1'
     process.env.ELECTROOS_EXECUTE_API_KEY = 'k2'
     const reply = createReplyMock()
-    const authReply = verifyAgentExecuteAuth(createRequestMock('k3'), reply)
+    const authReply = await verifyAgentExecuteAuth(createRequestMock('k3'), reply)
     expect(authReply).toBe(reply)
     expect(reply.code).toHaveBeenCalledWith(401)
   })
 
-  it('returns null when x-api-key matches PAPERCLIP_API_KEY', () => {
+  it('returns null when x-api-key matches PAPERCLIP_API_KEY', async () => {
     process.env.PAPERCLIP_API_KEY = 'k1'
     const reply = createReplyMock()
-    const authReply = verifyAgentExecuteAuth(createRequestMock('k1'), reply)
+    const authReply = await verifyAgentExecuteAuth(createRequestMock('k1'), reply)
     expect(authReply).toBeNull()
     expect(reply.code).not.toHaveBeenCalled()
   })
 
-  it('returns null when x-api-key matches ELECTROOS_EXECUTE_API_KEY (without Paperclip key)', () => {
+  it('returns null when x-api-key matches ELECTROOS_EXECUTE_API_KEY (without Paperclip key)', async () => {
     process.env.ELECTROOS_EXECUTE_API_KEY = 'tenant-run-key'
     const reply = createReplyMock()
-    const authReply = verifyAgentExecuteAuth(createRequestMock('tenant-run-key'), reply)
+    const authReply = await verifyAgentExecuteAuth(createRequestMock('tenant-run-key'), reply)
     expect(authReply).toBeNull()
     expect(reply.code).not.toHaveBeenCalled()
   })

@@ -22,7 +22,7 @@ const goalContextSchemas: Partial<Record<AgentType, z.ZodTypeAny>> = {
     proposals: z.array(z.object({
       productId: z.string(),
       currentPrice: z.number(),
-      newPrice: z.number(),
+      proposedPrice: z.number(),
       reason: z.string().optional(),
     })).optional(),
     approvalThresholdPercent: z.number().optional(),
@@ -32,6 +32,15 @@ const goalContextSchemas: Partial<Record<AgentType, z.ZodTypeAny>> = {
   }).passthrough(),
   'support-relay': z.object({
     autoReplyPolicy: z.enum(['auto_reply_non_refund', 'all_manual']).optional(),
+  }).passthrough(),
+  'ads-optimizer': z.object({
+    targetRoas: z.number().positive().optional(),
+  }).passthrough(),
+  'inventory-guard': z.object({
+    safetyThreshold: z.number().int().nonnegative().optional(),
+    replenishApprovalMinUnits: z.number().int().positive().optional(),
+    timeZone: z.string().optional(),
+    enforceDailyWindow: z.boolean().optional(),
   }).passthrough(),
 }
 
@@ -57,6 +66,7 @@ const createAgentBodySchema = z.object({
   name: z.string().min(1),
   type: z.enum(AGENT_TYPES),
   goalContext: z.string().optional(),
+  systemPrompt: z.string().optional(),
 })
 
 const updateAgentBodySchema = z.object({
@@ -64,6 +74,7 @@ const updateAgentBodySchema = z.object({
   type: z.enum(AGENT_TYPES).optional(),
   status: z.enum(['active', 'suspended', 'error']).optional(),
   goalContext: z.string().optional(),
+  systemPrompt: z.string().nullable().optional(),
 })
 
 const paramsSchema = z.object({ id: z.string().uuid() })
@@ -113,6 +124,7 @@ const agentsRoute: FastifyPluginAsync = async (app) => {
           name: parsedBody.data.name,
           type: parsedBody.data.type,
           goalContext: gcResult.value,
+          systemPrompt: parsedBody.data.systemPrompt ?? null,
           status: 'active',
         })
         .returning(),
@@ -196,20 +208,13 @@ const agentsRoute: FastifyPluginAsync = async (app) => {
       }
     }
 
-    const patch: {
-      name?: string
-      type?: AgentType
-      status?: 'active' | 'suspended' | 'error'
-      goalContext?: string | null
-      updatedAt: Date
-    } = {
-      updatedAt: new Date(),
-    }
+    const patch: Record<string, unknown> = { updatedAt: new Date() }
 
     if (typeof parsedBody.data.name !== 'undefined') patch.name = parsedBody.data.name
     if (typeof parsedBody.data.type !== 'undefined') patch.type = parsedBody.data.type
     if (typeof parsedBody.data.status !== 'undefined') patch.status = parsedBody.data.status
     if (typeof validatedGoalContext !== 'undefined') patch.goalContext = validatedGoalContext
+    if (typeof parsedBody.data.systemPrompt !== 'undefined') patch.systemPrompt = parsedBody.data.systemPrompt ?? null
 
     const [updated] = await request.withDb((db) =>
       db

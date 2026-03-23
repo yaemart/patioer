@@ -8,7 +8,8 @@
       "@patioer/db": ["packages/db/src/index.ts"],
       "@patioer/shared": ["packages/shared/src/index.ts"],
       "@patioer/harness": ["packages/harness/src/index.ts"],
-      "@patioer/agent-runtime": ["packages/agent-runtime/src/index.ts"]
+      "@patioer/agent-runtime": ["packages/agent-runtime/src/index.ts"],
+      "@patioer/market": ["packages/market/src/index.ts"]
     },
     "strict": true,
     "esModuleInterop": true,

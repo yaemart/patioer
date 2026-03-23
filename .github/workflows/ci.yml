@@ -70,12 +70,22 @@ jobs:
         env:
           VITEST_REPORTER: github-actions
 
-      - name: Coverage check (api)
-        run: pnpm --filter api test:coverage
+      - name: Agent seed script tests (Task 4.9)
+        run: pnpm test:scripts
+        env:
+          VITEST_REPORTER: github-actions
+
+      - name: Coverage check (market)
+        run: pnpm --filter @patioer/market test:coverage
         env:
           VITEST_REPORTER: github-actions
 
       - name: Coverage check (harness)
         run: pnpm --filter @patioer/harness test:coverage
+        env:
+          VITEST_REPORTER: github-actions
+
+      - name: Coverage check (api)
+        run: pnpm --filter api test:coverage
         env:
           VITEST_REPORTER: github-actions

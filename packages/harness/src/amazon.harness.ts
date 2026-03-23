@@ -16,12 +16,43 @@ import type {
   AmazonOrderSummary,
 } from './amazon.types.js'
 
-import { TokenBucket, jitteredBackoff, sleep } from './token-bucket.js'
+import { TokenBucket, getSharedBucket, jitteredBackoff, sleep } from './token-bucket.js'
 
 const AMAZON_SP_API_BASE_URL: Record<AmazonCredentials['region'], string> = {
   na: 'https://sellingpartnerapi-na.amazon.com',
   eu: 'https://sellingpartnerapi-eu.amazon.com',
   fe: 'https://sellingpartnerapi-fe.amazon.com',
+}
+
+/**
+ * Canonical marketplace → ISO 4217 currency mapping.
+ * Source: Amazon SP-API Marketplace IDs reference (2024).
+ * Used by normalizeAmazonProduct and buildPricePatch to avoid hardcoding USD.
+ */
+const MARKETPLACE_CURRENCY: Record<string, string> = {
+  ATVPDKIKX0DER: 'USD', // US
+  A2EUQ1WTGCTBG2: 'CAD', // Canada
+  A1F83G8C2ARO7P: 'GBP', // UK
+  A13V1IB3VIYZZH: 'EUR', // France
+  A1PA6795UKMFR9: 'EUR', // Germany
+  APJ6JRA9NG5V4:  'EUR', // Italy
+  A1RKKUPIHCS9HS: 'EUR', // Spain
+  A1805IZSGTT6HS: 'EUR', // Netherlands
+  A2NODRKZP88ZB9: 'SEK', // Sweden
+  A33AVAJ2PDY3EV: 'TRY', // Turkey
+  A19VAU5U5O7RUS: 'SGD', // Singapore
+  A39IBJ37TRP1C6: 'AUD', // Australia
+  A1VC38T7YXB528: 'JPY', // Japan
+  A21TJRUUN4KGV:  'INR', // India
+  AAHKV2X7AFYLW: 'CNY', // China
+  A2Q3Y263D00KWC: 'BRL', // Brazil
+  A1AM78C64UM0Y8: 'MXN', // Mexico
+} as const
+
+const AMAZON_SP_API_SANDBOX_URL: Record<AmazonCredentials['region'], string> = {
+  na: 'https://sandbox.sellingpartnerapi-na.amazon.com',
+  eu: 'https://sandbox.sellingpartnerapi-eu.amazon.com',
+  fe: 'https://sandbox.sellingpartnerapi-fe.amazon.com',
 }
 
 const AMAZON_LWA_TOKEN_URL = 'https://api.amazon.com/auth/o2/token'
@@ -65,7 +96,7 @@ function normalizeAmazonProduct(
     price: null,
     inventory: null,
     sku: item.sku,
-    currency: marketplaceId.startsWith('A1') ? 'USD' : undefined,
+    currency: MARKETPLACE_CURRENCY[marketplaceId],
     platformMeta: { platform: 'amazon', asin: item.asin, source: 'catalog-items' },
   }
 }
@@ -81,7 +112,6 @@ function normalizeAmazonOrder(order: AmazonOrderSummary): Order {
 export class AmazonHarness implements TenantHarness {
   readonly platformId = 'amazon'
   private readonly baseUrl: string
-  private readonly apiBuckets = new Map<string, TokenBucket>()
 
   private accessToken?: string
   private tokenExpiresAt = 0
@@ -93,20 +123,20 @@ export class AmazonHarness implements TenantHarness {
     readonly tenantId: string,
     private readonly credentials: AmazonCredentials,
   ) {
-    this.baseUrl = AMAZON_SP_API_BASE_URL[credentials.region]
+    // useSandbox defaults to true so sandbox is always the safe default.
+    // Pass useSandbox: false (or set AMAZON_USE_SANDBOX=false) for production.
+    const sandbox = credentials.useSandbox !== false
+    this.baseUrl = sandbox
+      ? AMAZON_SP_API_SANDBOX_URL[credentials.region]
+      : AMAZON_SP_API_BASE_URL[credentials.region]
   }
 
   private getApiBucket(path: string): TokenBucket {
     const family =
       Object.keys(AMAZON_API_FAMILIES).find((prefix) => path.includes(prefix)) ?? '/default/'
     const config = AMAZON_API_FAMILIES[family] ?? AMAZON_DEFAULT_BUCKET_CONFIG
-
-    let bucket = this.apiBuckets.get(family)
-    if (!bucket) {
-      bucket = new TokenBucket(config.capacity, config.refillRate)
-      this.apiBuckets.set(family, bucket)
-    }
-    return bucket
+    const bucketKey = `amazon:${this.credentials.sellerId}:${family}`
+    return getSharedBucket(bucketKey, { capacity: config.capacity, refillRatePerSecond: config.refillRate })
   }
 
   private buildUrl(path: string, query?: Record<string, string | undefined>): string {
@@ -280,12 +310,15 @@ export class AmazonHarness implements TenantHarness {
     return { items, nextCursor: data.pagination?.nextToken }
   }
 
-  async getProducts(opts?: PaginationOpts): Promise<Product[]> {
+  async getProducts(opts?: PaginationOpts): Promise<Product[] & { truncated?: boolean }> {
     const page = await this.getProductsPage(opts)
-    return page.items
+    const items = page.items as Product[] & { truncated?: boolean }
+    if (page.nextCursor !== undefined) items.truncated = true
+    return items
   }
 
   private buildPricePatch(price: number): Array<{ op: 'replace'; path: string; value: unknown[] }> {
+    const currency = MARKETPLACE_CURRENCY[this.credentials.marketplaceId] ?? 'USD'
     return [
       {
         op: 'replace',
@@ -293,7 +326,7 @@ export class AmazonHarness implements TenantHarness {
         value: [
           {
             marketplace_id: this.credentials.marketplaceId,
-            currency: 'USD',
+            currency,
             our_price: [{ schedule: [{ value_with_tax: price.toFixed(2) }] }],
           },
         ],
@@ -369,9 +402,11 @@ export class AmazonHarness implements TenantHarness {
   }
 
   async getOpenThreads(): Promise<Thread[]> {
-    // Amazon has no unified "open threads" list endpoint in SP-API.
-    // Sprint 1 returns an empty array; Phase 3 will aggregate via Messaging/SNS.
-    return []
+    throw new HarnessError(
+      'amazon',
+      'not_implemented',
+      'Amazon SP-API has no unified open-threads list endpoint — requires Messaging/SNS aggregation',
+    )
   }
 
   async getAnalytics(range: DateRange): Promise<Analytics> {

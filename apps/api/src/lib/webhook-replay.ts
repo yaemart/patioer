@@ -1,6 +1,12 @@
 import { and, inArray, lt } from 'drizzle-orm'
 import { listTenantIds, withTenantDb, schema } from '@patioer/db'
 import { markWebhookProcessed, markWebhookFailed } from './webhook-dedup.js'
+import {
+  dispatchWebhook,
+  handleWebhookTopic,
+  type WebhookPlatform,
+  type WebhookTopic,
+} from './webhook-topic-handler.js'
 
 export interface ReplayResult {
   total: number
@@ -12,7 +18,6 @@ const DEFAULT_RETRY_AFTER_MS = 60_000
 const DEFAULT_LIMIT = 100
 
 export async function replayPendingWebhooks(
-  handler: (topic: string, tenantId: string, payload: unknown) => Promise<void>,
   options?: { retryAfterMs?: number; limit?: number },
 ): Promise<ReplayResult> {
   const retryAfterMs = options?.retryAfterMs ?? DEFAULT_RETRY_AFTER_MS
@@ -32,6 +37,7 @@ export async function replayPendingWebhooks(
         .select({
           id: schema.webhookEvents.id,
           tenantId: schema.webhookEvents.tenantId,
+          platform: schema.webhookEvents.platform,
           topic: schema.webhookEvents.topic,
           payload: schema.webhookEvents.payload,
         })
@@ -49,7 +55,7 @@ export async function replayPendingWebhooks(
 
     for (const event of pending) {
       try {
-        await handler(event.topic, event.tenantId, event.payload)
+        await replayOneEvent(event)
       } catch (err) {
         await withTenantDb(tenantId, (tdb) =>
           markWebhookFailed(tdb, event.id, err instanceof Error ? err.message : String(err)),
@@ -62,11 +68,29 @@ export async function replayPendingWebhooks(
         await withTenantDb(tenantId, (tdb) => markWebhookProcessed(tdb, event.id))
         result.processed += 1
       } catch {
-        // Handler side effects already succeeded; do not overwrite webhook state to `failed`.
         result.failed += 1
       }
     }
   }
 
   return result
+}
+
+async function replayOneEvent(event: {
+  tenantId: string
+  platform: string
+  topic: string
+  payload: unknown
+}): Promise<void> {
+  if (event.platform === 'shopify') {
+    await handleWebhookTopic(event.topic, event.tenantId, event.payload)
+    return
+  }
+  await dispatchWebhook({
+    platform: event.platform as WebhookPlatform,
+    topic: event.topic as WebhookTopic,
+    tenantId: event.tenantId,
+    payload: event.payload,
+    receivedAt: new Date(),
+  })
 }

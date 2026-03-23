@@ -3,6 +3,8 @@ export interface TikTokCredentials {
   appSecret: string
   accessToken: string
   shopId?: string
+  /** Default ISO 4217 currency for this shop. Used by updatePrice when the product's currency is unavailable. */
+  currency?: string
 }
 
 export interface TikTokProductPrice {

@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { TikTokHarness, buildTikTokSign, buildTikTokParams, normalizeTikTokProduct, normalizeTikTokOrder } from './tiktok.harness.js'
 import { HarnessError } from './harness-error.js'
 import type { TikTokCredentials, TikTokOrder, TikTokProduct } from './tiktok.types.js'
+import { resetSharedBuckets } from './token-bucket.js'
 
 // ── Global fetch mock ─────────────────────────────────────────────────────────
 
@@ -71,6 +72,7 @@ function httpErrorResponse(status: number) {
 afterEach(() => {
   mockFetch.mockReset()
   vi.useRealTimers()
+  resetSharedBuckets()
 })
 
 // ── Signing (CARD-D9-02) ────────────────────────────────────────────────────
@@ -241,10 +243,12 @@ describe('TikTokHarness skeleton stubs', () => {
     expect(harness.tenantId).toBe('my-tenant')
   })
 
-  it('getOpenThreads returns empty array without calling fetch', async () => {
+  it('getOpenThreads throws not_implemented', async () => {
     const harness = makeHarness()
-    const result = await harness.getOpenThreads()
-    expect(result).toEqual([])
+    await expect(harness.getOpenThreads()).rejects.toMatchObject({
+      type: 'harness_error',
+      code: 'not_implemented',
+    })
     expect(mockFetch).not.toHaveBeenCalled()
   })
 })
@@ -378,28 +382,44 @@ describe('TikTokHarness getProducts', () => {
 // ── CARD-D10-02: updatePrice ──────────────────────────────────────────────────
 
 describe('TikTokHarness updatePrice', () => {
+  const productResponse = (currency = 'USD') =>
+    okResponse({
+      product: {
+        id: 'prod-123',
+        title: 'Test',
+        status: 'active',
+        price: { amount: '10.00', currency },
+        inventory: 5,
+      },
+    })
+
   it('sends PUT request to product endpoint with price payload', async () => {
-    mockFetch.mockResolvedValueOnce(okResponse({}))
+    mockFetch
+      .mockResolvedValueOnce(productResponse())
+      .mockResolvedValueOnce(okResponse({}))
 
     const harness = makeHarness()
     await harness.updatePrice('prod-123', 24.99)
 
-    expect(mockFetch).toHaveBeenCalledTimes(1)
-    const [calledUrl, calledInit] = mockFetch.mock.calls[0] as [string, RequestInit]
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+    const [calledUrl, calledInit] = mockFetch.mock.calls[1] as [string, RequestInit]
     expect(calledUrl).toContain('/api/products/prod-123')
     expect(calledInit.method).toBe('PUT')
   })
 
-  it('formats price to two decimal places in skus payload', async () => {
-    mockFetch.mockResolvedValueOnce(okResponse({}))
+  it('formats price to two decimal places and uses product currency', async () => {
+    mockFetch
+      .mockResolvedValueOnce(productResponse('GBP'))
+      .mockResolvedValueOnce(okResponse({}))
 
     const harness = makeHarness()
-    await harness.updatePrice('prod-1', 9.9)
+    await harness.updatePrice('prod-123', 9.9)
 
-    const body = JSON.parse(mockFetch.mock.calls[0][1].body as string) as {
-      skus: Array<{ price: { amount: string } }>
+    const body = JSON.parse(mockFetch.mock.calls[1][1].body as string) as {
+      skus: Array<{ price: { amount: string; currency: string } }>
     }
     expect(body.skus[0].price.amount).toBe('9.90')
+    expect(body.skus[0].price.currency).toBe('GBP')
   })
 
   it('throws HarnessError when TikTok API returns error code', async () => {
@@ -469,52 +489,58 @@ describe('TikTokHarness updateInventory', () => {
 // ── CARD-D10-04: getAnalytics ─────────────────────────────────────────────────
 
 describe('TikTokHarness getAnalytics', () => {
-  it('aggregates revenue and order count from getOrders result', async () => {
-    const harness = makeHarness()
-    vi.spyOn(harness, 'getOrders').mockResolvedValueOnce([
-      { id: 'o1', status: 'shipped', totalPrice: 30 },
-      { id: 'o2', status: 'delivered', totalPrice: 70 },
-    ])
+  const makeOrder = (id: string, amount: string) => ({
+    order_id: id,
+    status: 'delivered',
+    payment_info: { total_amount: amount, currency: 'USD' },
+    create_time: 1700000000,
+    line_items: [],
+  })
 
-    const result = await harness.getAnalytics({ from: new Date(), to: new Date() })
+  it('aggregates revenue and order count within date range', async () => {
+    mockFetch.mockResolvedValueOnce(
+      okResponse({
+        order_list: [makeOrder('o1', '30'), makeOrder('o2', '70')],
+        next_page_token: undefined,
+      }),
+    )
+
+    const result = await makeHarness().getAnalytics({ from: new Date('2024-01-01'), to: new Date('2024-01-31') })
 
     expect(result.revenue).toBe(100)
     expect(result.orders).toBe(2)
     expect(result.truncated).toBe(false)
   })
 
-  it('returns zero revenue and orders when getOrders returns empty list', async () => {
-    const harness = makeHarness()
-    vi.spyOn(harness, 'getOrders').mockResolvedValueOnce([])
+  it('returns zero revenue and orders when no orders in range', async () => {
+    mockFetch.mockResolvedValueOnce(okResponse({ order_list: [] }))
 
-    const result = await harness.getAnalytics({ from: new Date(), to: new Date() })
+    const result = await makeHarness().getAnalytics({ from: new Date(), to: new Date() })
 
     expect(result.revenue).toBe(0)
     expect(result.orders).toBe(0)
   })
 
   it('sets truncated=true when order count reaches the 100 limit', async () => {
-    const harness = makeHarness()
-    const fullPage = Array.from({ length: 100 }, (_, i) => ({
-      id: `o${i}`,
-      status: 'delivered',
-      totalPrice: 10,
-    }))
-    vi.spyOn(harness, 'getOrders').mockResolvedValueOnce(fullPage)
+    const orders = Array.from({ length: 100 }, (_, i) => makeOrder(`o${i}`, '10'))
+    mockFetch.mockResolvedValueOnce(okResponse({ order_list: orders }))
 
-    const result = await harness.getAnalytics({ from: new Date(), to: new Date() })
+    const result = await makeHarness().getAnalytics({ from: new Date(), to: new Date() })
 
     expect(result.truncated).toBe(true)
     expect(result.orders).toBe(100)
   })
 
-  it('returns zero analytics when getOrders throws not_implemented', async () => {
-    const harness = makeHarness()
-    vi.spyOn(harness, 'getOrders').mockRejectedValueOnce(
-      new HarnessError('tiktok', 'not_implemented', 'stub'),
-    )
-    const result = await harness.getAnalytics({ from: new Date(), to: new Date() })
-    expect(result).toEqual({ revenue: 0, orders: 0, truncated: true })
+  it('passes date range as unix timestamps to TikTok API', async () => {
+    mockFetch.mockResolvedValueOnce(okResponse({ order_list: [] }))
+    const from = new Date('2024-06-01T00:00:00Z')
+    const to = new Date('2024-06-30T23:59:59Z')
+
+    await makeHarness().getAnalytics({ from, to })
+
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body as string)
+    expect(body.create_time_ge).toBe(Math.floor(from.getTime() / 1000))
+    expect(body.create_time_lt).toBe(Math.floor(to.getTime() / 1000))
   })
 })
 
@@ -649,10 +675,12 @@ describe('TikTokHarness replyToMessage', () => {
     expect(mockFetch).toHaveBeenCalledTimes(2)
   })
 
-  it('getOpenThreads returns empty array (MVP stub)', async () => {
+  it('getOpenThreads throws not_implemented', async () => {
     const harness = makeHarness()
-    const threads = await harness.getOpenThreads()
-    expect(threads).toEqual([])
+    await expect(harness.getOpenThreads()).rejects.toMatchObject({
+      type: 'harness_error',
+      code: 'not_implemented',
+    })
     expect(mockFetch).not.toHaveBeenCalled()
   })
 })
@@ -671,11 +699,14 @@ describe('TikTokHarness regression', () => {
 
     await expect(harness.getProducts({ limit: 5 })).resolves.toEqual([])
     await expect(harness.getOrders({ limit: 5 })).resolves.toEqual([])
-    await expect(harness.getOpenThreads()).resolves.toEqual([])
+    await expect(harness.getOpenThreads()).rejects.toMatchObject({
+      type: 'harness_error',
+      code: 'not_implemented',
+    })
 
-    vi.spyOn(harness, 'getOrders').mockResolvedValue([
-      { id: 'o1', status: 'paid', totalPrice: 42 },
-    ])
+    mockFetch.mockResolvedValueOnce(okResponse({
+      order_list: [{ order_id: 'o1', status: 'paid', payment_info: { total_amount: '42', currency: 'USD' }, create_time: 1700000000, line_items: [] }],
+    }))
     await expect(harness.getAnalytics({ from: new Date(), to: new Date() })).resolves.toMatchObject({
       revenue: 42,
       orders: 1,

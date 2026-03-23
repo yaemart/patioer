@@ -30,6 +30,7 @@ export const agents = pgTable('agents', {
   type: agentTypeEnum('type').notNull(),
   status: agentStatusEnum('status').notNull().default('active'),
   goalContext: text('goal_context'),
+  systemPrompt: text('system_prompt'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 })

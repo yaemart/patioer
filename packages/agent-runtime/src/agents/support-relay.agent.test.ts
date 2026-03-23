@@ -23,7 +23,8 @@ function createMockContext(
   return {
     tenantId: 'tenant-1',
     agentId: 'agent-1',
-    getHarness: () => harness,
+    getHarness: (_platform?: string) => harness,
+    getEnabledPlatforms: () => ['shopify'],
     llm: vi.fn().mockResolvedValue({ text: 'Thanks for reaching out! We are on it.' }),
     budget: {
       isExceeded: vi.fn().mockResolvedValue(false),
@@ -121,6 +122,7 @@ describe('runSupportRelay', () => {
     await runSupportRelay(ctx, {})
     expect(ctx.logAction).toHaveBeenCalledWith('support_relay.run.started', {
       policy: 'auto_reply_non_refund',
+      recentEventCount: 0,
     })
     expect(ctx.logAction).toHaveBeenCalledWith('support_relay.run.completed', {
       totalThreads: 2,

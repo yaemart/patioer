@@ -31,7 +31,8 @@ function createCtx(overrides?: {
   const ctx: AgentContext = {
     tenantId: 'tenant-a',
     agentId: 'agent-a',
-    getHarness: () => harness,
+    getHarness: (_platform?: string) => harness,
+    getEnabledPlatforms: () => ['shopify'],
     llm: vi.fn().mockResolvedValue({ text: 'ok' }),
     budget: {
       isExceeded: vi.fn().mockResolvedValue(overrides?.budgetExceeded ?? false),

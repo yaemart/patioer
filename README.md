@@ -17,6 +17,24 @@ pnpm install
 pnpm dev
 ```
 
+### 五 Agent 种子（Sprint 4 · Task 4.9 / Day 10）
+
+与 Onboarding「初始化 Agent」同源；需有效 `DATABASE_URL` 与租户 UUID：
+
+```bash
+pnpm seed:agents <tenant-uuid>
+pnpm seed:agents -- --dry-run <tenant-uuid>   # 仅预览，不写库
+pnpm test:scripts                              # 种子逻辑单元测（CI 亦跑）
+```
+
+详见 [docs/ops/agents-seed.md](docs/ops/agents-seed.md)。
+
+### Sprint 4 整体验收（Day 12）
+
+- 验收清单与范围边界：[docs/sprint4/acceptance-checklist.md](docs/sprint4/acceptance-checklist.md)
+- 已知问题 / 豁免：[docs/sprint4/known-issues.md](docs/sprint4/known-issues.md)
+- 演示脚本（Ads / Inventory / Onboarding）与 `pnpm test:ci`：[docs/sprint4/demo-script.md](docs/sprint4/demo-script.md)
+
 如需本地同时启动 API + Paperclip，请先在仓库根目录准备 `paperclip/`（需包含 `package.json`）。
 ## 系统概要
 1. 双层系统概览

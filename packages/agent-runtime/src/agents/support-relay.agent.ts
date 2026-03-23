@@ -14,7 +14,8 @@ export async function runSupportRelay(
 ): Promise<{ relayed: RelayedThread[] }> {
   const policy = input.autoReplyPolicy ?? 'auto_reply_non_refund'
 
-  await ctx.logAction('support_relay.run.started', { policy })
+  const recentEvents = ctx.getRecentEvents ? await ctx.getRecentEvents(5) : []
+  await ctx.logAction('support_relay.run.started', { policy, recentEventCount: recentEvents.length })
 
   if (await ctx.budget.isExceeded()) {
     await ctx.logAction('support_relay.budget_exceeded', { policy })
@@ -39,7 +40,9 @@ export async function runSupportRelay(
     }
 
     const llmResponse = await ctx.llm({
-      prompt: `You are a helpful e-commerce support agent. Draft a concise, friendly reply to the following customer inquiry.\n\nSubject: ${thread.subject}\n\nReply:`,
+      prompt: `Customer inquiry subject: ${thread.subject}\n\nDraft a concise, friendly reply:`,
+      systemPrompt:
+        'You are a helpful e-commerce customer support agent. Reply professionally and concisely. Do not mention internal systems or policies not relevant to the customer.',
     })
 
     await ctx.getHarness().replyToMessage(thread.id, llmResponse.text)

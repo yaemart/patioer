@@ -15,6 +15,10 @@ export type HarnessErrorCode =
   | 'variant_not_found'
   | 'location_not_found'
   | 'json_parse_error'
+  | 'business_error'
+  | 'invalid_param'
+  | 'insufficient_stock'
+  | 'product_not_found'
 
 const httpStatusSet = new Set<string>(HTTP_STATUS_CODES)
 

@@ -1,15 +1,17 @@
 import dotenv from 'dotenv'
 import { buildServer } from './app.js'
-import { bootstrapActiveAgents } from './lib/agent-bootstrap.js'
+import { bootstrapActiveAgents, registerPlatformHarnessFactories } from './lib/agent-bootstrap.js'
 import { createPaperclipBridgeFromEnv } from './lib/paperclip-bridge.js'
 import { closeRedisClient } from './lib/redis.js'
 import { gracefulShutdown } from './lib/graceful-shutdown.js'
 import { replayPendingWebhooks } from './lib/webhook-replay.js'
-import { handleWebhookTopic } from './lib/webhook-topic-handler.js'
+import { registerStubPlatformWebhookHandlers } from './lib/webhook-topic-handler.js'
 import { closeAllQueues, createWorker } from './lib/queue-factory.js'
 import { processWebhookProcessingJob } from './lib/approval-execute-worker.js'
 
 dotenv.config()
+registerPlatformHarnessFactories()
+registerStubPlatformWebhookHandlers()
 
 const rawPort = process.env.PORT
 const port = rawPort !== undefined ? parseInt(rawPort, 10) : 3100
@@ -59,7 +61,7 @@ app
         })
     }
 
-    replayPendingWebhooks(handleWebhookTopic)
+    replayPendingWebhooks()
       .then((r) => {
         if (r.total > 0) app.log.info(r, 'webhook replay complete')
       })
