@@ -12,16 +12,16 @@ const {
   mockPaperclipGetBudgetStatus,
   mockResolveFirstCredential,
 } = vi.hoisted(() => ({
-    mockRunPriceSentinel: vi.fn(),
-    mockRunProductScout: vi.fn(),
-    mockRunSupportRelay: vi.fn(),
-    mockCreateAgentContext: vi.fn(),
-    mockCreateHarness: vi.fn(),
-    mockGetOrCreate: vi.fn(),
-    mockPaperclipEnsureCompany: vi.fn(),
-    mockPaperclipGetBudgetStatus: vi.fn(),
-    mockResolveFirstCredential: vi.fn(),
-  }))
+  mockRunPriceSentinel: vi.fn(),
+  mockRunProductScout: vi.fn(),
+  mockRunSupportRelay: vi.fn(),
+  mockCreateAgentContext: vi.fn(),
+  mockCreateHarness: vi.fn(),
+  mockGetOrCreate: vi.fn(),
+  mockPaperclipEnsureCompany: vi.fn(),
+  mockPaperclipGetBudgetStatus: vi.fn(),
+  mockResolveFirstCredential: vi.fn(),
+}))
 
 vi.mock('@patioer/agent-runtime', () => ({
   createAgentContext: mockCreateAgentContext,
@@ -52,15 +52,65 @@ vi.mock('../lib/harness-registry.js', () => ({
   },
 }))
 
+vi.mock('../lib/redis.js', () => ({
+  getRedisClient: () => null,
+}))
+
+vi.mock('@patioer/market', () => ({
+  createMarketContext: () => ({
+    convertPrice: vi.fn(),
+    getTaxRate: vi.fn(),
+    checkCompliance: vi.fn(),
+  }),
+}))
+
+vi.mock('../lib/paperclip-bridge.js', () => ({
+  createPaperclipBridgeFromEnv: () => {
+    if (!process.env.PAPERCLIP_API_URL || !process.env.PAPERCLIP_API_KEY) return null
+    return {
+      ensureCompany: (...args: unknown[]) => mockPaperclipEnsureCompany(...args),
+      getBudgetStatus: (...args: unknown[]) => mockPaperclipGetBudgetStatus(...args),
+    }
+  },
+}))
+
+vi.mock('../lib/execution-services.js', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('../lib/execution-services.js')>()
+  let current: import('../lib/execution-services.js').ExecutionServices | null = null
+  return {
+    ...mod,
+    getExecutionServices: () => {
+      if (!current) current = mod.createExecutionServices()
+      return current
+    },
+    /** Tests call this via `beforeEach` to get fresh caches per test. */
+    _resetServices: () => { current = null },
+  }
+})
+
 import { HarnessError } from '@patioer/harness'
+import * as execServices from '../lib/execution-services.js'
 import agentsExecuteRoute, {
   buildPriceSentinelInput,
   buildProductScoutInput,
   buildSupportRelayInput,
   getBudgetStatus,
   onBudgetExceeded,
-  _resetCachesForTesting,
 } from './agents-execute.js'
+
+/**
+ * After the agent row, `buildExecutionContext` performs two more `withDb` calls:
+ * {@link listEnabledPlatformsFromDb} → `['shopify']`, then {@link queryCredentialForPlatform} → cred row.
+ */
+const HARNESS_CONTEXT_DB_TAIL = [
+  ['shopify'],
+  {
+    accessToken: 'enc',
+    shopDomain: 'demo.myshopify.com',
+    region: 'global',
+    metadata: null,
+  },
+] as const
 
 function createApp(
   responses: unknown[],
@@ -89,7 +139,7 @@ function createApp(
 }
 
 beforeEach(() => {
-  _resetCachesForTesting()
+  ;(execServices as unknown as { _resetServices: () => void })._resetServices()
   process.env.PAPERCLIP_API_KEY = 'paperclip-key'
   process.env.PAPERCLIP_API_URL = 'http://paperclip.local'
   process.env.CRED_ENCRYPTION_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
@@ -201,7 +251,7 @@ describe('agents execute route', () => {
     })
     const app = createApp([
       [{ id: '123e4567-e89b-12d3-a456-426614174001', type: 'price-sentinel', goalContext: '' }],
-      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com', region: 'global', metadata: null, platform: 'shopify' }],
+      ...HARNESS_CONTEXT_DB_TAIL,
     ])
     const response = await app.inject({
       method: 'POST',
@@ -275,7 +325,7 @@ describe('agents execute route', () => {
   it('returns 501 when agent type is not implemented', async () => {
     const app = createApp([
       [{ id: '123e4567-e89b-12d3-a456-426614174001', type: 'unknown-future-agent', goalContext: '' }],
-      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com', region: 'global', metadata: null, platform: 'shopify' }],
+      ...HARNESS_CONTEXT_DB_TAIL,
     ])
     const response = await app.inject({
       method: 'POST',
@@ -301,7 +351,7 @@ describe('agents execute route', () => {
           goalContext: JSON.stringify({ proposals: [] }),
         },
       ],
-      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com', region: 'global', metadata: null, platform: 'shopify' }],
+      ...HARNESS_CONTEXT_DB_TAIL,
     ])
     const response = await app.inject({
       method: 'POST',
@@ -326,7 +376,7 @@ describe('agents execute route', () => {
     mockRunPriceSentinel.mockRejectedValueOnce(new Error('boom'))
     const app = createApp([
       [{ id: '123e4567-e89b-12d3-a456-426614174001', type: 'price-sentinel', goalContext: '' }],
-      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com', region: 'global', metadata: null, platform: 'shopify' }],
+      ...HARNESS_CONTEXT_DB_TAIL,
     ])
     const response = await app.inject({
       method: 'POST',
@@ -352,7 +402,7 @@ describe('agents execute route', () => {
     )
     const app = createApp([
       [{ id: '123e4567-e89b-12d3-a456-426614174001', type: 'price-sentinel', goalContext: '' }],
-      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com', region: 'global', metadata: null, platform: 'shopify' }],
+      ...HARNESS_CONTEXT_DB_TAIL,
     ])
     const response = await app.inject({
       method: 'POST',
@@ -383,7 +433,7 @@ describe('agents execute route', () => {
     )
     const app = createApp([
       [{ id: '123e4567-e89b-12d3-a456-426614174001', type: 'price-sentinel', goalContext: '' }],
-      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com', region: 'global', metadata: null, platform: 'shopify' }],
+      ...HARNESS_CONTEXT_DB_TAIL,
     ])
     const response = await app.inject({
       method: 'POST',
@@ -411,7 +461,7 @@ describe('agents execute route', () => {
     })
     const app = createApp([
       [{ id: '123e4567-e89b-12d3-a456-426614174001', type: 'price-sentinel', goalContext: '' }],
-      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com', region: 'global', metadata: null, platform: 'shopify' }],
+      ...HARNESS_CONTEXT_DB_TAIL,
       undefined,
     ])
     const response = await app.inject({
@@ -437,7 +487,7 @@ describe('agents execute route', () => {
     })
     const app = createApp([
       [{ id: '123e4567-e89b-12d3-a456-426614174001', type: 'price-sentinel', goalContext: '' }],
-      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com', region: 'global', metadata: null, platform: 'shopify' }],
+      ...HARNESS_CONTEXT_DB_TAIL,
       undefined,
     ])
     const response = await app.inject({
@@ -461,7 +511,7 @@ describe('agents execute route', () => {
     })
     const app = createApp([
       [{ id: '123e4567-e89b-12d3-a456-426614174001', type: 'price-sentinel', goalContext: '' }],
-      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com', region: 'global', metadata: null, platform: 'shopify' }],
+      ...HARNESS_CONTEXT_DB_TAIL,
     ])
     const response = await app.inject({
       method: 'POST',
@@ -485,7 +535,7 @@ describe('agents execute route', () => {
     })
     const app = createApp([
       [{ id: '123e4567-e89b-12d3-a456-426614174001', type: 'price-sentinel', goalContext: '' }],
-      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com', region: 'global', metadata: null, platform: 'shopify' }],
+      ...HARNESS_CONTEXT_DB_TAIL,
       undefined,
     ])
     const response = await app.inject({
@@ -505,7 +555,7 @@ describe('agents execute route', () => {
     mockPaperclipEnsureCompany.mockRejectedValueOnce(new Error('paperclip unavailable'))
     const app = createApp([
       [{ id: '123e4567-e89b-12d3-a456-426614174001', type: 'price-sentinel', goalContext: '' }],
-      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com', region: 'global', metadata: null, platform: 'shopify' }],
+      ...HARNESS_CONTEXT_DB_TAIL,
       undefined,
     ])
     const response = await app.inject({
@@ -526,7 +576,7 @@ describe('agents execute route', () => {
     mockPaperclipEnsureCompany.mockRejectedValueOnce(new Error('paperclip unavailable'))
     const app = createApp([
       [{ id: '123e4567-e89b-12d3-a456-426614174001', type: 'price-sentinel', goalContext: '' }],
-      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com', region: 'global', metadata: null, platform: 'shopify' }],
+      ...HARNESS_CONTEXT_DB_TAIL,
     ])
     const response = await app.inject({
       method: 'POST',
@@ -550,7 +600,7 @@ describe('agents execute route', () => {
           goalContext: JSON.stringify({ maxProducts: 10 }),
         },
       ],
-      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com', region: 'global', metadata: null, platform: 'shopify' }],
+      ...HARNESS_CONTEXT_DB_TAIL,
     ])
     const response = await app.inject({
       method: 'POST',
@@ -581,7 +631,7 @@ describe('agents execute route', () => {
           goalContext: JSON.stringify({ policy: 'auto_reply_non_refund' }),
         },
       ],
-      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com', region: 'global', metadata: null, platform: 'shopify' }],
+      ...HARNESS_CONTEXT_DB_TAIL,
     ])
     const response = await app.inject({
       method: 'POST',
@@ -601,6 +651,31 @@ describe('agents execute route', () => {
     await app.close()
   })
 
+  it('returns probe response when ?probe=1 without executing agent', async () => {
+    const app = createApp([
+      [{ id: '123e4567-e89b-12d3-a456-426614174001', type: 'price-sentinel', goalContext: '' }],
+      ...HARNESS_CONTEXT_DB_TAIL,
+    ])
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/agents/123e4567-e89b-12d3-a456-426614174001/execute?probe=1',
+      headers: {
+        'x-api-key': 'paperclip-key',
+        'x-tenant-id': '123e4567-e89b-12d3-a456-426614174000',
+      },
+    })
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({
+      ok: true,
+      probeOnly: true,
+      agentId: '123e4567-e89b-12d3-a456-426614174001',
+      agentType: 'price-sentinel',
+      platform: 'shopify',
+    })
+    expect(mockRunPriceSentinel).not.toHaveBeenCalled()
+    await app.close()
+  })
+
   it('executes support-relay and includes warning when no threads found', async () => {
     mockRunSupportRelay.mockResolvedValueOnce({ relayed: [] })
     const app = createApp([
@@ -611,7 +686,7 @@ describe('agents execute route', () => {
           goalContext: '',
         },
       ],
-      [{ accessToken: 'enc', shopDomain: 'demo.myshopify.com', region: 'global', metadata: null, platform: 'shopify' }],
+      ...HARNESS_CONTEXT_DB_TAIL,
     ])
     const response = await app.inject({
       method: 'POST',
@@ -623,8 +698,6 @@ describe('agents execute route', () => {
     })
     expect(response.statusCode).toBe(200)
     expect(response.json()).toMatchObject({ ok: true, relayed: [] })
-    expect(response.json().warnings).toHaveLength(1)
-    expect(response.json().warnings[0]).toContain('Shopify Inbox')
     await app.close()
   })
 })

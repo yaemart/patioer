@@ -1,6 +1,8 @@
 node_modules
+.pnpm-store/
 .env
 .env.local
+.env.staging
 .env.staging.local
 dist
 coverage

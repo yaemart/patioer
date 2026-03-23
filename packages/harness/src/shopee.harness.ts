@@ -1,6 +1,8 @@
 import crypto from 'node:crypto'
 import type { TenantHarness } from './base.harness.js'
-import { HarnessError, httpStatusToCode } from './harness-error.js'
+import { HarnessError, httpStatusToCode, type HarnessErrorCode } from './harness-error.js'
+import { getSharedBucket, jitteredBackoff, sleep } from './token-bucket.js'
+import type { TokenBucket } from './token-bucket.js'
 import type { Analytics, DateRange, Order, PaginationOpts, PaginatedResult, Product, Thread } from './types.js'
 import type {
   ShopeeApiResponse,
@@ -15,6 +17,14 @@ import { SHOPEE_MARKET_ENDPOINTS, SHOPEE_SANDBOX_ENDPOINT } from './shopee.types
 
 const MAX_RETRIES = 3
 const BASE_DELAY_MS = 500
+
+function classifyShopeeError(errorKey: string): HarnessErrorCode {
+  if (errorKey.includes('auth') || errorKey.includes('permission')) return 'auth_failed'
+  if (errorKey.includes('param') || errorKey.includes('invalid')) return 'invalid_param'
+  if (errorKey.includes('not_found') || errorKey.includes('item.not_found')) return 'product_not_found'
+  if (errorKey.includes('stock')) return 'insufficient_stock'
+  return 'business_error'
+}
 
 // ── Signing ──────────────────────────────────────────────────────────────────
 
@@ -95,6 +105,7 @@ export function normalizeShopeeOrder(o: ShopeeOrder): Order {
 export class ShopeeHarness implements TenantHarness {
   readonly platformId = 'shopee'
   private readonly baseUrl: string
+  private readonly bucket: TokenBucket
 
   constructor(
     readonly tenantId: string,
@@ -103,6 +114,8 @@ export class ShopeeHarness implements TenantHarness {
     this.baseUrl = credentials.sandbox
       ? SHOPEE_SANDBOX_ENDPOINT
       : SHOPEE_MARKET_ENDPOINTS[credentials.market]
+    const bucketKey = `shopee:${credentials.shopId}`
+    this.bucket = getSharedBucket(bucketKey, { capacity: 10, refillRatePerSecond: 10 })
   }
 
   // ── Internal request layer ────────────────────────────────────────────────
@@ -123,6 +136,7 @@ export class ShopeeHarness implements TenantHarness {
     }
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      await this.bucket.acquire()
       const res = await fetch(url.toString(), {
         method,
         headers: { 'Content-Type': 'application/json' },
@@ -133,7 +147,7 @@ export class ShopeeHarness implements TenantHarness {
       if (!res.ok) {
         const retryable = res.status === 429 || res.status >= 500
         if (retryable && attempt < MAX_RETRIES) {
-          await new Promise((r) => setTimeout(r, BASE_DELAY_MS * 2 ** attempt))
+          await sleep(jitteredBackoff(attempt, BASE_DELAY_MS))
           continue
         }
         throw new HarnessError('shopee', httpStatusToCode(res.status), `Shopee API error ${res.status}`)
@@ -141,7 +155,8 @@ export class ShopeeHarness implements TenantHarness {
 
       const json = (await res.json()) as ShopeeApiResponse<T>
       if (json.error && json.error !== '') {
-        throw new HarnessError('shopee', 'network_error', `Shopee error ${json.error}: ${json.message}`)
+        const code = classifyShopeeError(json.error)
+        throw new HarnessError('shopee', code, `Shopee error ${json.error}: ${json.message}`)
       }
       return json.response as T
     }
@@ -187,9 +202,11 @@ export class ShopeeHarness implements TenantHarness {
     return { items, nextCursor }
   }
 
-  async getProducts(opts?: PaginationOpts): Promise<Product[]> {
+  async getProducts(opts?: PaginationOpts): Promise<Product[] & { truncated?: boolean }> {
     const page = await this.getProductsPage(opts)
-    return page.items
+    const items = page.items as Product[] & { truncated?: boolean }
+    if (page.nextCursor !== undefined) items.truncated = true
+    return items
   }
 
   async updatePrice(productId: string, price: number): Promise<void> {
@@ -253,14 +270,27 @@ export class ShopeeHarness implements TenantHarness {
   }
 
   async getOpenThreads(): Promise<Thread[]> {
-    return []
+    throw new HarnessError(
+      'shopee',
+      'not_implemented',
+      'Shopee seller chat conversation list API not wired — getOpenThreads not available',
+    )
   }
 
   // ── Analytics ─────────────────────────────────────────────────────────────
 
-  async getAnalytics(_range: DateRange): Promise<Analytics> {
-    const orders = await this.getOrders({ limit: 100 })
+  async getAnalytics(range: DateRange): Promise<Analytics> {
+    const PAGE_LIMIT = 100
+    const data = await this.shopeeFetch<ShopeeOrderListResponse>('/api/v2/order/get_order_list', {
+      extra: {
+        time_range_field: 'create_time',
+        time_from: Math.floor(range.from.getTime() / 1000),
+        time_to: Math.floor(range.to.getTime() / 1000),
+        page_size: PAGE_LIMIT,
+      },
+    })
+    const orders = (data.order_list ?? []).map(normalizeShopeeOrder)
     const revenue = orders.reduce((sum, o) => sum + o.totalPrice, 0)
-    return { revenue, orders: orders.length, truncated: orders.length >= 100 }
+    return { revenue, orders: orders.length, truncated: orders.length >= PAGE_LIMIT }
   }
 }

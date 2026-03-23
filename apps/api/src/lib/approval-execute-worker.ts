@@ -4,13 +4,14 @@
  */
 import { and, eq, sql } from 'drizzle-orm'
 import type { Job } from 'bullmq'
+import type { AdsCapableHarness, TenantHarness } from '@patioer/harness'
 import { HarnessError } from '@patioer/harness'
 import { withTenantDb, schema, type AppDb } from '@patioer/db'
 import { z } from 'zod'
 import { registry } from './harness-registry.js'
-import { createHarness } from './harness-factory.js'
+import { getOrCreateHarnessFromCredential } from './harness-from-credential.js'
 import { optionalPlatformZod } from './platform-schema.js'
-import { resolveFirstCredentialForTenant } from './resolve-credential.js'
+import { parseElectroosPlatformFromPayload, resolveFirstCredentialForTenant } from './resolve-credential.js'
 import type { SupportedPlatform } from './harness-factory.js'
 
 const approvalExecutePayloadSchema = z.object({
@@ -25,6 +26,20 @@ const approvalExecutePayloadSchema = z.object({
 const priceUpdatePayloadSchema = z.object({
   productId: z.string().min(1),
   proposedPrice: z.number().finite().positive(),
+})
+
+const adsSetBudgetPayloadSchema = z.object({
+  platform: z.string().min(1),
+  platformCampaignId: z.string().min(1),
+  proposedDailyBudgetUsd: z.number().finite().positive(),
+})
+
+const inventoryAdjustPayloadSchema = z.object({
+  platform: z.string().min(1),
+  /** Platform-native product id (harness `updateInventory` contract). */
+  platformProductId: z.string().min(1),
+  /** Absolute on-hand quantity after restock. */
+  targetQuantity: z.number().int().nonnegative(),
 })
 
 export type ApprovalExecuteJobPayload = z.infer<typeof approvalExecutePayloadSchema>
@@ -65,16 +80,14 @@ async function runPriceUpdateApproved(
   const { cred, platform } = resolved
   const registryKey = `${tenantId}:${platform}`
 
-  let harness: ReturnType<typeof createHarness>
+  let harness: ReturnType<typeof getOrCreateHarnessFromCredential>
   try {
-    harness = registry.getOrCreate(registryKey, () =>
-      createHarness(tenantId, platform, {
-        accessToken: cred.accessToken,
-        shopDomain: cred.shopDomain,
-        region: cred.region,
-        metadata: cred.metadata,
-      }),
-    )
+    harness = getOrCreateHarnessFromCredential(tenantId, platform, {
+      accessToken: cred.accessToken,
+      shopDomain: cred.shopDomain,
+      region: cred.region,
+      metadata: cred.metadata,
+    })
   } catch (err) {
     throw new Error(err instanceof Error ? err.message : 'harness initialization failed', { cause: err })
   }
@@ -98,6 +111,135 @@ async function runPriceUpdateApproved(
         kind: 'price.update',
         productId,
         proposedPrice,
+      } as Record<string, unknown>,
+    })
+  })
+}
+
+async function runAdsBudgetApproved(
+  tenantId: string,
+  agentId: string,
+  approvalId: string,
+  rawPayload: unknown,
+  preferredPlatform?: SupportedPlatform,
+): Promise<void> {
+  const parsed = adsSetBudgetPayloadSchema.safeParse(rawPayload)
+  if (!parsed.success) {
+    throw new Error(`invalid ads.set_budget payload: ${parsed.error.message}`)
+  }
+  const { platformCampaignId, proposedDailyBudgetUsd } = parsed.data
+
+  const platformHint =
+    preferredPlatform ??
+    parseElectroosPlatformFromPayload(rawPayload) ??
+    (parsed.data.platform as SupportedPlatform)
+
+  const resolved = await resolveFirstCredentialForTenant(tenantId, platformHint ?? null)
+  if (!resolved) {
+    throw new Error('No platform credentials found for tenant')
+  }
+
+  const { cred, platform } = resolved
+  const registryKey = `${tenantId}:${platform}`
+
+  let harness: ReturnType<typeof getOrCreateHarnessFromCredential>
+  try {
+    harness = getOrCreateHarnessFromCredential(tenantId, platform, {
+      accessToken: cred.accessToken,
+      shopDomain: cred.shopDomain,
+      region: cred.region,
+      metadata: cred.metadata,
+    })
+  } catch (err) {
+    throw new Error(err instanceof Error ? err.message : 'harness initialization failed', { cause: err })
+  }
+
+  const ads = harness as TenantHarness & AdsCapableHarness
+  if (typeof ads.updateAdsBudget !== 'function') {
+    throw new Error('harness does not implement updateAdsBudget')
+  }
+
+  try {
+    await ads.updateAdsBudget(platformCampaignId, proposedDailyBudgetUsd)
+  } catch (err) {
+    if (err instanceof HarnessError && err.code === '401') {
+      registry.invalidate(registryKey)
+    }
+    throw err
+  }
+
+  await withTenantDb(tenantId, async (db) => {
+    await db.insert(schema.agentEvents).values({
+      tenantId,
+      agentId,
+      action: 'approval.executed',
+      payload: {
+        approvalId,
+        kind: 'ads.set_budget',
+        platformCampaignId,
+        proposedDailyBudgetUsd,
+      } as Record<string, unknown>,
+    })
+  })
+}
+
+async function runInventoryAdjustApproved(
+  tenantId: string,
+  agentId: string,
+  approvalId: string,
+  rawPayload: unknown,
+  preferredPlatform?: SupportedPlatform,
+): Promise<void> {
+  const parsed = inventoryAdjustPayloadSchema.safeParse(rawPayload)
+  if (!parsed.success) {
+    throw new Error(`invalid inventory.adjust payload: ${parsed.error.message}`)
+  }
+  const { platformProductId, targetQuantity } = parsed.data
+
+  const platformHint =
+    preferredPlatform ??
+    parseElectroosPlatformFromPayload(rawPayload) ??
+    (parsed.data.platform as SupportedPlatform)
+
+  const resolved = await resolveFirstCredentialForTenant(tenantId, platformHint ?? null)
+  if (!resolved) {
+    throw new Error('No platform credentials found for tenant')
+  }
+
+  const { cred, platform } = resolved
+  const registryKey = `${tenantId}:${platform}`
+
+  let harness: ReturnType<typeof getOrCreateHarnessFromCredential>
+  try {
+    harness = getOrCreateHarnessFromCredential(tenantId, platform, {
+      accessToken: cred.accessToken,
+      shopDomain: cred.shopDomain,
+      region: cred.region,
+      metadata: cred.metadata,
+    })
+  } catch (err) {
+    throw new Error(err instanceof Error ? err.message : 'harness initialization failed', { cause: err })
+  }
+
+  try {
+    await harness.updateInventory(platformProductId, targetQuantity)
+  } catch (err) {
+    if (err instanceof HarnessError && err.code === '401') {
+      registry.invalidate(registryKey)
+    }
+    throw err
+  }
+
+  await withTenantDb(tenantId, async (db) => {
+    await db.insert(schema.agentEvents).values({
+      tenantId,
+      agentId,
+      action: 'approval.executed',
+      payload: {
+        approvalId,
+        kind: 'inventory.adjust',
+        platformProductId,
+        targetQuantity,
       } as Record<string, unknown>,
     })
   })
@@ -145,6 +287,12 @@ export async function processApprovalExecuteJob(data: unknown): Promise<void> {
       break
     case 'support.escalate':
       await runSupportEscalateApproved(tenantId, agentId, approvalId, payload)
+      break
+    case 'ads.set_budget':
+      await runAdsBudgetApproved(tenantId, agentId, approvalId, payload, platform)
+      break
+    case 'inventory.adjust':
+      await runInventoryAdjustApproved(tenantId, agentId, approvalId, payload, platform)
       break
     default:
       await withTenantDb(tenantId, async (db) => {

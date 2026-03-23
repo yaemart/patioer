@@ -63,4 +63,12 @@ describe('RLS migration safety', () => {
     expect(sql).not.toContain('ALTER TABLE tenants ENABLE ROW LEVEL SECURITY')
     expect(sql).not.toContain('ON tenants')
   })
+
+  it('0004 ads/inventory migration enables RLS with tenant_isolation policies', () => {
+    const sql = readFileSync(join(migrationsDir, '0004_ads_inventory.sql'), 'utf8')
+    expect(sql).toContain('CREATE POLICY tenant_isolation_ads_campaigns ON ads_campaigns')
+    expect(sql).toContain('CREATE POLICY tenant_isolation_inventory_levels ON inventory_levels')
+    expect(sql).toContain("current_setting('app.tenant_id')::uuid")
+    expect(sql).toContain('FORCE ROW LEVEL SECURITY')
+  })
 })

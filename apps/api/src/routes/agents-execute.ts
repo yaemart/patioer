@@ -1,122 +1,31 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify'
 import { z } from 'zod'
-import { and, eq } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import { schema } from '@patioer/db'
 import { HarnessError } from '@patioer/harness'
-import {
-  createAgentContext,
-  runPriceSentinel,
-  runProductScout,
-  runSupportRelay,
-  type PriceSentinelRunInput,
-  type ProductScoutRunInput,
-  type SupportRelayRunInput,
-} from '@patioer/agent-runtime'
-import type { PaperclipBridge } from '@patioer/agent-runtime'
+import { createAgentContext } from '@patioer/agent-runtime'
 import { registry } from '../lib/harness-registry.js'
-import { createHarness, type SupportedPlatform } from '../lib/harness-factory.js'
-import { resolveFirstCredential } from '../lib/resolve-credential.js'
-import { createPaperclipBridgeFromEnv } from '../lib/paperclip-bridge.js'
+import { getOrCreateHarnessFromCredential } from '../lib/harness-from-credential.js'
+import type { SupportedPlatform } from '../lib/harness-factory.js'
+import { SUPPORTED_PLATFORMS } from '../lib/supported-platforms.js'
+import {
+  listEnabledPlatformsFromDb,
+  queryCredentialForPlatform,
+  resolveFirstCredential,
+} from '../lib/resolve-credential.js'
 import { createIssueForAgentTicket } from '../lib/agent-paperclip-ticket.js'
 import { verifyPaperclipAuth } from '../lib/paperclip-auth.js'
+import { createLlmProvider } from '../lib/llm-client.js'
+import { getRunner, type ExecuteAgentResponse } from '../lib/agent-registry.js'
+import { getExecutionServices } from '../lib/execution-services.js'
+import type { BudgetStatus } from '../lib/execution-services.js'
 
 const paramsSchema = z.object({ id: z.string().uuid() })
 
-import type { PriceDecision, ScoutedProduct, RelayedThread } from '@patioer/agent-runtime'
+export type { BudgetStatus }
 
-interface ExecuteAgentResponse {
-  ok: true
-  agentId: string
-  executedAt: string
-  decisions?: PriceDecision[]
-  scouted?: ScoutedProduct[]
-  relayed?: RelayedThread[]
-  warnings?: string[]
-}
-
-export interface BudgetStatus {
-  exceeded: boolean
-  remaining: number
-}
-
-const LLM_STUB_PREVIEW_MAX = 80
-
-/**
- * Safe preview string for the execute-route LLM stub — avoids throwing when
- * `params` or `prompt` is missing, null, or not a string (agents may pass invalid data).
- */
-export function previewPromptForLlmStub(params: unknown): string {
-  if (params === null || params === undefined || typeof params !== 'object') {
-    return ''
-  }
-  const raw = (params as { prompt?: unknown }).prompt
-  if (raw === null || raw === undefined) return ''
-  if (typeof raw === 'string') {
-    return raw.length <= LLM_STUB_PREVIEW_MAX ? raw : raw.slice(0, LLM_STUB_PREVIEW_MAX)
-  }
-  try {
-    return String(raw).slice(0, LLM_STUB_PREVIEW_MAX)
-  } catch {
-    return ''
-  }
-}
-
-let _bridgeInstance: PaperclipBridge | null = null
-
-function getBridge(): PaperclipBridge | null {
-  if (!_bridgeInstance) {
-    _bridgeInstance = createPaperclipBridgeFromEnv()
-  }
-  return _bridgeInstance
-}
-
-const _companyIdCache = new Map<string, string>()
-
-async function resolveCompanyId(bridge: PaperclipBridge, tenantId: string): Promise<string> {
-  const cached = _companyIdCache.get(tenantId)
-  if (cached) return cached
-  const company = await bridge.ensureCompany({ tenantId, name: `tenant-${tenantId}` })
-  _companyIdCache.set(tenantId, company.id)
-  return company.id
-}
-
-const _budgetCache = new Map<string, { status: BudgetStatus; expiresAt: number }>()
-const BUDGET_CACHE_TTL_MS = 30_000
-
-export function _resetCachesForTesting(): void {
-  _bridgeInstance = null
-  _companyIdCache.clear()
-  _budgetCache.clear()
-}
-
-export async function getBudgetStatus(tenantId: string, agentId: string): Promise<BudgetStatus> {
-  if (process.env.AGENT_BUDGET_FORCE_EXCEEDED === '1') {
-    return { exceeded: true, remaining: 0 }
-  }
-
-  const bridge = getBridge()
-  if (!bridge) {
-    return { exceeded: false, remaining: Number.POSITIVE_INFINITY }
-  }
-
-  const cacheKey = `${tenantId}:${agentId}`
-  const cached = _budgetCache.get(cacheKey)
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached.status
-  }
-
-  try {
-    const companyId = await resolveCompanyId(bridge, tenantId)
-    const raw = await bridge.getBudgetStatus(companyId, agentId)
-    const result: BudgetStatus = { exceeded: raw.exceeded, remaining: raw.remainingUsd }
-    _budgetCache.set(cacheKey, { status: result, expiresAt: Date.now() + BUDGET_CACHE_TTL_MS })
-    return result
-  } catch {
-    if (process.env.AGENT_BUDGET_FAIL_OPEN === '1') {
-      return { exceeded: false, remaining: Number.POSITIVE_INFINITY }
-    }
-    return { exceeded: true, remaining: 0 }
-  }
+export function getBudgetStatus(tenantId: string, agentId: string): Promise<BudgetStatus> {
+  return getExecutionServices().getBudgetStatus(tenantId, agentId)
 }
 
 export async function onBudgetExceeded(
@@ -140,44 +49,17 @@ export async function onBudgetExceeded(
   })
 }
 
-function parseGoalContext(goalContext: string): Record<string, unknown> | null {
-  if (!goalContext) return null
-  try {
-    return JSON.parse(goalContext) as Record<string, unknown>
-  } catch {
-    return null
-  }
-}
-
-export function buildPriceSentinelInput(goalContext: string): PriceSentinelRunInput {
-  const parsed = parseGoalContext(goalContext)
-  if (parsed && Array.isArray(parsed.proposals)) {
-    return parsed as unknown as PriceSentinelRunInput
-  }
-  return { proposals: [] }
-}
-
-export function buildProductScoutInput(goalContext: string): ProductScoutRunInput {
-  const parsed = parseGoalContext(goalContext)
-  if (!parsed) return {}
-  return {
-    maxProducts: typeof parsed.maxProducts === 'number' ? parsed.maxProducts : undefined,
-  }
-}
-
-export function buildSupportRelayInput(goalContext: string): SupportRelayRunInput {
-  const parsed = parseGoalContext(goalContext)
-  if (!parsed) return {}
-  const policy = parsed.policy ?? parsed.autoReplyPolicy
-  if (policy === 'auto_reply_non_refund' || policy === 'all_manual') {
-    return { autoReplyPolicy: policy }
-  }
-  return {}
-}
+export {
+  buildPriceSentinelInput,
+  buildProductScoutInput,
+  buildSupportRelayInput,
+  buildAdsOptimizerInput,
+  buildInventoryGuardInput,
+} from '../lib/agent-inputs.js'
 
 type AgentContext = ReturnType<typeof createAgentContext>
 type ExecutionLoadResult =
-  | { ok: true; agentRow: { id: string; type: string; goalContext: string | null }; ctx: AgentContext; platform: SupportedPlatform }
+  | { ok: true; agentRow: { id: string; type: string; goalContext: string | null; systemPrompt: string | null }; ctx: AgentContext; platform: SupportedPlatform }
   | { ok: false; statusCode: number; body: { error: string } }
 
 async function buildExecutionContext(
@@ -202,183 +84,199 @@ async function buildExecutionContext(
 
   const resolved = await resolveFirstCredential(request)
   if (!resolved) {
-    return {
-      ok: false,
-      statusCode: 404,
-      body: { error: 'No platform credentials found' },
-    }
+    return { ok: false, statusCode: 404, body: { error: 'No platform credentials found' } }
   }
 
-  const { cred, platform } = resolved
+  const { platform } = resolved
   const registryKey = `${request.tenantId}:${platform}`
 
-  let harness: ReturnType<typeof createHarness>
+  const enabledPlatforms = await request.withDb((db) =>
+    listEnabledPlatformsFromDb(db, request.tenantId!),
+  )
+
+  const harnessByPlatform = new Map<SupportedPlatform, ReturnType<typeof getOrCreateHarnessFromCredential>>()
   try {
-    harness = registry.getOrCreate(registryKey, () =>
-      createHarness(request.tenantId!, platform, {
-        accessToken: cred.accessToken,
-        shopDomain: cred.shopDomain,
-        region: cred.region,
-        metadata: cred.metadata,
-      }),
-    )
+    for (const p of enabledPlatforms) {
+      const row = await request.withDb((db) =>
+        queryCredentialForPlatform(db, request.tenantId!, p),
+      )
+      if (!row) continue
+      harnessByPlatform.set(
+        p,
+        getOrCreateHarnessFromCredential(request.tenantId!, p, {
+          accessToken: row.accessToken,
+          shopDomain: row.shopDomain,
+          region: row.region,
+          metadata: row.metadata,
+        }),
+      )
+    }
   } catch (err) {
-    // createHarness can throw (missing CRED_ENCRYPTION_KEY, invalid Amazon metadata, etc.).
-    // Catch here so the route handler's try/catch (HarnessError / agent execution) is not bypassed.
     request.log.warn({ err, registryKey, platform }, 'createHarness failed during agent execution load')
     return {
       ok: false,
       statusCode: 502,
-      body: {
-        error: err instanceof Error ? err.message : 'harness initialization failed',
-      },
+      body: { error: err instanceof Error ? err.message : 'harness initialization failed' },
     }
   }
 
+  const defaultHarness = harnessByPlatform.get(platform)
+  if (!defaultHarness) {
+    request.log.warn(
+      { tenantId: request.tenantId, platform, enabledPlatforms },
+      'default harness missing from multi-platform map',
+    )
+    return { ok: false, statusCode: 502, body: { error: 'harness initialization failed' } }
+  }
+
+  request.log.info(
+    { tenantId: request.tenantId, agentId: agentRow.id, enabledPlatforms, defaultPlatform: platform },
+    'agent.execute.context.ready',
+  )
+
   const ctx = createAgentContext(
+    { tenantId: request.tenantId, agentId: agentRow.id },
     {
-      tenantId: request.tenantId,
-      agentId: agentRow.id,
-    },
-    {
-      harness: { getHarness: (_tenantId, _agentId) => harness },
+      harness: buildHarnessDeps(harnessByPlatform, defaultHarness, enabledPlatforms),
       budget: {
-        isExceeded: async (tenantId, executedAgentId) =>
-          (await getBudgetStatus(tenantId, executedAgentId)).exceeded,
+        isExceeded: async (tid, aid) => (await getExecutionServices().getBudgetStatus(tid, aid)).exceeded,
       },
-      audit: {
-        logAction: async (tenantId, executedAgentId, action, payload) => {
-          await request.withDb!(async (db) => {
-            await db.insert(schema.agentEvents).values({
-              tenantId,
-              agentId: executedAgentId,
-              action,
-              payload,
-            })
-          })
-        },
-      },
-      approvals: {
-        requestApproval: async (tenantId, executedAgentId, params) => {
-          await request.withDb!(async (db) => {
-            await db.insert(schema.approvals).values({
-              tenantId,
-              agentId: executedAgentId,
-              action: params.action,
-              payload: {
-                ...(params.payload as Record<string, unknown>),
-                /** Same harness platform as execute route / x-platform resolution. */
-                electroosPlatform: platform,
-              },
-              status: 'pending',
-            })
-          })
-        },
-      },
-      tickets: {
-        createTicket: async (tenantId, executedAgentId, params) => {
-          const bridge = getBridge()
-          const paperclip = await createIssueForAgentTicket(bridge, tenantId, executedAgentId, params)
-          await request.withDb!(async (db) => {
-            await db.insert(schema.agentEvents).values({
-              tenantId,
-              agentId: executedAgentId,
-              action: 'ticket.create',
-              payload: {
-                title: params.title,
-                body: params.body,
-                ...paperclip,
-              } as Record<string, unknown>,
-            })
-          })
-          if (paperclip.paperclipError) {
-            request.log.warn(
-              { err: paperclip.paperclipError, tenantId, agentId: executedAgentId },
-              'Paperclip createIssue failed; ticket.create audit event still recorded',
-            )
-          }
-        },
-      },
-      llm: {
-        complete: async (params, _context) => ({
-          text: `[LLM stub] No model configured. Prompt: ${previewPromptForLlmStub(params)}`,
-        }),
-      },
+      audit: buildAuditDeps(request),
+      approvals: buildApprovalDeps(request, platform),
+      tickets: buildTicketDeps(request),
+      llm: createLlmProvider(agentRow.systemPrompt),
+      market: getExecutionServices().getMarketContext(),
+      approvalsQuery: buildApprovalsQueryDeps(request),
+      events: buildEventsDeps(request),
     },
   )
 
   return {
     ok: true,
-    agentRow: {
-      id: agentRow.id,
-      type: agentRow.type,
-      goalContext: agentRow.goalContext,
-    },
+    agentRow: { id: agentRow.id, type: agentRow.type, goalContext: agentRow.goalContext, systemPrompt: agentRow.systemPrompt },
     ctx,
     platform,
   }
 }
 
+function buildHarnessDeps(
+  harnessByPlatform: Map<SupportedPlatform, ReturnType<typeof getOrCreateHarnessFromCredential>>,
+  defaultHarness: ReturnType<typeof getOrCreateHarnessFromCredential>,
+  enabledPlatforms: SupportedPlatform[],
+) {
+  return {
+    getHarness: (_tenantId: string, _agentId: string, platformKey?: string) => {
+      if (!platformKey || platformKey === '') return defaultHarness
+      const n = platformKey.trim().toLowerCase()
+      if (!SUPPORTED_PLATFORMS.includes(n as SupportedPlatform)) {
+        throw new Error(`Unknown platform "${platformKey}" (expected one of: ${SUPPORTED_PLATFORMS.join(', ')})`)
+      }
+      const h = harnessByPlatform.get(n as SupportedPlatform)
+      if (!h) throw new Error(`Platform "${n}" is not connected for this tenant`)
+      return h
+    },
+    getEnabledPlatforms: () => [...enabledPlatforms],
+  }
+}
+
+function buildAuditDeps(request: FastifyRequest) {
+  return {
+    logAction: async (tenantId: string, agentId: string, action: string, payload: unknown) => {
+      await request.withDb!(async (db) => {
+        await db.insert(schema.agentEvents).values({ tenantId, agentId, action, payload })
+      })
+    },
+  }
+}
+
+function buildApprovalDeps(request: FastifyRequest, defaultPlatform: string) {
+  return {
+    requestApproval: async (tenantId: string, agentId: string, params: { action: string; payload: unknown }) => {
+      const payloadObj = (params.payload ?? {}) as Record<string, unknown>
+      const explicitPlatform =
+        typeof payloadObj.platform === 'string' ? payloadObj.platform : undefined
+      await request.withDb!(async (db) => {
+        await db.insert(schema.approvals).values({
+          tenantId,
+          agentId,
+          action: params.action,
+          payload: { ...payloadObj, electroosPlatform: explicitPlatform ?? defaultPlatform },
+          status: 'pending',
+        })
+      })
+    },
+  }
+}
+
+function buildTicketDeps(request: FastifyRequest) {
+  return {
+    createTicket: async (tenantId: string, agentId: string, params: { title: string; body: string }) => {
+      const bridge = getExecutionServices().getBridge()
+      const paperclip = await createIssueForAgentTicket(bridge, tenantId, agentId, params)
+      await request.withDb!(async (db) => {
+        await db.insert(schema.agentEvents).values({
+          tenantId,
+          agentId,
+          action: 'ticket.create',
+          payload: { title: params.title, body: params.body, ...paperclip } as Record<string, unknown>,
+        })
+      })
+      if (paperclip.paperclipError) {
+        request.log.warn(
+          { err: paperclip.paperclipError, tenantId, agentId },
+          'Paperclip createIssue failed; ticket.create audit event still recorded',
+        )
+      }
+    },
+  }
+}
+
+function buildApprovalsQueryDeps(request: FastifyRequest) {
+  return {
+    listPending: async (tenantId: string, agentId: string) => {
+      if (!request.withDb) return []
+      return request.withDb((db) =>
+        db.select().from(schema.approvals).where(
+          and(
+            eq(schema.approvals.tenantId, tenantId),
+            eq(schema.approvals.agentId, agentId),
+            eq(schema.approvals.status, 'pending'),
+          ),
+        ),
+      )
+    },
+  }
+}
+
+function buildEventsDeps(request: FastifyRequest) {
+  return {
+    getRecent: async (tenantId: string, agentId: string, limit: number) => {
+      if (!request.withDb) return []
+      return request.withDb((db) =>
+        db.select().from(schema.agentEvents)
+          .where(and(eq(schema.agentEvents.tenantId, tenantId), eq(schema.agentEvents.agentId, agentId)))
+          .orderBy(desc(schema.agentEvents.createdAt))
+          .limit(limit),
+      )
+    },
+  }
+}
+
 async function executeAgentByType(
+  request: FastifyRequest,
   agentRow: { id: string; type: string; goalContext: string | null },
   ctx: AgentContext,
 ): Promise<ExecuteAgentResponse | null> {
-  switch (agentRow.type) {
-    case 'price-sentinel': {
-      const input = buildPriceSentinelInput(agentRow.goalContext ?? '')
-      const result = await runPriceSentinel(ctx, input)
-      return {
-        ok: true,
-        agentId: agentRow.id,
-        executedAt: new Date().toISOString(),
-        decisions: result.decisions,
-      }
-    }
-    case 'product-scout': {
-      const input = buildProductScoutInput(agentRow.goalContext ?? '')
-      const result = await runProductScout(ctx, input)
-      return {
-        ok: true,
-        agentId: agentRow.id,
-        executedAt: new Date().toISOString(),
-        scouted: result.scouted,
-      }
-    }
-    case 'support-relay': {
-      const input = buildSupportRelayInput(agentRow.goalContext ?? '')
-      const result = await runSupportRelay(ctx, input)
-      const warnings: string[] = []
-      if (result.relayed.length === 0) {
-        warnings.push('Shopify Inbox API not integrated in Phase 1 MVP — getOpenThreads returns empty')
-      }
-      return {
-        ok: true,
-        agentId: agentRow.id,
-        executedAt: new Date().toISOString(),
-        relayed: result.relayed,
-        ...(warnings.length > 0 ? { warnings } : {}),
-      }
-    }
-    case 'ads-optimizer':
-    case 'inventory-guard': {
-      await ctx.logAction('agent.execute.stub', { type: agentRow.type })
-      return {
-        ok: true,
-        agentId: agentRow.id,
-        executedAt: new Date().toISOString(),
-        warnings: [`${agentRow.type} runtime not yet implemented — scheduled for Sprint 3`],
-      }
-    }
-    default:
-      return null
-  }
+  const runner = getRunner(agentRow.type)
+  if (!runner) return null
+  return runner(request, agentRow, ctx)
 }
 
 const agentsExecuteRoute: FastifyPluginAsync = async (app) => {
   app.post('/api/v1/agents/:id/execute', {
     schema: { tags: ['Agent Execution'], summary: 'Execute an agent', security: [{ apiKey: [], tenantId: [] }] },
   }, async (request, reply) => {
-    const authReply = verifyPaperclipAuth(request, reply)
+    const authReply = await verifyPaperclipAuth(request, reply)
     if (authReply) return authReply
     if (!request.withDb || !request.tenantId) {
       return reply.code(401).send({ error: 'x-tenant-id required' })
@@ -396,13 +294,23 @@ const agentsExecuteRoute: FastifyPluginAsync = async (app) => {
     }
     const { agentRow, ctx, platform } = loaded
 
+    if ((request.query as Record<string, string>)?.probe === '1') {
+      return reply.send({
+        ok: true,
+        probeOnly: true,
+        agentId: agentRow.id,
+        agentType: agentRow.type,
+        platform,
+      })
+    }
+
     try {
-      const budget = await getBudgetStatus(request.tenantId, agentRow.id)
+      const budget = await getExecutionServices().getBudgetStatus(request.tenantId, agentRow.id)
       if (budget.exceeded) {
         await onBudgetExceeded(request, request.tenantId, agentRow.id, { remaining: budget.remaining })
         return reply.code(409).send({ error: 'budget exceeded', remaining: budget.remaining })
       }
-      const response = await executeAgentByType(agentRow, ctx)
+      const response = await executeAgentByType(request, agentRow, ctx)
       if (!response) {
         return reply.code(501).send({ error: `agent type ${agentRow.type} not implemented` })
       }

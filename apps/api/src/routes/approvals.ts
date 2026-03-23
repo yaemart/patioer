@@ -10,6 +10,7 @@ const paramsSchema = z.object({ id: z.string().uuid() })
 
 const listQuerySchema = z.object({
   status: z.enum(['pending', 'approved', 'rejected']).optional(),
+  agentId: z.string().uuid().optional(),
 })
 
 const resolveBodySchema = z.object({
@@ -33,18 +34,10 @@ const approvalsRoute: FastifyPluginAsync = async (app) => {
     }
 
     const rows = await request.withDb((db) => {
-      if (query.data.status) {
-        return db
-          .select()
-          .from(schema.approvals)
-          .where(
-            and(
-              eq(schema.approvals.tenantId, request.tenantId!),
-              eq(schema.approvals.status, query.data.status),
-            ),
-          )
-      }
-      return db.select().from(schema.approvals).where(eq(schema.approvals.tenantId, request.tenantId!))
+      const conditions = [eq(schema.approvals.tenantId, request.tenantId!)]
+      if (query.data.status) conditions.push(eq(schema.approvals.status, query.data.status))
+      if (query.data.agentId) conditions.push(eq(schema.approvals.agentId, query.data.agentId))
+      return db.select().from(schema.approvals).where(and(...conditions))
     })
 
     return reply.send({ approvals: rows })

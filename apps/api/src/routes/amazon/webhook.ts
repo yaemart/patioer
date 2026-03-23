@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify'
 import { withTenantDb, schema } from '@patioer/db'
 import { randomUUID } from 'node:crypto'
+import { handleAmazonWebhook, type AmazonTopic } from '../../lib/webhook-topic-handler.js'
 
 interface SnsNotification {
   Type: string
@@ -71,6 +72,10 @@ const amazonWebhookRoute: FastifyPluginAsync = async (app) => {
       app.log.error({ err, tenantId }, 'failed to persist Amazon SNS notification')
       return reply.code(500).send({ error: 'failed to persist notification' })
     }
+
+    // Dispatch to registered handler (best-effort; no throw on missing handler)
+    const amazonTopic = `amazon:${notification.Subject ?? notification.Type ?? 'unknown'}` as AmazonTopic
+    await handleAmazonWebhook(tenantId, amazonTopic, notification)
 
     return reply.code(200).send({ ok: true })
   })

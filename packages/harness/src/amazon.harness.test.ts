@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AmazonHarness } from './amazon.harness.js'
 import type { AmazonCredentials } from './amazon.types.js'
+import { resetSharedBuckets } from './token-bucket.js'
 
 const mockFetch = vi.fn()
 vi.stubGlobal('fetch', mockFetch)
@@ -34,6 +35,7 @@ function ok(body: unknown) {
 afterEach(() => {
   mockFetch.mockReset()
   vi.useRealTimers()
+  resetSharedBuckets()
 })
 
 describe('AmazonHarness token refresh', () => {
@@ -187,7 +189,7 @@ describe('AmazonHarness core methods', () => {
         price: null,
         inventory: null,
         sku: 'SKU-1',
-        currency: undefined,
+        currency: 'USD',
         platformMeta: { platform: 'amazon', asin: 'B001', source: 'catalog-items' },
       },
     ])
@@ -412,10 +414,11 @@ describe('AmazonHarness messaging', () => {
     })
   })
 
-  it('getOpenThreads returns empty array in MVP mode', async () => {
-    const threads = await makeHarness().getOpenThreads()
-
-    expect(threads).toEqual([])
+  it('getOpenThreads throws not_implemented', async () => {
+    await expect(makeHarness().getOpenThreads()).rejects.toMatchObject({
+      type: 'harness_error',
+      code: 'not_implemented',
+    })
     expect(mockFetch).not.toHaveBeenCalled()
   })
 })
@@ -523,5 +526,51 @@ describe('AmazonHarness rate limiting', () => {
 
     // 1 token + 6 api calls (attempt 0..5 = MAX_RETRIES 5, last throws)
     expect(mockFetch).toHaveBeenCalledTimes(7)
+  })
+})
+
+// ─── Phase 2 · Sprint 3 Day 9: useSandbox endpoint switching ─────────────────
+
+describe('AmazonHarness useSandbox endpoint switching', () => {
+  it('AmazonHarness useSandbox=true uses sandbox endpoint', async () => {
+    // When useSandbox is true the harness should hit the sandbox base URL.
+    mockFetch
+      .mockResolvedValueOnce(ok({ access_token: 'tok', token_type: 'bearer', expires_in: 3600 }))
+      .mockResolvedValueOnce(ok({ items: [], pagination: {} }))
+
+    const harness = new AmazonHarness('tenant-1', makeCredentials({ useSandbox: true }))
+    await harness.getProductsPage()
+
+    const [, apiCall] = mockFetch.mock.calls
+    expect(String(apiCall?.[0])).toContain('sandbox.sellingpartnerapi-na.amazon.com')
+  })
+
+  it('AmazonHarness useSandbox=false uses production endpoint', async () => {
+    // When useSandbox is explicitly false the harness should hit the production URL.
+    mockFetch
+      .mockResolvedValueOnce(ok({ access_token: 'tok', token_type: 'bearer', expires_in: 3600 }))
+      .mockResolvedValueOnce(ok({ items: [], pagination: {} }))
+
+    const harness = new AmazonHarness('tenant-1', makeCredentials({ useSandbox: false }))
+    await harness.getProductsPage()
+
+    const [, apiCall] = mockFetch.mock.calls
+    const url = String(apiCall?.[0])
+    expect(url).toContain('sellingpartnerapi-na.amazon.com')
+    expect(url).not.toContain('sandbox.')
+  })
+
+  it('AmazonHarness defaults to sandbox endpoint when useSandbox is undefined', async () => {
+    // useSandbox omitted → defaults to true (sandbox) for safety.
+    mockFetch
+      .mockResolvedValueOnce(ok({ access_token: 'tok', token_type: 'bearer', expires_in: 3600 }))
+      .mockResolvedValueOnce(ok({ items: [], pagination: {} }))
+
+    // makeCredentials() does not set useSandbox, so it is undefined
+    const harness = new AmazonHarness('tenant-1', makeCredentials())
+    await harness.getProductsPage()
+
+    const [, apiCall] = mockFetch.mock.calls
+    expect(String(apiCall?.[0])).toContain('sandbox.sellingpartnerapi-na.amazon.com')
   })
 })

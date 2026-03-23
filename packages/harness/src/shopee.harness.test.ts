@@ -7,6 +7,7 @@
  */
 import { createHmac } from 'node:crypto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { resetSharedBuckets } from './token-bucket.js'
 import {
   buildShopeeSign,
   buildShopeeQuery,
@@ -81,6 +82,7 @@ function httpErrorResponse(status: number) {
 afterEach(() => {
   mockFetch.mockReset()
   vi.useRealTimers()
+  resetSharedBuckets()
 })
 
 // ── CARD-D12-02: buildShopeeSign ─────────────────────────────────────────────
@@ -290,7 +292,7 @@ describe('ShopeeHarness shopeeFetch', () => {
     await expect(internal.shopeeFetch('/api/v2/product/get_item_list')).rejects.toMatchObject({
       type: 'harness_error',
       platform: 'shopee',
-      code: 'network_error',
+      code: 'product_not_found',
     })
   })
 
@@ -505,7 +507,7 @@ describe('ShopeeHarness updatePrice', () => {
     await expect(makeHarness().updatePrice('1', 10)).rejects.toMatchObject({
       type: 'harness_error',
       platform: 'shopee',
-      code: 'network_error',
+      code: 'invalid_param',
     })
   })
 })
@@ -637,9 +639,11 @@ describe('ShopeeHarness multi-market endpoints (Day13)', () => {
 // ── getOpenThreads (unchanged MVP) ───────────────────────────────────────────
 
 describe('ShopeeHarness getOpenThreads', () => {
-  it('returns empty array without calling fetch', async () => {
-    const threads = await makeHarness().getOpenThreads()
-    expect(threads).toEqual([])
+  it('throws not_implemented', async () => {
+    await expect(makeHarness().getOpenThreads()).rejects.toMatchObject({
+      type: 'harness_error',
+      code: 'not_implemented',
+    })
     expect(mockFetch).not.toHaveBeenCalled()
   })
 })
@@ -680,9 +684,9 @@ describe('ShopeeHarness regression', () => {
     const harness = new ShopeeHarness('tenant-regression', mockShopeeCredentials)
     await expect(harness.getProducts()).resolves.toEqual([])
 
-    vi.spyOn(harness, 'getOrders').mockResolvedValue([
-      { id: 'sn1', status: 'COMPLETED', totalPrice: 25.5 },
-    ])
+    mockFetch.mockResolvedValueOnce(okResponse({
+      order_list: [{ order_sn: 'sn1', order_status: 'COMPLETED', total_amount: 25.5 }],
+    }))
     await expect(harness.getAnalytics({ from: new Date(), to: new Date() })).resolves.toMatchObject({
       revenue: 25.5,
       orders: 1,

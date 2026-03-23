@@ -2,9 +2,11 @@ import Fastify from 'fastify'
 import sensible from '@fastify/sensible'
 import swagger from '@fastify/swagger'
 import swaggerUi from '@fastify/swagger-ui'
+import metricsPlugin from './plugins/metrics.js'
 import tenantPlugin from './plugins/tenant.js'
 import healthRoute from './routes/health.js'
 import tenantDiscoveryRoute from './routes/tenant-discovery.js'
+import onboardingRoute from './routes/onboarding.js'
 import shopifyOauthRoute from './routes/shopify/oauth.js'
 import shopifyWebhookRoute from './routes/shopify/webhook.js'
 import productsRoute from './routes/products.js'
@@ -19,16 +21,21 @@ import tikTokWebhookRoute from './routes/tiktok/webhook.js'
 import shopeeOAuthRoute from './routes/shopee/oauth.js'
 import shopeeWebhookRoute from './routes/shopee/webhook.js'
 import platformCredentialsRoute from './routes/platform-credentials.js'
+import adsInventoryRoute from './routes/ads-inventory.js'
+import agentEventsRoute from './routes/agent-events.js'
 
 export const buildServer = () => {
   const app = Fastify({ logger: true })
+
+  // Register metrics plugin first so the onResponse hook covers all routes
+  app.register(metricsPlugin)
 
   app.register(swagger, {
     openapi: {
       info: {
         title: 'ElectroOS API',
         description:
-          'ElectroOS multi-tenant API: agents, approvals, Shopify / Amazon / TikTok / Shopee OAuth & webhooks, Paperclip execution. Optional header x-platform (shopify|amazon|tiktok|shopee) pins harness credential selection for sync/execute routes.',
+          'ElectroOS multi-tenant API: onboarding (tenant register), agents, approvals, Shopify / Amazon / TikTok / Shopee OAuth & webhooks, Paperclip execution. Optional header x-platform (shopify|amazon|tiktok|shopee) pins harness credential selection for sync/execute routes.',
         version: '0.1.0',
       },
       servers: [{ url: `http://localhost:${process.env.PORT ?? 3100}` }],
@@ -46,6 +53,7 @@ export const buildServer = () => {
   app.register(tenantPlugin)
   app.register(healthRoute)
   app.register(tenantDiscoveryRoute)
+  app.register(onboardingRoute)
   app.register(shopifyOauthRoute)
   app.register(shopifyWebhookRoute)
   app.register(productsRoute)
@@ -60,6 +68,8 @@ export const buildServer = () => {
   app.register(shopeeOAuthRoute, { prefix: '/api/v1/shopee' })
   app.register(shopeeWebhookRoute)
   app.register(platformCredentialsRoute)
+  app.register(adsInventoryRoute)
+  app.register(agentEventsRoute)
 
   return app
 }

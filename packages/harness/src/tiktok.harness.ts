@@ -1,7 +1,8 @@
 import crypto from 'node:crypto'
 import type { TenantHarness } from './base.harness.js'
-import { HarnessError, httpStatusToCode } from './harness-error.js'
-import { jitteredBackoff, sleep } from './token-bucket.js'
+import { HarnessError, httpStatusToCode, type HarnessErrorCode } from './harness-error.js'
+import { getSharedBucket, jitteredBackoff, sleep } from './token-bucket.js'
+import type { TokenBucket } from './token-bucket.js'
 import type {
   Analytics,
   DateRange,
@@ -21,6 +22,14 @@ import type {
 } from './tiktok.types.js'
 
 const TIKTOK_BASE_URL = 'https://open-api.tiktokshop.com'
+
+function classifyTikTokError(code: number): HarnessErrorCode {
+  if (code === 105 || code === 106) return 'auth_failed'
+  if (code >= 200 && code < 300) return 'invalid_param'
+  if (code === 500 || code === 501) return 'product_not_found'
+  if (code === 600) return 'insufficient_stock'
+  return 'business_error'
+}
 const MAX_RETRIES = 3
 const BASE_DELAY_MS = 500
 const FETCH_TIMEOUT_MS = 15_000
@@ -101,11 +110,15 @@ export function normalizeTikTokProduct(p: TikTokProduct): Product {
 
 export class TikTokHarness implements TenantHarness {
   readonly platformId = 'tiktok'
+  private readonly bucket: TokenBucket
 
   constructor(
     readonly tenantId: string,
     private readonly credentials: TikTokCredentials,
-  ) {}
+  ) {
+    const bucketKey = `tiktok:${credentials.shopId ?? tenantId}`
+    this.bucket = getSharedBucket(bucketKey, { capacity: 10, refillRatePerSecond: 10 })
+  }
 
   // ── Internal request layer ────────────────────────────────────────────────
 
@@ -139,6 +152,7 @@ export class TikTokHarness implements TenantHarness {
     }
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      await this.bucket.acquire()
       const res = await fetch(url.toString(), {
         method,
         headers: { 'Content-Type': 'application/json' },
@@ -157,7 +171,8 @@ export class TikTokHarness implements TenantHarness {
 
       const json = (await res.json()) as TikTokApiResponse<T>
       if (json.code !== 0) {
-        throw new HarnessError('tiktok', 'network_error', `TikTok error ${json.code}: ${json.message}`)
+        const code = classifyTikTokError(json.code)
+        throw new HarnessError('tiktok', code, `TikTok error ${json.code}: ${json.message}`)
       }
       return json.data as T
     }
@@ -194,15 +209,18 @@ export class TikTokHarness implements TenantHarness {
     return { items, nextCursor: data.next_page_token }
   }
 
-  async getProducts(opts?: PaginationOpts): Promise<Product[]> {
+  async getProducts(opts?: PaginationOpts): Promise<Product[] & { truncated?: boolean }> {
     const page = await this.getProductsPage(opts)
-    return page.items
+    const items = page.items as Product[] & { truncated?: boolean }
+    if (page.nextCursor !== undefined) items.truncated = true
+    return items
   }
 
   // ── Price & Inventory ─────────────────────────────────────────────────────
 
   async updatePrice(productId: string, price: number): Promise<void> {
-    // TikTok updates price at the SKU level via the product edit endpoint
+    const product = await this.getProduct(productId)
+    const currency = product?.currency ?? this.credentials.currency ?? 'USD'
     await this.tikTokFetch(`/api/products/${productId}`, {
       method: 'PUT',
       body: {
@@ -210,7 +228,7 @@ export class TikTokHarness implements TenantHarness {
           {
             price: {
               amount: price.toFixed(2),
-              currency: 'USD',
+              currency,
             },
           },
         ],
@@ -273,24 +291,30 @@ export class TikTokHarness implements TenantHarness {
   }
 
   async getOpenThreads(): Promise<Thread[]> {
-    // MVP: Sprint 3 will wire /api/customer_service/conversations
-    return []
+    throw new HarnessError(
+      'tiktok',
+      'not_implemented',
+      'TikTok customer_service/conversations API not wired — getOpenThreads not available',
+    )
   }
 
   // ── Analytics ─────────────────────────────────────────────────────────────
 
-  async getAnalytics(_range: DateRange): Promise<Analytics> {
-    // MVP: aggregate from recent orders; full Reports API deferred to Phase 3.
-    // getOrders becomes available in Day11 — until then this returns zeroed data.
-    try {
-      const orders = await this.getOrders({ limit: 100 })
-      const revenue = orders.reduce((sum, o) => sum + o.totalPrice, 0)
-      return { revenue, orders: orders.length, truncated: orders.length >= 100 }
-    } catch (err) {
-      if (err instanceof HarnessError && err.code === 'not_implemented') {
-        return { revenue: 0, orders: 0, truncated: true }
-      }
-      throw err
+  async getAnalytics(range: DateRange): Promise<Analytics> {
+    const PAGE_LIMIT = 100
+    const body: Record<string, unknown> = {
+      page_size: PAGE_LIMIT,
+      create_time_ge: Math.floor(range.from.getTime() / 1000),
+      create_time_lt: Math.floor(range.to.getTime() / 1000),
     }
+
+    const data = await this.tikTokFetch<TikTokOrderListData>('/api/orders/search', {
+      method: 'POST',
+      body,
+    })
+
+    const orders = (data.order_list ?? []).map(normalizeTikTokOrder)
+    const revenue = orders.reduce((sum, o) => sum + o.totalPrice, 0)
+    return { revenue, orders: orders.length, truncated: orders.length >= PAGE_LIMIT }
   }
 }

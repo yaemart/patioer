@@ -1,12 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { mockWithTenantDb, mockResolveFirstCredentialForTenant, mockGetOrCreate, mockHarnessUpdatePrice } =
-  vi.hoisted(() => ({
-    mockWithTenantDb: vi.fn(),
-    mockResolveFirstCredentialForTenant: vi.fn(),
-    mockGetOrCreate: vi.fn(),
-    mockHarnessUpdatePrice: vi.fn(),
-  }))
+const {
+  mockWithTenantDb,
+  mockResolveFirstCredentialForTenant,
+  mockGetOrCreate,
+  mockHarnessUpdatePrice,
+  mockHarnessUpdateAdsBudget,
+  mockHarnessUpdateInventory,
+} = vi.hoisted(() => ({
+  mockWithTenantDb: vi.fn(),
+  mockResolveFirstCredentialForTenant: vi.fn(),
+  mockGetOrCreate: vi.fn(),
+  mockHarnessUpdatePrice: vi.fn(),
+  mockHarnessUpdateAdsBudget: vi.fn(),
+  mockHarnessUpdateInventory: vi.fn(),
+}))
 
 vi.mock('@patioer/db', async () => {
   const actual = await vi.importActual<typeof import('@patioer/db')>('@patioer/db')
@@ -16,9 +24,13 @@ vi.mock('@patioer/db', async () => {
   }
 })
 
-vi.mock('./resolve-credential.js', () => ({
-  resolveFirstCredentialForTenant: mockResolveFirstCredentialForTenant,
-}))
+vi.mock('./resolve-credential.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./resolve-credential.js')>()
+  return {
+    ...actual,
+    resolveFirstCredentialForTenant: mockResolveFirstCredentialForTenant,
+  }
+})
 
 vi.mock('./harness-registry.js', () => ({
   registry: {
@@ -30,6 +42,8 @@ vi.mock('./harness-registry.js', () => ({
 vi.mock('./harness-factory.js', () => ({
   createHarness: vi.fn(() => ({
     updatePrice: mockHarnessUpdatePrice,
+    updateAdsBudget: mockHarnessUpdateAdsBudget,
+    updateInventory: mockHarnessUpdateInventory,
   })),
 }))
 
@@ -42,6 +56,8 @@ const APPROVAL = '123e4567-e89b-12d3-a456-426614174002'
 beforeEach(() => {
   vi.clearAllMocks()
   mockHarnessUpdatePrice.mockResolvedValue(undefined)
+  mockHarnessUpdateAdsBudget.mockResolvedValue(undefined)
+  mockHarnessUpdateInventory.mockResolvedValue(undefined)
   mockResolveFirstCredentialForTenant.mockResolvedValue({
     cred: { accessToken: 't', shopDomain: 'test.myshopify.com' },
     platform: 'shopify',
@@ -195,5 +211,73 @@ describe('processApprovalExecuteJob', () => {
     expect(inserts.some((row) => (row as { payload?: { kind?: string } }).payload?.kind === 'support.escalate')).toBe(
       true,
     )
+  })
+
+  it('applies ads.set_budget via updateAdsBudget', async () => {
+    mockWithTenantDb.mockImplementation(async (_tid: string, cb: (db: unknown) => Promise<unknown>) => {
+      const db = {
+        select: vi.fn().mockReturnValue({
+          from: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue([]),
+            }),
+          }),
+        }),
+        insert: vi.fn().mockReturnValue({
+          values: vi.fn().mockResolvedValue(undefined),
+        }),
+      }
+      return cb(db)
+    })
+
+    await processApprovalExecuteJob({
+      tenantId: TENANT,
+      agentId: AGENT,
+      approvalId: APPROVAL,
+      action: 'ads.set_budget',
+      payload: {
+        platform: 'shopify',
+        platformCampaignId: 'camp-1',
+        proposedDailyBudgetUsd: 506,
+      },
+      platform: 'shopify',
+    })
+
+    expect(mockHarnessUpdateAdsBudget).toHaveBeenCalledWith('camp-1', 506)
+    expect(mockHarnessUpdateInventory).not.toHaveBeenCalled()
+  })
+
+  it('applies inventory.adjust via updateInventory', async () => {
+    mockWithTenantDb.mockImplementation(async (_tid: string, cb: (db: unknown) => Promise<unknown>) => {
+      const db = {
+        select: vi.fn().mockReturnValue({
+          from: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue([]),
+            }),
+          }),
+        }),
+        insert: vi.fn().mockReturnValue({
+          values: vi.fn().mockResolvedValue(undefined),
+        }),
+      }
+      return cb(db)
+    })
+
+    await processApprovalExecuteJob({
+      tenantId: TENANT,
+      agentId: AGENT,
+      approvalId: APPROVAL,
+      action: 'inventory.adjust',
+      payload: {
+        platform: 'shopify',
+        platformProductId: 'p-99',
+        targetQuantity: 120,
+      },
+      platform: 'shopify',
+    })
+
+    expect(mockHarnessUpdateInventory).toHaveBeenCalledWith('p-99', 120)
+    expect(mockHarnessUpdateAdsBudget).not.toHaveBeenCalled()
   })
 })

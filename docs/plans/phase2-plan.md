@@ -7003,6 +7003,409 @@ Day 10 │ 全量回归 (≥ 80% 覆盖率) + Sprint 验收清单 + CI 绿灯
 - [ ] 5 Agent 种子一键初始化
 - [ ] Onboarding 4 步完整流程 < 30 分钟
 
+#### Sprint 4 · 每日实施计划（Day by day）
+
+> **前提（Sprint 3 末 CARD-D10-04）：** `AgentContext` 扩展方案已定稿；`ads_campaigns` / `inventory_levels` 字段与 RLS 策略已评审。  
+> **半天粒度：** 以下「上午 / 下午」按各约 3.5–4h 有效开发时间计，可按实际会议弹性微调。
+
+**方案 A — 2 人并行（推荐）**
+
+| Day | 开发者 A（Agent / Governance / Seed） | 开发者 B（Schema / API / Onboarding） |
+|-----|----------------------------------------|----------------------------------------|
+| 1 上午 | 4.1 `AgentContext`：`getHarness` / `getEnabledPlatforms` / `market` 注入（启动） | 4.2 `ads_campaigns` + `inventory_levels` Drizzle + migration 草稿 |
+| 1 下午 | 4.1 继续：与 `HarnessRegistry`、执行路径联调 | 4.2 收尾：RLS policy、与现有 `0001` 风格对齐；本地 migrate 验证 |
+| 2 上午 | 4.3 Ads Optimizer：心跳 schedule、跨平台拉数骨架 | 4.5 + 4.6：广告 / 库存 GET routes（读 DB + 鉴权/租户） |
+| 2 下午 | 4.3：ROAS 目标、日预算分支、与 Ticket/审批钩子 | 4.5/4.6 收尾 + route 冒烟测试 |
+| 3 上午 | 4.3：聚合逻辑、日志与 `agent_events`（若已有） | 4.8 Onboarding：Step 1–2（register + OAuth 回调骨架） |
+| 3 下午 | 4.3 收尾；开始 4.7：`setAdsBudget` >$500 → 待审批 | 4.8：Step 3–4（Agent 初始化 + 健康检查 API 壳） |
+| 4 上午 | 4.4 Inventory Guard：08:00 cron、跨平台 `getInventoryLevels` | 4.8 与 4.1 对接：执行链上 `getHarness` 实测 |
+| 4 下午 | 4.4：阈值告警、补货建议 Ticket | 4.8 收尾：四步串起来、错误码与超时 |
+| 5 上午 | 4.7：Governance 收尾（`adjustInventory` 需人工确认） | 4.10：每平台 Harness 探测 + 心跳触发验证 |
+| 5 下午 | 4.9 `agents.seed.ts` 五 Agent 种子 | 4.10 收尾；与 A 联调 Onboarding 端到端 |
+| 6 | 双人联调：§Sprint 4 验收清单逐项过、P0/P1 缺陷 | 同左 |
+| 7–8 | 全量回归、`pnpm vitest`、CI 绿、演示租户数据 | 同左 |
+| 9–10 | 缓冲：补测试、文档缺口；**可选** OpenAPI 条目（与 Sprint 6 Task 6.7 衔接） | 可选 |
+
+**方案 B — 1 人串行（无并行）**
+
+> 以下按 **任务 · 质量门禁 · 交付与验收** 组织，实施时以 **当日验收项全部打勾** 为 Day Done；未达标则 **不进入下一日**。
+
+**总览（任务映射）**
+
+> **说明：** 下表按 **每个工作日同级展开**（与上文「Day 1」粒度一致）。单人串行时原合并项（如 4.3 两日、4.8 两日）拆成 **Day 1–Day 12**；若迭代强约束 **10 个日历日**，可将 **Day 4+5**、**Day 8+9**、**Day 11+12** 按组合并实施，验收表仍按条目逐项勾验。
+
+| Day | 覆盖任务 | 粗粒度产出 |
+|-----|----------|------------|
+| 1 | 4.1 | `AgentContext` 多平台 + `MarketContext` 注入可执行 |
+| 2 | 4.2 | `ads_campaigns` / `inventory_levels` + migration + RLS |
+| 3 | 4.5、4.6 | 广告 / 库存只读 API |
+| 4 | 4.3（上） | Ads Optimizer：调度 / 跨平台拉数 / 骨架与可观测 |
+| 5 | 4.3（下） | Ads Optimizer：ROAS / 日预算分支 / 与审批钩子对接 |
+| 6 | 4.4 | Inventory Guard Agent 全量 |
+| 7 | 4.7 | Governance：`setAdsBudget` / `adjustInventory` 门控 |
+| 8 | 4.8（上） | Onboarding：注册 + 平台授权（OAuth 回调） |
+| 9 | 4.8（下） | Onboarding：Agent 初始化 + 健康检查 API |
+| 10 | 4.9 | 五 Agent `agents.seed.ts` |
+| 11 | 4.10 | Onboarding 健康检查（Harness + 心跳） |
+| 12 | — | Sprint 4 整体验收与回归 |
+
+---
+
+##### Day 1 · Task 4.1 — `AgentContext` 多平台 + `MarketContext`
+
+**任务（当日必须完成的工作单元）**
+
+1. **接口与类型**：在 `packages/agent-runtime`（或当前 `AgentContext` 定义处）扩展 `AgentContext`：`getHarness(platform?: string)`、`getEnabledPlatforms(): string[]`、`market: MarketContext`；与 §5.4 / Sprint 3 已定稿方案一致。  
+2. **实现**：从租户已授权平台（如 `platform_credentials` + `HarnessRegistry`）解析 `getEnabledPlatforms()`；`getHarness(platform)` 返回对应 `TenantHarness`，未授权平台行为明确（抛错或 `null` 策略写清并一致）。  
+3. **注入**：`MarketContext` 使用 `packages/market` 已有实现（S3.5），在执行链（如 `/api/v1/agents/:id/execute` 构建 context 处）完成注入，避免 Agent 内重复 new。  
+4. **联调最小闭环**：至少一条真实或集成测试路径调用 `getHarness` + `market`（可为 test double），确保非「仅编译通过」。
+
+**质量门禁（当日合并前必须满足）**
+
+- **测试**：新增或扩展单测/集成测，覆盖「多平台列表非空」「请求某平台 harness」「`market.convertPrice` 或等价方法可被调用」；相关包 `pnpm vitest run` 通过。  
+- **类型与安全**：不放宽 `strict`；对 `platform` 字符串建议与现有 harness 注册名对齐（大小写约定文档化）。  
+- **租户隔离**：`getEnabledPlatforms` / `getHarness` 仅基于**当前请求租户**数据，不泄漏其他租户凭证信息。  
+- **可观测**：日志或现有 metrics 中可区分「多平台 context 构建成功 / 失败原因」（无需新指标也可，至少结构化日志一条）。
+
+**交付物与验收标准（Day 1 结束可签字）**
+
+| 序号 | 交付物 | 验收标准（满足即 ✓） |
+|------|--------|----------------------|
+| D1-01 | 代码合并 | `AgentContext` 扩展已合入主开发分支，CI 绿。 |
+| D1-02 | `getHarness` / `getEnabledPlatforms` | 测试用例中断言行为与产品设计一致；未授权平台错误可预期。 |
+| D1-03 | `market` 注入 | 执行路径中 Agent 或测试桩可访问 `ctx.market`，且来自 `packages/market`。 |
+| D1-04 | 文档 | 代码旁或 `docs/` 短注：`platform` 可选时的语义、平台名与 Registry 键名对照。 |
+
+**当日不纳入（避免范围蔓延）**：不实现 Ads/Inventory 业务逻辑（属 4.3–4.4）；不写 `ads_campaigns` 表（属 Day 2）。
+
+---
+
+##### Day 2 · Task 4.2 — `ads_campaigns` + `inventory_levels`（Drizzle + migration + RLS）
+
+**任务（当日必须完成的工作单元）**
+
+1. **Drizzle schema**：在 `packages/db` 增加 `ads_campaigns`、`inventory_levels` 表定义，字段与 §4.2 `ads_campaigns` / §4.3 `inventory_levels` 及外键（`tenant_id`、`product_id` 等）一致。  
+2. **SQL migration**：新增 migration 文件（如 `0002_phase2.sql` 或仓库下一序号）；`ENABLE ROW LEVEL SECURITY` / `FORCE ROW LEVEL SECURITY`；`tenant_isolation` policy 与 `0001_rls.sql` 风格一致。  
+3. **导出与类型**：`packages/db` 对外 re-export；迁移在本地 PG **up** 成功；若有 seed 占位行，不污染生产策略。  
+4. **RLS 验证**：编写测试或脚本：在 `set_config('app.tenant_id', ...)` 下仅能读写本租户行；跨租户 `SELECT` 为空或拒绝。
+
+**质量门禁（当日合并前必须满足）**
+
+- **迁移**：`down`/`up` 或团队约定的一次性策略明确；CI 或本地文档记录如何应用。  
+- **一致性**：表名、列名与 §4 文档、后续 4.5/4.6 API 约定对齐，避免 Day 3 大规模改名。  
+- **测试**：至少 1 个针对 RLS 或 repository 的自动化测试（可为 integration）。  
+- **无业务逻辑**：本日不写 Ads Agent、不写 HTTP route（属 Day 3+）。
+
+**交付物与验收标准（Day 2 结束可签字）**
+
+| 序号 | 交付物 | 验收标准（满足即 ✓） |
+|------|--------|----------------------|
+| D2-01 | Schema 代码 | 两表 Drizzle 定义已合并，TypeScript 无报错。 |
+| D2-02 | Migration | 本地/CI PG 执行 migration 成功，`\d` 可见新表。 |
+| D2-03 | RLS | Policy 生效；自动化或记录在案的跨租户否定用例通过。 |
+| D2-04 | 导出 | 其他包可 `import` 新表类型；无循环依赖。 |
+
+**当日不纳入**：`GET /api/v1/ads/*`、`/inventory/*`（属 Day 3）；Agent 同步写表（属 4.3/4.4）。
+
+---
+
+##### Day 3 · Task 4.5、4.6 — 广告 / 库存只读 API
+
+**任务（当日必须完成的工作单元）**
+
+1. **路由**：实现 `GET /api/v1/ads/campaigns`、`GET /api/v1/ads/performance`、`GET /api/v1/inventory`、`GET /api/v1/inventory/alerts`（路径以项目现有 `/api/v1` 惯例为准）。  
+2. **数据**：从 Day 2 表读取；空表返回稳定 JSON（如 `[]` / `{ "items": [] }`，与项目统一）。  
+3. **安全**：与现有路由相同的 auth + 租户解析；`tenant_id` 来自会话/RLS，禁止 query 参数跨租户。  
+4. **注册**：在 `app.ts` 或路由聚合处注册；与 smoke test 列表同步（若项目有 `app.smoke.test.ts`）。
+
+**质量门禁（当日合并前必须满足）**
+
+- **测试**：每路由至少 handler 单测或集成测 1 则；401/403/200 行为明确。  
+- **性能**：列表查询带 `tenant` 限定；大表预留 `limit`（若已有分页中间件则接入）。  
+- **文档**：响应 JSON 形状在代码注释或 OpenAPI 草稿中可查找（可与 Sprint 6.7 合并补全）。
+
+**交付物与验收标准（Day 3 结束可签字）**
+
+| 序号 | 交付物 | 验收标准（满足即 ✓） |
+|------|--------|----------------------|
+| D3-01 | 四路由可用 | 带有效租户凭证时四端点均 200；形态符合约定。 |
+| D3-02 | 鉴权 | 无凭证 / 错误租户时行为与现有 API 一致。 |
+| D3-03 | 测试 | 相关 `vitest` 通过；CI 绿。 |
+| D3-04 | 可观测 | 错误路径有日志级别与 request id（若项目已有）。 |
+
+**当日不纳入**：Ads Optimizer 定时写库（属 4.3）；Governance 写预算（属 Day 7）。
+
+---
+
+##### Day 4 · Task 4.3（上）— Ads Optimizer：调度、跨平台拉数、骨架
+
+**任务（当日必须完成的工作单元）**
+
+1. **Agent 骨架**：在 `packages/agent-runtime`（或约定目录）建立 Ads Optimizer Agent 模块；与 Paperclip/心跳约定对齐（**每 4h** 触发配置可查）。  
+2. **多平台**：通过 `ctx.getEnabledPlatforms()` / `ctx.getHarness(platform)` 拉取各平台广告能力（`isAdsCapable` 等 §5.1）；无能力平台跳过并记日志。  
+3. **数据落库**：将同步结果写入 `ads_campaigns`（或先内存再写入，以当日可测为准）；`synced_at` 更新。  
+4. **可观测**：结构化日志含 `agentId`、`platforms`、`runId`；若已有 metrics，增加计数或 histogram 钩子（可选）。
+
+**质量门禁（当日合并前必须满足）**
+
+- **测试**：对「多平台列表为空」「单平台 mock」「写库失败」至少各 1 条覆盖。  
+- **幂等**：重复执行不产生重复主键或唯一冲突（依赖 `platform_campaign_id` 唯一策略）。  
+- **不完成 ROAS/审批**：复杂策略可留 Day 5，但代码边界清晰（TODO 与接口分离）。
+
+**交付物与验收标准（Day 4 结束可签字）**
+
+| 序号 | 交付物 | 验收标准（满足即 ✓） |
+|------|--------|----------------------|
+| D4-01 | 调度 | 配置或 cron 表达式可证明 4h 周期；本地可手动触发一次 run。 |
+| D4-02 | 跨平台拉数 | 日志中可见每平台尝试结果；mock 下全路径可跑通。 |
+| D4-03 | 持久化 | `ads_campaigns` 有合理行或等价集成测断言。 |
+| D4-04 | CI | 相关测试绿，无 flaky。 |
+
+**当日不纳入**：ROAS ≥ 3x 完整策略、日预算 >$500 审批闭环（属 Day 5–7）；Inventory Agent（属 Day 6）。
+
+---
+
+##### Day 5 · Task 4.3（下）— Ads Optimizer：ROAS、日预算分支、审批钩子
+
+**任务（当日必须完成的工作单元）**
+
+1. **策略**：实现 ROAS 目标与优化动作（调 bid / 调 budget）的**决策模块**；边界条件单测覆盖。  
+2. **日预算 >$500**：在调用 `updateAdsBudget` 前计算新日预算；若 \>$500（或约定货币换算后）则 **不直接写平台**，改为创建/关联审批 Ticket（与现有 Ticket 模型一致）；Day 7 将加固为最终 Governance。  
+3. **联调**：至少一次端到端：mock harness 或沙盒下「需审批」路径产生 Ticket 记录或日志等价物。  
+4. **日志**：每次 run 输出「触发原因」「是否进入审批」可检索关键词。
+
+**质量门禁（当日合并前必须满足）**
+
+- **测试**：ROAS 纯函数测试；日预算 499 vs 501（或美分整数）边界测试。  
+- **安全**：审批前绝无未授权写操作调用。  
+- **与 §Sprint 4 对齐**：验收项「每 4h 触发」「日预算 >$500 触发审批 Ticket」本日可演示或自动化断言。
+
+**交付物与验收标准（Day 5 结束可签字）**
+
+| 序号 | 交付物 | 验收标准（满足即 ✓） |
+|------|--------|----------------------|
+| D5-01 | ROAS 逻辑 | 单测覆盖主要分支；与产品目标（如 ≥3x）一致。 |
+| D5-02 | 审批分支 | \>$500 时走 Ticket，不调用平台写 budget。 |
+| D5-03 | 可观测 | 日志满足 §Sprint 4「日志可查」的最低要求。 |
+| D5-04 | 回归 | Day 4 测试仍绿；无破坏性改动。 |
+
+**当日不纳入**：Governance 统一门控抽象（属 Day 7）；Inventory（Day 6）。
+
+---
+
+##### Day 6 · Task 4.4 — Inventory Guard Agent
+
+**任务（当日必须完成的工作单元）**
+
+1. **调度**：每日 **08:00** 触发（时区文档化：`TZ` 或租户默认时区策略二选一并写明）。  
+2. **库存**：`isInventoryCapable` 各平台 `getInventoryLevels`；聚合写入/对比 `inventory_levels`；`status` 与 `safety_threshold` 更新。  
+3. **告警**：低于阈值生成 **补货建议 Ticket**（类型与现有 Ticket 一致）；含 SKU/平台/建议数量等上下文。  
+4. **联调**：低库存场景可在测试中用固定数据触发。
+
+**质量门禁（当日合并前必须满足）**
+
+- **测试**：cron 解析或时区单测；低库存路径单测；空库存/零阈值边界。  
+- **租户隔离**：仅当前租户库存参与判断。  
+- **与 §Sprint 对齐**：「每天 08:00」「低库存 Ticket」可验证。
+
+**交付物与验收标准（Day 6 结束可签字）**
+
+| 序号 | 交付物 | 验收标准（满足即 ✓） |
+|------|--------|----------------------|
+| D6-01 | 调度 | 08:00 规则可配置且文档化；手动触发可测。 |
+| D6-02 | 数据 | `inventory_levels` 反映同步结果；状态机合理。 |
+| D6-03 | Ticket | 低库存时创建 Ticket；内容可人工读懂。 |
+| D6-04 | 测试 | `vitest` 覆盖核心路径；CI 绿。 |
+
+**当日不纳入**：`adjustInventory` 人工确认门控（属 Day 7）；Onboarding（Day 8–9）。
+
+---
+
+##### Day 7 · Task 4.7 — Governance Gates
+
+**任务（当日必须完成的工作单元）**
+
+1. **`setAdsBudget`**：统一入口：凡日预算调整 \>$500 必须 **已审批** 才调用 Harness；与 Day 5 Ticket 状态机对接（`approved` / `pending`）。  
+2. **`adjustInventory`**：补货数量或金额超阈值时 **需人工确认**；未确认不调用 `adjustInventory`。  
+3. **落点**：门控放在 API 层或 Agent 调用栈的单一 choke point，避免重复检查。  
+4. **审计**：可选 `agent_events` 或审计表记录「拒绝原因」「审批 id」。
+
+**质量门禁（当日合并前必须满足）**
+
+- **测试**：499/501、`pending` 审批、`approved` 后成功写；inventory 未确认拒绝写。  
+- **一致性**：与 Day 5–6 行为无矛盾；文档更新门控规则摘要。
+
+**交付物与验收标准（Day 7 结束可签字）**
+
+| 序号 | 交付物 | 验收标准（满足即 ✓） |
+|------|--------|----------------------|
+| D7-01 | 广告门控 | 未批准时零平台写；批准后写成功且可追踪。 |
+| D7-02 | 库存门控 | 未确认时零 `adjustInventory` 调用。 |
+| D7-03 | 单测 | 边界与状态组合覆盖；CI 绿。 |
+| D7-04 | 文档 | 门控规则与 Ticket 状态对照表（短注即可）。 |
+
+**当日不纳入**：Onboarding UI（Phase 3）；DevOS（Sprint 5）。
+
+---
+
+##### Day 8 · Task 4.8（上）— Onboarding：注册 + 平台授权
+
+**任务（当日必须完成的工作单元）**
+
+1. **Step 1 注册**：`POST` 创建租户、初始化 RLS、与现有 `tenants` 流程一致；返回后续 OAuth 所需 id/令牌。  
+2. **Step 2 授权**：平台选择 → OAuth/LWA/HMAC 等按现有 `platform_credentials` 扩展字段落地；回调路由保存加密 token；`HarnessRegistry` 可解析。  
+3. **错误**：重复注册、OAuth 失败、state 不匹配等返回码稳定；敏感信息不入日志。  
+4. **测试**：注册 + 单平台 mock OAuth 回调集成测（可用 stub）。
+
+**质量门禁（当日合并前必须满足）**
+
+- **安全**：HTTPS/回调 URL 配置校验；state/nonce；token 加密存储与 Phase 1 一致。  
+- **测试**：至少 1 条集成路径；401/400 覆盖。
+
+**交付物与验收标准（Day 8 结束可签字）**
+
+| 序号 | 交付物 | 验收标准（满足即 ✓） |
+|------|--------|----------------------|
+| D8-01 | 注册 API | 新租户可创建且 DB 可查；RLS 上下文可设置。 |
+| D8-02 | OAuth 回调 | 至少一平台完整回调链路（真实或沙盒）。 |
+| D8-03 | 凭证 | `platform_credentials` 行正确；Harness 可实例化。 |
+| D8-04 | 日志 | 无 token 明文；错误可诊断。 |
+
+**当日不纳入**：Agent 初始化与心跳（属 Day 9）；`agents.seed`（Day 10）。
+
+---
+
+##### Day 9 · Task 4.8（下）— Onboarding：Agent 初始化 + 健康检查 API
+
+**任务（当日必须完成的工作单元）**
+
+1. **Step 3**：执行或触发 `agents.seed` 等价逻辑（若 Day 10 才脚本化，本日至少 API 可调通创建 5 Agent 记录 + Paperclip 注册 + 预算占位）。  
+2. **Step 4 壳**：`GET` 或 `POST` 健康检查端点：定义「每平台一次轻量 Harness 调用」的接口契约（具体探测与 Day 11 可分层）。  
+3. **串联**：从 Step 1 到 Step 4 可脚本化顺序执行；总耗时目标为 §「&lt; 30 分钟」留足 OAuth 人工时间。  
+4. **文档**：四步顺序、环境变量、常见失败码一页内可读完。
+
+**质量门禁（当日合并前必须满足）**
+
+- **测试**：四步集成测或 e2e（可 headless mock）。  
+- **超时**：每步默认超时与重试策略写明。
+
+**交付物与验收标准（Day 9 结束可签字）**
+
+| 序号 | 交付物 | 验收标准（满足即 ✓） |
+|------|--------|----------------------|
+| D9-01 | Agent 初始化 | 5 Agent 业务上可创建（与 Day 10 种子一致或可合并）。 |
+| D9-02 | 健康 API | 端点存在且返回结构化 JSON（含每平台状态占位）。 |
+| D9-03 | 流程 | 计时一次完整四步 &lt; 30 min（文档记前提：含人工点击）。 |
+| D9-04 | 测试 | 集成测绿；无 P0 泄漏。 |
+
+**当日不纳入**：生产级心跳端到端（Day 11）；种子脚本 polish（Day 10）。
+
+---
+
+##### Day 10 · Task 4.9 — `agents.seed.ts` 五 Agent
+
+**任务（当日必须完成的工作单元）**
+
+1. **扩展种子**：在 `scripts/`（或约定路径）将 Agent 扩至 **5** 个：保留原 3 + **Ads Optimizer** + **Inventory Guard**；id/slug 稳定。  
+2. **依赖**：与 Paperclip、DB、预算字段一致；重复执行语义文档化（upsert / skip）。  
+3. **CI**：若允许，增加 dry-run 或短 smoke；否则 Makefile/README 一条命令可复制。  
+4. **对齐**：与 Day 9 Onboarding 中「初始化 Agent」使用同一数据来源或调用同一模块。
+
+**质量门禁（当日合并前必须满足）**
+
+- **幂等**：二次执行不爆炸、不重复扣费/预算（若适用）。  
+- **测试**：脚本级或单元测覆盖核心分支。
+
+**交付物与验收标准（Day 10 结束可签字）**
+
+| 序号 | 交付物 | 验收标准（满足即 ✓） |
+|------|--------|----------------------|
+| D10-01 | 五 Agent | §「5 Agent 种子一键初始化」命令成功。 |
+| D10-02 | 一致性 | Dashboard/DB 中可见五角色定义正确。 |
+| D10-03 | 文档 | README 或 ops 笔记含命令与 env。 |
+| D10-04 | CI | 不破坏流水线；若有 smoke 则绿。 |
+
+**当日不纳入**：深度健康探测（Day 11）。
+
+---
+
+##### Day 11 · Task 4.10 — Onboarding 健康检查（Harness + 心跳）
+
+**任务（当日必须完成的工作单元）**
+
+1. **Harness**：对 `getEnabledPlatforms()` 每平台执行轻量调用（如 `getProducts` 限 1 条）；失败写入检查报告。  
+2. **心跳**：触发一次 Agent execute/heartbeat（与 Paperclip 约定一致），验证链路可达。  
+3. **响应**：健康检查 JSON 含 `platforms[]`、`agentHeartbeats[]`、总体 `ok`。  
+4. **失败策略**：单平台失败不掩盖整体状态；便于客服排查。
+
+**质量门禁（当日合并前必须满足）**
+
+- **测试**：mock harness 全绿；mock 单平台失败场景。  
+- **隔离**：仅当前租户数据与凭证。
+
+**交付物与验收标准（Day 11 结束可签字）**
+
+| 序号 | 交付物 | 验收标准（满足即 ✓） |
+|------|--------|----------------------|
+| D11-01 | 每平台探测 | 日志/JSON 可证每平台至少一次调用。 |
+| D11-02 | 心跳 | 一次心跳成功或明确错误码（与 AC 对齐）。 |
+| D11-03 | 新租户 | 走完 Onboarding 后调用健康检查可得预期结果。 |
+| D11-04 | 测试 | CI 绿。 |
+
+**当日不纳入**：Sprint 6 压测；OpenAPI 全文（Sprint 6.7）。
+
+---
+
+##### Day 12 — Sprint 4 整体验收与回归
+
+**任务（当日必须完成的工作单元）**
+
+1. **清单**：逐项核对 §**Sprint 4 验收** 五项 + 本方案 B 各日 D\*-** 遗留项。  
+2. **缺陷**：P0/P1 清零或登记豁免与负责人。  
+3. **回归**：全仓 `pnpm vitest`（或项目命令）；与 `ci.yml` 一致。  
+4. **债务**：已知问题列表；可选 OpenAPI/运维备注移交 Sprint 6。
+
+**质量门禁（当日合并前必须满足）**
+
+- **CI**：主分支绿；覆盖率不低于团队 Sprint 门禁（若 §Phase 2 有数值则遵守）。  
+- **无静默降级**：验收项未达标不得标为完成。
+
+**交付物与验收标准（Day 12 / Sprint 4 结束可签字）**
+
+| 序号 | 交付物 | 验收标准（满足即 ✓） |
+|------|--------|----------------------|
+| D12-01 | §Sprint 4 验收 | 五项全部 ✓ 或已批准豁免。 |
+| D12-02 | 测试与 CI | 全量测试通过；CI 绿。 |
+| D12-03 | 已知问题 | 列表完整，含严重度与后续 Sprint。 |
+| D12-04 | 演示 | 可按脚本复现核心路径（Ads / Inventory / Onboarding）。 |
+
+**当日不纳入**：Sprint 5 DevOS、Sprint 6 全量 20 项（按 Phase 2 路线图）。
+
+---
+
+**每日产出汇总（简表，便于站会对照）**
+
+```
+方案 A（并行）· Day 1–5 核心交付
+Day 1  │ 4.1 AgentContext 可运行 │ 4.2 两表 + RLS migration
+Day 2  │ 4.3 Ads 骨架 + 半套业务规则 │ 4.5/4.6 广告与库存只读 API
+Day 3  │ 4.3 收尾 + 4.7 启动 │ 4.8 Onboarding 大半完成
+Day 4  │ 4.4 Inventory Guard 全 │ 4.8/4.10 联调
+Day 5  │ 4.7/4.9 收尾 │ 4.10 + 五 Agent 种子
+
+方案 B（串行 · Day 1–12 同级展开）
+Day 1   │ 4.1 AgentContext
+Day 2   │ 4.2 两表 + RLS
+Day 3   │ 4.5 / 4.6 只读 API
+Day 4–5 │ 4.3 Ads Optimizer（上/下）
+Day 6   │ 4.4 Inventory Guard
+Day 7   │ 4.7 Governance
+Day 8–9 │ 4.8 Onboarding（上/下）
+Day 10  │ 4.9 五 Agent seed
+Day 11  │ 4.10 健康检查
+Day 12  │ Sprint 4 整体验收
+```
+
 ---
 
 ### Sprint 5 · Week 9–10 — DevOS 基础结构

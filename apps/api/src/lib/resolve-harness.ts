@@ -1,8 +1,9 @@
 import type { FastifyRequest } from 'fastify'
 import type { TenantHarness } from '@patioer/harness'
 import { HarnessError } from '@patioer/harness'
+import { getOrCreateHarnessFromCredential } from './harness-from-credential.js'
 import { registry } from './harness-registry.js'
-import { createHarness, type SupportedPlatform } from './harness-factory.js'
+import type { SupportedPlatform } from './harness-factory.js'
 import { resolveFirstCredential } from './resolve-credential.js'
 
 export type ResolveHarnessResult =
@@ -26,14 +27,12 @@ export async function resolveHarness(
   const registryKey = `${request.tenantId}:${platform}`
 
   try {
-    const harness = registry.getOrCreate(registryKey, () =>
-      createHarness(request.tenantId!, platform, {
-        accessToken: cred.accessToken,
-        shopDomain: cred.shopDomain,
-        region: cred.region,
-        metadata: cred.metadata,
-      }),
-    )
+    const harness = getOrCreateHarnessFromCredential(request.tenantId!, platform, {
+      accessToken: cred.accessToken,
+      shopDomain: cred.shopDomain,
+      region: cred.region,
+      metadata: cred.metadata,
+    })
     return { ok: true, harness, platform, registryKey }
   } catch {
     return { ok: false, statusCode: 503, body: { error: 'Platform integration not configured' } }

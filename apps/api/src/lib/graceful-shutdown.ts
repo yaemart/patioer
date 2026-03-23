@@ -3,12 +3,18 @@ export async function gracefulShutdown(
   closeRedis: () => Promise<void>,
   closeQueues?: () => Promise<void>,
 ): Promise<number> {
-  try {
-    await closeApp()
-    if (closeQueues) await closeQueues()
-    await closeRedis()
-    return 0
-  } catch {
-    return 1
+  let failed = false
+  const attempt = async (fn: () => Promise<void>) => {
+    try {
+      await fn()
+    } catch {
+      failed = true
+    }
   }
+
+  await attempt(closeApp)
+  if (closeQueues) await attempt(closeQueues)
+  await attempt(closeRedis)
+
+  return failed ? 1 : 0
 }

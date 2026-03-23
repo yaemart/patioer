@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 import { randomUUID } from 'node:crypto'
 import type { FastifyPluginAsync } from 'fastify'
 import { withTenantDb, schema } from '@patioer/db'
+import { handleTikTokWebhook, type TikTokTopic } from '../../lib/webhook-topic-handler.js'
 
 /** TikTok live-commerce order stream — higher priority for downstream workers / replay. */
 export const TIKTOK_WEBHOOK_TOPIC_LIVE_ORDER = 'LIVE_ORDER' as const
@@ -106,6 +107,10 @@ const tikTokWebhookRoute: FastifyPluginAsync = async (app) => {
       app.log.error({ err, tenantId }, 'failed to persist TikTok webhook event')
       return reply.code(500).send({ error: 'failed to persist webhook' })
     }
+
+    // Dispatch to registered handler (best-effort; no throw on missing handler)
+    const tiktokTopic = `tiktok:${topic}` as TikTokTopic
+    await handleTikTokWebhook(tenantId, tiktokTopic, payload)
 
     return reply.code(200).send({ ok: true })
   })

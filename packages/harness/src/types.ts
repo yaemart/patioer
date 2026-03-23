@@ -1,17 +1,11 @@
 /**
  * Flattened product representation used across all harness implementations.
  *
- * **Multi-variant limitation (Shopify):** `toProduct()` maps only the *first*
- * variant's price and inventory_quantity. Products with multiple variants will
- * have their additional variant data silently discarded. This is a known MVP
- * trade-off — full multi-variant support is tracked for a future sprint.
- */
-/**
- * Flattened product representation used across all harness implementations.
+ * **Shopify:** `toProduct()` maps only the *first* variant's price and
+ * `inventory_quantity`; multi-variant products lose extra variant rows (MVP trade-off).
  *
- * `price` and `inventory` are nullable — Amazon's Catalog Items API does not
- * return pricing or stock data, so those fields will be `null` until enriched
- * via the Listings or Inventory APIs.
+ * **Amazon:** Catalog Items often leaves `price` and `inventory` as `null` until
+ * enriched via Listings or Inventory APIs.
  */
 export interface Product {
   id: string
@@ -40,6 +34,16 @@ export interface DateRange {
   to: Date
 }
 
+/**
+ * Aggregated sales metrics for a date range.
+ *
+ * **`truncated`:** when `true`, the implementation **stopped after a single page**
+ * of orders (or hit an internal cap) and **revenue / orders are lower bounds** —
+ * not a full-range rollup. When `false` or omitted, numbers reflect all orders
+ * the harness pulled for that range (per-platform page limits still apply; see
+ * each harness’s `getAnalytics`). Do **not** treat `truncated: true` as “complete”
+ * for finance or ops reporting without fetching additional pages or using platform reports.
+ */
 export interface Analytics {
   revenue: number
   orders: number
@@ -55,3 +59,21 @@ export interface PaginatedResult<T> {
   items: T[]
   nextCursor?: string
 }
+
+// ─── Phase 2: Multi-platform HarnessRegistry types ────────────────────────────
+// Day 1: interface design → Day 6 (Sprint 3): full implementation in harness.registry.ts
+
+/** All platforms supported by the HarnessRegistry in Phase 2. */
+export type Platform = 'shopify' | 'amazon' | 'tiktok' | 'shopee'
+
+/**
+ * Factory function signature used to instantiate a TenantHarness on demand.
+ * Registered per-platform via `registerHarnessFactory(platform, factory)`.
+ */
+export type HarnessFactory = (tenantId: string) => import('./base.harness.js').TenantHarness
+
+/**
+ * Composite cache key used internally by HarnessRegistry.
+ * Format: `${tenantId}:${platform}`
+ */
+export type RegistryKey = `${string}:${Platform}`

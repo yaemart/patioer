@@ -9,8 +9,9 @@
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
+    "test:ci": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:scripts && pnpm --filter @patioer/market test:coverage && pnpm --filter @patioer/harness test:coverage && pnpm --filter api test:coverage",
     "seed:agents": "pnpm exec tsx ./scripts/agents.seed.ts",
-    "test:scripts": "pnpm exec vitest run scripts/agents.seed.test.ts"
+    "test:scripts": "pnpm --filter @patioer/api exec vitest run src/lib/seed-default-agents.test.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

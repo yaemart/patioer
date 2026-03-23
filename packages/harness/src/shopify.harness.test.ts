@@ -225,9 +225,11 @@ describe('ShopifyHarness.getAnalytics', () => {
 })
 
 describe('ShopifyHarness.getOpenThreads', () => {
-  it('returns empty array (Shopify Inbox not wired in MVP)', async () => {
-    const threads = await makeHarness().getOpenThreads()
-    expect(threads).toEqual([])
+  it('throws not_implemented (Shopify Inbox not wired)', async () => {
+    await expect(makeHarness().getOpenThreads()).rejects.toMatchObject({
+      type: 'harness_error',
+      code: 'not_implemented',
+    })
     expect(mockFetch).not.toHaveBeenCalled()
   })
 })
@@ -278,8 +280,11 @@ describe('ShopifyHarness retry behavior', () => {
 })
 
 describe('Support Relay (Shopify Inbox)', () => {
-  it('Support Relay handles empty thread list gracefully', async () => {
-    expect(await makeHarness().getOpenThreads()).toEqual([])
+  it('Support Relay: getOpenThreads throws not_implemented', async () => {
+    await expect(makeHarness().getOpenThreads()).rejects.toMatchObject({
+      type: 'harness_error',
+      code: 'not_implemented',
+    })
     expect(mockFetch).not.toHaveBeenCalled()
   })
 })

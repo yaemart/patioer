@@ -19,6 +19,8 @@ vi.mock('@patioer/db', () => ({
     tenants: {},
     agents: {},
     approvals: {},
+    adsCampaigns: {},
+    inventoryLevels: {},
   },
 }))
 
@@ -34,6 +36,29 @@ vi.mock('../lib/resolve-credential.js', () => ({
   resolveFirstCredential: vi.fn(async () => ({
     cred: { accessToken: 'enc', shopDomain: 'shop.test', region: 'global', metadata: null },
     platform: 'shopify',
+  })),
+  listEnabledPlatformsFromDb: vi.fn(async () => []),
+  queryCredentialForPlatform: vi.fn(async () => null),
+}))
+
+vi.mock('../lib/seed-default-agents.js', () => ({
+  seedDefaultAgents: vi.fn(async () => ({
+    created: [],
+    skipped: [],
+    registered: [],
+  })),
+  defaultAgentSpecs: vi.fn(() => []),
+}))
+
+vi.mock('../lib/onboarding-health-probe.js', () => ({
+  runOnboardingHealthProbe: vi.fn(async () => ({
+    ok: false,
+    tenantId: '00000000-0000-0000-0000-000000000001',
+    platforms: [],
+    agentHeartbeat: { agentType: '_', agentId: '', ok: false, probe: 'agent_execute', error: 'no_agent_rows' },
+    agents: { count: 0, types: [], expectedMin: 5, meetsMinimum: false },
+    paperclip: { configured: false },
+    summary: { heartbeatOk: false },
   })),
 }))
 
@@ -166,6 +191,25 @@ describe('Smoke — Amazon routes', () => {
 describe('Smoke — Business routes', () => {
   const tenantHeader = { 'x-tenant-id': '00000000-0000-0000-0000-000000000001' }
 
+  it('POST /api/v1/onboarding/register is registered (non-404)', async () => {
+    await assertRegistered('POST', '/api/v1/onboarding/register', {
+      contentType: 'application/json',
+      payload: '{}',
+    })
+  })
+
+  it('POST /api/v1/onboarding/initialize-agents is registered (non-404)', async () => {
+    await assertRegistered('POST', '/api/v1/onboarding/initialize-agents', {
+      headers: tenantHeader,
+      contentType: 'application/json',
+      payload: '{}',
+    })
+  })
+
+  it('GET /api/v1/onboarding/health is registered (non-404)', async () => {
+    await assertRegistered('GET', '/api/v1/onboarding/health', { headers: tenantHeader })
+  })
+
   it('POST /api/v1/products/sync is registered (non-404)', async () => {
     await assertRegistered('POST', '/api/v1/products/sync', {
       headers: tenantHeader,
@@ -188,6 +232,22 @@ describe('Smoke — Business routes', () => {
 
   it('GET /api/v1/platform-credentials is registered (non-404)', async () => {
     await assertRegistered('GET', '/api/v1/platform-credentials', { headers: tenantHeader })
+  })
+
+  it('GET /api/v1/ads/campaigns is registered (non-404)', async () => {
+    await assertRegistered('GET', '/api/v1/ads/campaigns', { headers: tenantHeader })
+  })
+
+  it('GET /api/v1/ads/performance is registered (non-404)', async () => {
+    await assertRegistered('GET', '/api/v1/ads/performance', { headers: tenantHeader })
+  })
+
+  it('GET /api/v1/inventory is registered (non-404)', async () => {
+    await assertRegistered('GET', '/api/v1/inventory', { headers: tenantHeader })
+  })
+
+  it('GET /api/v1/inventory/alerts is registered (non-404)', async () => {
+    await assertRegistered('GET', '/api/v1/inventory/alerts', { headers: tenantHeader })
   })
 })
 

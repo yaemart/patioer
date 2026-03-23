@@ -23,7 +23,8 @@ function createMockContext(
   return {
     tenantId: 'tenant-1',
     agentId: 'agent-1',
-    getHarness: () => harness,
+    getHarness: (_platform?: string) => harness,
+    getEnabledPlatforms: () => ['shopify'],
     llm: vi.fn(),
     budget: {
       isExceeded: vi.fn().mockResolvedValue(false),

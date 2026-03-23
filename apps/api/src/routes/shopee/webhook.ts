@@ -1,5 +1,13 @@
 import crypto from 'node:crypto'
 import type { FastifyPluginAsync } from 'fastify'
+import { handleShopeeWebhook, type ShopeeTopic } from '../../lib/webhook-topic-handler.js'
+
+/** Maps Shopee push-notification numeric codes to canonical topic strings. */
+const SHOPEE_CODE_TO_TOPIC: Record<number, ShopeeTopic> = {
+  3: 'shopee:order.status_update',
+  6: 'shopee:logistics.tracking_update',
+  1: 'shopee:shop.update_profile',
+}
 
 /**
  * Shopee push notification signature:
@@ -54,6 +62,14 @@ const shopeeWebhookRoute: FastifyPluginAsync = async (app) => {
     }
 
     app.log.info({ eventCode: payload.code, shopId: payload.shop_id }, 'shopee webhook received')
+
+    // Dispatch to registered handler (best-effort; no throw on missing handler)
+    const shopeeTopic: ShopeeTopic =
+      SHOPEE_CODE_TO_TOPIC[payload.code ?? -1] ?? 'shopee:order.status_update'
+    const tenantId =
+      (request.headers as Record<string, string>)['x-tenant-id'] ??
+      String(payload.shop_id ?? 'unknown')
+    await handleShopeeWebhook(tenantId, shopeeTopic, payload)
 
     return reply.code(200).send({ ok: true })
   })

@@ -13,7 +13,7 @@ describe('gracefulShutdown', () => {
     expect(closeRedis).toHaveBeenCalledTimes(1)
   })
 
-  it('gracefulShutdown exits with failure when close throws', async () => {
+  it('gracefulShutdown still closes redis when closeApp throws', async () => {
     const closeApp = vi.fn(async () => {
       throw new Error('boom')
     })
@@ -23,6 +23,34 @@ describe('gracefulShutdown', () => {
 
     expect(code).toBe(1)
     expect(closeApp).toHaveBeenCalledTimes(1)
-    expect(closeRedis).not.toHaveBeenCalled()
+    expect(closeRedis).toHaveBeenCalledTimes(1)
+  })
+
+  it('gracefulShutdown still closes redis when closeQueues throws', async () => {
+    const closeApp = vi.fn(async () => undefined)
+    const closeQueues = vi.fn(async () => {
+      throw new Error('queue error')
+    })
+    const closeRedis = vi.fn(async () => undefined)
+
+    const code = await gracefulShutdown(closeApp, closeRedis, closeQueues)
+
+    expect(code).toBe(1)
+    expect(closeApp).toHaveBeenCalledTimes(1)
+    expect(closeQueues).toHaveBeenCalledTimes(1)
+    expect(closeRedis).toHaveBeenCalledTimes(1)
+  })
+
+  it('gracefulShutdown returns 1 when all steps fail', async () => {
+    const closeApp = vi.fn(async () => { throw new Error('app') })
+    const closeQueues = vi.fn(async () => { throw new Error('queues') })
+    const closeRedis = vi.fn(async () => { throw new Error('redis') })
+
+    const code = await gracefulShutdown(closeApp, closeRedis, closeQueues)
+
+    expect(code).toBe(1)
+    expect(closeApp).toHaveBeenCalledTimes(1)
+    expect(closeQueues).toHaveBeenCalledTimes(1)
+    expect(closeRedis).toHaveBeenCalledTimes(1)
   })
 })

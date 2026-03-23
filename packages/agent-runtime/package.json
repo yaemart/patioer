@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@patioer/harness": "workspace:*",
+    "@patioer/market": "workspace:*",
     "@patioer/shared": "workspace:*"
   },
   "devDependencies": {

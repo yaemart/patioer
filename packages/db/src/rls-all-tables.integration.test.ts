@@ -132,6 +132,50 @@ describe.skipIf(!isIntegration)('RLS cross-tenant isolation — all business tab
     })
   })
 
+  // ── ads_campaigns ─────────────────────────────────────────
+
+  describe('ads_campaigns', () => {
+    it('tenant A sees only own campaigns', async () => {
+      const rows = await withTenantDb(fix.tenantAId, (tdb) =>
+        tdb.select().from(schema.adsCampaigns),
+      )
+      expect(rows).toHaveLength(1)
+      expect(rows[0]!.id).toBe(seedA.adsCampaignId)
+    })
+
+    it('tenant B cannot read tenant A campaign by id', async () => {
+      const rows = await withTenantDb(fix.tenantBId, (tdb) =>
+        tdb
+          .select()
+          .from(schema.adsCampaigns)
+          .where(eq(schema.adsCampaigns.id, seedA.adsCampaignId)),
+      )
+      expect(rows).toEqual([])
+    })
+  })
+
+  // ── inventory_levels ──────────────────────────────────────
+
+  describe('inventory_levels', () => {
+    it('tenant A sees only own inventory rows', async () => {
+      const rows = await withTenantDb(fix.tenantAId, (tdb) =>
+        tdb.select().from(schema.inventoryLevels),
+      )
+      expect(rows).toHaveLength(1)
+      expect(rows[0]!.id).toBe(seedA.inventoryLevelId)
+    })
+
+    it('tenant B cannot read tenant A inventory by id', async () => {
+      const rows = await withTenantDb(fix.tenantBId, (tdb) =>
+        tdb
+          .select()
+          .from(schema.inventoryLevels)
+          .where(eq(schema.inventoryLevels.id, seedA.inventoryLevelId)),
+      )
+      expect(rows).toEqual([])
+    })
+  })
+
   // ── agent_events ──────────────────────────────────────────
 
   describe('agent_events', () => {
@@ -271,6 +315,20 @@ describe.skipIf(!isIntegration)('RLS cross-tenant isolation — all business tab
     it('platform_credentials table returns empty', async () => {
       const rows = await withTenantDb(phantomTenantId, (tdb) =>
         tdb.select().from(schema.platformCredentials),
+      )
+      expect(rows).toEqual([])
+    })
+
+    it('ads_campaigns table returns empty', async () => {
+      const rows = await withTenantDb(phantomTenantId, (tdb) =>
+        tdb.select().from(schema.adsCampaigns),
+      )
+      expect(rows).toEqual([])
+    })
+
+    it('inventory_levels table returns empty', async () => {
+      const rows = await withTenantDb(phantomTenantId, (tdb) =>
+        tdb.select().from(schema.inventoryLevels),
       )
       expect(rows).toEqual([])
     })
