@@ -80,6 +80,11 @@ jobs:
         env:
           VITEST_REPORTER: github-actions
 
+      - name: Coverage check (devos-bridge)
+        run: pnpm --filter @patioer/devos-bridge test:coverage
+        env:
+          VITEST_REPORTER: github-actions
+
       - name: Coverage check (harness)
         run: pnpm --filter @patioer/harness test:coverage
         env:

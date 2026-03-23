@@ -1,0 +1,72 @@
+# ElectroOS API — Prometheus alert rules (Sprint 5 · Task 5.7)
+#
+# Metric names align with apps/api/src/plugins/metrics.ts (Sprint 3.10).
+# Deploy: add path under Prometheus `rule_files`, or kube-prometheus-stack
+# `additionalPrometheusRulesMap` / `additionalPrometheusRules`.
+#
+groups:
+  - name: electroos
+    interval: 30s
+    rules:
+      # harness_error_rate > 5% of tenant request rate → P0
+      - alert: ElectroOsHarnessErrorRateHigh
+        expr: |
+          (
+            sum(rate(harness_error_total[5m]))
+            / clamp_min(sum(rate(tenant_request_total[5m])), 1e-9)
+          ) > 0.05
+          unless sum(rate(tenant_request_total[5m])) < 0.01
+        for: 5m
+        labels:
+          severity: critical
+          devos_priority: P0
+        annotations:
+          summary: Harness error rate exceeds 5% of tenant request rate
+          description: >-
+            The 5-minute harness error rate ({{ $value | humanizePercentage }})
+            exceeds the 5% threshold relative to tenant_request_total.
+            Investigate platform API failures in Harness logs.
+
+      # heartbeat_missed → P1 (staleness: last success > 15m ago)
+      - alert: ElectroOsAgentHeartbeatStale
+        expr: (time() - agent_heartbeat_last_timestamp) > 900
+        for: 5m
+        labels:
+          severity: warning
+          devos_priority: P1
+        annotations:
+          summary: Agent heartbeat stale (no successful heartbeat in 15m)
+          description: >-
+            Agent {{ $labels.agent_type }} for tenant {{ $labels.tenant_id }}
+            last heartbeat was {{ $value | humanizeDuration }} ago (threshold 15m).
+
+      # latency_p99 > 5s → P1
+      - alert: ElectroOsApiLatencyP99High
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum(rate(api_request_duration_seconds_bucket[5m])) by (le)
+          ) > 5
+        for: 5m
+        labels:
+          severity: warning
+          devos_priority: P1
+        annotations:
+          summary: API request latency p99 above 5 seconds
+          description: >-
+            The 99th percentile API latency is {{ $value | humanizeDuration }},
+            exceeding the 5s threshold. Check slow routes and DB query times.
+
+      # db_pool > 90% → P0
+      - alert: ElectroOsDbPoolUsageHigh
+        expr: electroos_db_pool_usage_ratio > 0.9
+        for: 5m
+        labels:
+          severity: critical
+          devos_priority: P0
+        annotations:
+          summary: PostgreSQL connection pool usage above 90%
+          description: >-
+            Pool usage ratio is {{ $value | humanizePercentage }}.
+            Risk of connection exhaustion — consider scaling pool.max or
+            investigating long-running queries.

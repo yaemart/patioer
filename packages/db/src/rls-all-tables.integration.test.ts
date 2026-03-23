@@ -272,6 +272,57 @@ describe.skipIf(!isIntegration)('RLS cross-tenant isolation — all business tab
     })
   })
 
+  // ── devos_tickets（tenant_id 可空：系统级 Ticket 全租户可见）────
+
+  describe('devos_tickets', () => {
+    it('RLS: system rows visible to all tenants; scoped rows isolated', async () => {
+      await withTenantDb(fix.tenantAId, (tdb) =>
+        tdb.insert(schema.devosTickets).values({
+          tenantId: fix.tenantAId,
+          type: 'bug',
+          priority: 'P1',
+          title: 'a-only',
+          description: 'd',
+        }),
+      )
+      await withTenantDb(fix.tenantAId, (tdb) =>
+        tdb.insert(schema.devosTickets).values({
+          tenantId: null,
+          type: 'performance',
+          priority: 'P0',
+          title: 'system',
+          description: 'd',
+        }),
+      )
+      await withTenantDb(fix.tenantBId, (tdb) =>
+        tdb.insert(schema.devosTickets).values({
+          tenantId: fix.tenantBId,
+          type: 'feature',
+          priority: 'P2',
+          title: 'b-only',
+          description: 'd',
+        }),
+      )
+
+      const rowsA = await withTenantDb(fix.tenantAId, (tdb) =>
+        tdb.select().from(schema.devosTickets),
+      )
+      expect(rowsA.map((r) => r.title).sort()).toEqual(['a-only', 'system'])
+
+      const rowsB = await withTenantDb(fix.tenantBId, (tdb) =>
+        tdb.select().from(schema.devosTickets),
+      )
+      expect(rowsB.map((r) => r.title).sort()).toEqual(['b-only', 'system'])
+
+      const aScoped = rowsA.find((r) => r.title === 'a-only')
+      expect(aScoped).toBeDefined()
+      const leak = await withTenantDb(fix.tenantBId, (tdb) =>
+        tdb.select().from(schema.devosTickets).where(eq(schema.devosTickets.id, aScoped!.id)),
+      )
+      expect(leak).toEqual([])
+    })
+  })
+
   // ── AC-07: bare SELECT with wrong tenant context ──────────
 
   describe('bare SELECT with non-existent tenant context returns empty', () => {
@@ -331,6 +382,13 @@ describe.skipIf(!isIntegration)('RLS cross-tenant isolation — all business tab
         tdb.select().from(schema.inventoryLevels),
       )
       expect(rows).toEqual([])
+    })
+
+    it('devos_tickets returns only system rows (tenant_id IS NULL)', async () => {
+      const rows = await withTenantDb(phantomTenantId, (tdb) =>
+        tdb.select().from(schema.devosTickets),
+      )
+      expect(rows.every((r) => r.tenantId === null)).toBe(true)
     })
   })
 })

@@ -52,6 +52,13 @@ describe('GET /metrics — Prometheus endpoint', () => {
     expect(body).toContain('webhook_dispatch_no_handler_total')
   })
 
+  it('GET /metrics exposes electroos_db_pool_usage_ratio', async () => {
+    const app = buildMetricsApp()
+    await app.ready()
+    const res = await app.inject({ method: 'GET', url: '/metrics' })
+    expect(res.body).toContain('electroos_db_pool_usage_ratio')
+  })
+
   it('api_request_duration_seconds_count increments after a request', async () => {
     const app = buildMetricsApp()
     // Add a dummy route so we can fire a real request through the onResponse hook

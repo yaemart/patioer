@@ -1,5 +1,6 @@
 import fp from 'fastify-plugin'
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
+import { pool } from '@patioer/db'
 import { Registry, Counter, Histogram, Gauge, collectDefaultMetrics } from 'prom-client'
 
 // ─── Per-plugin registry ───────────────────────────────────────────────────────
@@ -39,6 +40,19 @@ export const agentHeartbeatGauge = new Gauge({
   help: 'Unix timestamp of last successful agent heartbeat',
   labelNames: ['agent_type', 'tenant_id'] as const,
   registers: [metricsRegistry],
+})
+
+/** Active connections / pool max (0..1); Prometheus rule `electroos_db_pool_usage_ratio > 0.9` (Sprint 5.7). */
+export const dbPoolUsageRatio = new Gauge({
+  name: 'electroos_db_pool_usage_ratio',
+  help: 'PostgreSQL pool active connections divided by max pool size (0..1)',
+  registers: [metricsRegistry],
+  collect() {
+    const max = pool.options.max ?? 10
+    const active = Math.max(0, pool.totalCount - pool.idleCount)
+    const ratio = max > 0 ? Math.min(1, active / max) : 0
+    this.set(ratio)
+  },
 })
 
 /** Registered handler ran but threw — HTTP still returns 200 to avoid platform retries. */

@@ -10,7 +10,7 @@ import { withTenantDb, schema, type AppDb } from '@patioer/db'
 import { z } from 'zod'
 import { registry } from './harness-registry.js'
 import { getOrCreateHarnessFromCredential } from './harness-from-credential.js'
-import { optionalPlatformZod } from './platform-schema.js'
+import { optionalPlatformZod, platformZod } from './platform-schema.js'
 import { parseElectroosPlatformFromPayload, resolveFirstCredentialForTenant } from './resolve-credential.js'
 import type { SupportedPlatform } from './harness-factory.js'
 
@@ -29,13 +29,13 @@ const priceUpdatePayloadSchema = z.object({
 })
 
 const adsSetBudgetPayloadSchema = z.object({
-  platform: z.string().min(1),
+  platform: platformZod,
   platformCampaignId: z.string().min(1),
   proposedDailyBudgetUsd: z.number().finite().positive(),
 })
 
 const inventoryAdjustPayloadSchema = z.object({
-  platform: z.string().min(1),
+  platform: platformZod,
   /** Platform-native product id (harness `updateInventory` contract). */
   platformProductId: z.string().min(1),
   /** Absolute on-hand quantity after restock. */
@@ -132,7 +132,7 @@ async function runAdsBudgetApproved(
   const platformHint =
     preferredPlatform ??
     parseElectroosPlatformFromPayload(rawPayload) ??
-    (parsed.data.platform as SupportedPlatform)
+    parsed.data.platform
 
   const resolved = await resolveFirstCredentialForTenant(tenantId, platformHint ?? null)
   if (!resolved) {
@@ -199,7 +199,7 @@ async function runInventoryAdjustApproved(
   const platformHint =
     preferredPlatform ??
     parseElectroosPlatformFromPayload(rawPayload) ??
-    (parsed.data.platform as SupportedPlatform)
+    parsed.data.platform
 
   const resolved = await resolveFirstCredentialForTenant(tenantId, platformHint ?? null)
   if (!resolved) {
