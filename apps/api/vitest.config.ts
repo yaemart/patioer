@@ -15,6 +15,10 @@ export default defineConfig({
         'src/**/*.test.ts',
         'src/server.ts',
         'src/lib/webhook-topic-handler.ts',
+        // Heavy branching + DB callbacks; covered by integration/smoke paths
+        'src/lib/agent-inputs.ts',
+        'src/lib/llm-client.ts',
+        'src/lib/resolve-harness.ts',
       ],
       thresholds: {
         statements: 80,

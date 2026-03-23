@@ -6,7 +6,6 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { TikTokHarness, buildTikTokSign, buildTikTokParams, normalizeTikTokProduct, normalizeTikTokOrder } from './tiktok.harness.js'
-import { HarnessError } from './harness-error.js'
 import type { TikTokCredentials, TikTokOrder, TikTokProduct } from './tiktok.types.js'
 import { resetSharedBuckets } from './token-bucket.js'
 
