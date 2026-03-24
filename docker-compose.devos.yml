@@ -1,0 +1,43 @@
+# DevOS：独立 PostgreSQL + Paperclip，与主栈 `docker-compose.yml` 数据卷隔离。
+# 宿主机：Paperclip 3200；DevOS Postgres 5433（避免与本地 patioer 5432 冲突）。
+version: '3.9'
+
+services:
+  devos-postgres:
+    image: postgres:14
+    container_name: devos-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: devos
+    ports:
+      - '5433:5432'
+    volumes:
+      - devos_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d devos']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  devos-paperclip:
+    image: node:22-alpine
+    container_name: devos-paperclip
+    working_dir: /workspace/paperclip
+    command: >-
+      sh -c "test -f package.json
+      || (echo 'Missing ./paperclip checkout. Prepare a local Paperclip copy at ./paperclip before starting DevOS compose.' >&2; exit 1);
+      corepack enable && pnpm install && pnpm dev"
+    volumes:
+      - ./paperclip:/workspace/paperclip
+    ports:
+      - '3200:3000'
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@devos-postgres:5432/devos
+    depends_on:
+      devos-postgres:
+        condition: service_healthy
+
+volumes:
+  devos_postgres_data:

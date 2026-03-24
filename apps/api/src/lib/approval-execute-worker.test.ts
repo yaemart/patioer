@@ -280,4 +280,38 @@ describe('processApprovalExecuteJob', () => {
     expect(mockHarnessUpdateInventory).toHaveBeenCalledWith('p-99', 120)
     expect(mockHarnessUpdateAdsBudget).not.toHaveBeenCalled()
   })
+
+  it('rejects ads.set_budget when payload platform is not a supported enum value', async () => {
+    await expect(
+      processApprovalExecuteJob({
+        tenantId: TENANT,
+        agentId: AGENT,
+        approvalId: APPROVAL,
+        action: 'ads.set_budget',
+        payload: {
+          platform: 'invalid-platform',
+          platformCampaignId: 'camp-1',
+          proposedDailyBudgetUsd: 100,
+        },
+      }),
+    ).rejects.toThrow(/invalid ads\.set_budget payload/)
+    expect(mockHarnessUpdateAdsBudget).not.toHaveBeenCalled()
+  })
+
+  it('rejects inventory.adjust when payload platform is not a supported enum value', async () => {
+    await expect(
+      processApprovalExecuteJob({
+        tenantId: TENANT,
+        agentId: AGENT,
+        approvalId: APPROVAL,
+        action: 'inventory.adjust',
+        payload: {
+          platform: 'not-a-platform',
+          platformProductId: 'p-1',
+          targetQuantity: 5,
+        },
+      }),
+    ).rejects.toThrow(/invalid inventory\.adjust payload/)
+    expect(mockHarnessUpdateInventory).not.toHaveBeenCalled()
+  })
 })

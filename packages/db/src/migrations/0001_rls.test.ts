@@ -71,4 +71,13 @@ describe('RLS migration safety', () => {
     expect(sql).toContain("current_setting('app.tenant_id')::uuid")
     expect(sql).toContain('FORCE ROW LEVEL SECURITY')
   })
+
+  it('0006 devos_tickets migration enables RLS with tenant_or_system policy', () => {
+    const sql = readFileSync(join(migrationsDir, '0006_devos_tickets.sql'), 'utf8')
+    expect(sql).toContain('CREATE TABLE devos_tickets')
+    expect(sql).toContain('CREATE POLICY tenant_or_system_devos_tickets ON devos_tickets')
+    expect(sql).toContain('tenant_id IS NULL')
+    expect(sql).toContain("current_setting('app.tenant_id')::uuid")
+    expect(sql).toContain('FORCE ROW LEVEL SECURITY')
+  })
 })

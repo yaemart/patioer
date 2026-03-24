@@ -7432,6 +7432,1153 @@ Day 12  │ Sprint 4 整体验收
 - [ ] SRE Agent alertRule 正确匹配 Prometheus 指标
 - [ ] DevOS 数据库与 ElectroOS 数据库完全独立
 
+**每日产出汇总（简表，10 个工作日 · 站会对照）**
+
+> 与上方任务表一致：5.1→5.2→5.3 串行；5.4 可与 5.1 并行；5.9 依赖 5.2；5.10 依赖 5.4；5.6 依赖 5.3；5.7 依赖 5.5 + Sprint 3 Prometheus 埋点（S3.10）；5.8 依赖 5.7；5.11 依赖 5.3 与 5.6。
+
+```
+Day 1  │ 5.1 devos-bridge 脚手架 │ 5.4 docker-compose.devos（Paperclip :3200 + 独立 DB）起盘
+Day 2  │ 5.2 DevOsTicket 协议 │ 5.4 收尾 / 健康检查 │ 5.9 devos_tickets schema + RLS（可与 5.2 同 PR 收尾）
+Day 3  │ 5.3 DevOsClient（创建 / 查询 / ack / resolve）│ 5.10 DevOS↔ElectroOS DB 隔离验证
+Day 4  │ 5.5 devos-seed（Org + SRE Agent）│ 5.3 联调收尾
+Day 5  │ 5.6 Harness 报错 → DevOS `harness_update` Ticket（ElectroOS + harness）
+Day 6  │ 5.7 SRE Agent：Prometheus 告警规则（依赖现有 `/metrics` 与 S3.10）
+Day 7  │ 5.7 规则与指标对齐 / 本地或 staging 冒烟
+Day 8  │ 5.8 Alertmanager webhook → DevOS Ticket → SRE 响应（上）
+Day 9  │ 5.8 通道收尾、端到端演练（伪造告警 → Ticket）
+Day 10 │ 5.11 DevOS Bridge 测试套件 │ Sprint 5 验收 checklist 全绿
+```
+
+#### Sprint 5 · Day 1 — 可复制任务卡（5.1 脚手架 + 5.4 compose 起盘）
+
+按卡片顺序实现即可；**5.1 与 5.4 可并行两个 PR**。类型与 env 名可在 Day 2（5.2 协议）收紧，此处仅保证包可 `build` / `test`。
+
+---
+
+**卡片 5.1-a — 包元数据（无逻辑）**
+
+| 文件 | 动作 |
+|------|------|
+| `packages/devos-bridge/package.json` | `name`: `@patioer/devos-bridge`，`type`: `module`，脚本对齐 `packages/market`：`build` / `lint` / `typecheck` / `test` / `test:coverage` |
+| `packages/devos-bridge/tsconfig.json` | `extends`：`../../tsconfig.base.json`，`include`：`["src"]` |
+| `pnpm-workspace.yaml` | 已含 `packages/*`，**无需改**；根目录 `pnpm install` 后 workspace 可见新包 |
+
+**自测：** `pnpm --filter @patioer/devos-bridge typecheck`（先完成 5.1-b～d 才有内容）。
+
+---
+
+**卡片 5.1-b — `src/version.ts`**
+
+函数签名模板：
+
+```typescript
+/** 包版本，供日志与 DevOS 侧对账；与 package.json version 保持同步（发布前 bump）。 */
+export const DEVOS_BRIDGE_VERSION: string
+```
+
+测试文件：`src/version.test.ts`
+
+| 用例名（`it(...)`） |
+|---------------------|
+| `exports non-empty semver-like string` |
+
+---
+
+**卡片 5.1-c — `src/config.ts`（Day 1 唯一环境解析入口）**
+
+函数签名模板：
+
+```typescript
+/** Day 1：从 process.env 读取 DevOS 连接信息；未配置时视为「桥接关闭」，不抛异常。 */
+export interface DevOsBridgeEnv {
+  /** 例：`http://localhost:3200`；空字符串表示未配置。 */
+  baseUrl: string
+  /** 请求 DevOS 时可选的 `x-api-key`。 */
+  apiKey?: string
+}
+
+export function loadDevOsBridgeEnv(env: NodeJS.ProcessEnv): DevOsBridgeEnv
+
+/** 纯函数：是否允许发起 DevOS HTTP 调用（baseUrl 非空且为合法 http(s)）。 */
+export function isDevOsBridgeConfigured(env: DevOsBridgeEnv): boolean
+```
+
+测试文件：`src/config.test.ts`
+
+| 用例名（`describe` / `it`） |
+|-----------------------------|
+| `describe('loadDevOsBridgeEnv')` |
+| `it('reads DEVOS_BASE_URL and DEVOS_API_KEY')` |
+| `it('returns empty baseUrl when DEVOS_BASE_URL unset')` |
+| `it('trims DEVOS_BASE_URL whitespace')` |
+| `describe('isDevOsBridgeConfigured')` |
+| `it('returns false for empty baseUrl')` |
+| `it('returns true for http:// and https://')` |
+| `it('returns false for non-http URL')` |
+
+`.env.example`（根目录追加两行，与卡片同步）：
+
+```bash
+# Sprint 5 Day 1 — DevOS Paperclip 桥（独立实例，默认 compose 映射 3200）
+# DEVOS_BASE_URL=http://localhost:3200
+# DEVOS_API_KEY=
+```
+
+---
+
+**卡片 5.1-d — `src/index.ts`**
+
+仅做聚合导出，无新逻辑：
+
+```typescript
+export { DEVOS_BRIDGE_VERSION } from './version.js'
+export type { DevOsBridgeEnv } from './config.js'
+export { loadDevOsBridgeEnv, isDevOsBridgeConfigured } from './config.js'
+```
+
+测试：`src/index.test.ts` 可选 — `it('re-exports loadDevOsBridgeEnv')`（或依赖 `config.test.ts` 即可，二选一避免重复）。
+
+---
+
+**卡片 5.1-e — Vitest 与覆盖率门槛**
+
+| 文件 | 动作 |
+|------|------|
+| `packages/devos-bridge/vitest.config.ts` | 对齐 `packages/market/vitest.config.ts`（同仓库模式） |
+
+**自测：** `pnpm --filter @patioer/devos-bridge test`；`pnpm --filter @patioer/devos-bridge test:coverage`（Day 1 目标：新包阈值与 market 一致或 CI 未接包前本地先绿）。
+
+---
+
+**卡片 5.4-a — `docker-compose.devos.yml`（根目录）**
+
+无 TS 函数；**检查清单（实现时逐条打勾）**：
+
+| 项 | 说明 |
+|----|------|
+| 独立 PostgreSQL | 服务名例：`devos-postgres`；**库名 ≠ `patioer`**（例：`devos`） |
+| 独立 volume | 与 `docker-compose.yml` 的 `postgres_data` **不共享** |
+| Paperclip / DevOS 进程 | 端口 **`3200:3000`**（宿主机 3200 → 容器内应用 3000，与主栈 3000 错开） |
+| 可选 Redis | 若 DevOS 镜像不需要可省略；需要则端口 **6380:6379** 类，避免与主 Redis 6379 冲突 |
+| `depends_on` | DB 就绪后再起应用容器 |
+
+**手工验收命令（可复制）**
+
+```bash
+docker compose -f docker-compose.devos.yml up -d
+curl -sfS "http://localhost:3200/health" || curl -sfS "http://localhost:3200/"   # 以实际 Paperclip 健康路径为准
+docker compose -f docker-compose.devos.yml down
+```
+
+（若本地 `paperclip/` 与主 `docker-compose.yml` 同样挂载开发，**working_dir / command** 可与 `paperclip` 服务对齐，仅换端口与 DB。）
+
+---
+
+**卡片 5.4-b — 文档钉一下（1 段）**
+
+| 文件 | 内容 |
+|------|------|
+| `docs/ops/devos-local.md`（新建，可选 Day 1 末） | 三行即可：compose 文件名、端口 3200、与 ElectroOS DB 分离说明 |
+
+---
+
+**Day 1 完成定义（DoD）**
+
+- [ ] `@patioer/devos-bridge`：`typecheck` + `test` 通过  
+- [ ] 根目录 `docker-compose.devos.yml`：`up` 后 **3200** 可访问（或文档说明占位原因）  
+- [ ] `.env.example` 含 `DEVOS_*` 占位  
+
+---
+
+#### Sprint 5 · Day 2 — 可复制任务卡（5.2 协议 + 5.4 健康检查 + 5.9 `devos_tickets`）
+
+对应每日简表：**5.2 DevOsTicket 协议**、**5.4 收尾 / 健康检查**、**5.9 schema + RLS**。可按 **5.2-a → 5.2-c → 5.4-a → 5.4-b → 5.9-a → 5.9-b** 顺序开 PR；**5.2 与 5.9 建议同 PR**（类型与表字段对齐）。
+
+---
+
+**卡片 5.2-a — `packages/devos-bridge/src/ticket-protocol.ts`（类型 + 纯函数）**
+
+函数 / 类型签名模板：
+
+```typescript
+export type DevOsTicketType = 'bug' | 'feature' | 'harness_update' | 'performance'
+export type DevOsTicketPriority = 'P0' | 'P1' | 'P2'
+export type DevOsSlaAcknowledge = '1h' | '4h' | '24h'
+export type DevOsSlaResolve = '4h' | '24h' | '48h' | '72h'
+
+export interface DevOsTicketContext {
+  platform?: string
+  agentId?: string
+  errorLog?: string
+  reproSteps?: string[]
+  tenantId?: string
+}
+
+export interface DevOsTicket {
+  type: DevOsTicketType
+  priority: DevOsTicketPriority
+  title: string
+  description: string
+  context: DevOsTicketContext
+  sla: { acknowledge: DevOsSlaAcknowledge; resolve: DevOsSlaResolve }
+}
+
+/** DevOS HTTP `getTicketStatus` 返回值侧状态（5.3 使用）。 */
+export type TicketStatus =
+  | 'open'
+  | 'acknowledged'
+  | 'in_progress'
+  | 'resolved'
+  | 'closed'
+
+export function defaultSlaForPriority(priority: DevOsTicketPriority): DevOsTicket['sla']
+
+/** 浅层运行时校验（脚本 / 测试入口）；HTTP 响应可再套 Zod。 */
+export function isDevOsTicket(value: unknown): value is DevOsTicket
+```
+
+测试文件：`src/ticket-protocol.test.ts`
+
+| 用例名（`describe` / `it`） |
+|-----------------------------|
+| `describe('defaultSlaForPriority')` |
+| `it('returns stricter SLA for P0 than P2')` |
+| `it('returns mid SLA for P1')` |
+| `describe('isDevOsTicket')` |
+| `it('accepts a minimal valid ticket')` |
+| `it('rejects non-object')` |
+| `it('rejects wrong type field')` |
+| `it('rejects empty title')` |
+| `it('rejects invalid context reproSteps')` |
+
+---
+
+**卡片 5.2-b — `packages/devos-bridge/src/index.ts`**
+
+在 Day 1 导出基础上增加：
+
+```typescript
+export type {
+  DevOsSlaAcknowledge,
+  DevOsSlaResolve,
+  DevOsTicket,
+  DevOsTicketContext,
+  DevOsTicketPriority,
+  DevOsTicketType,
+  TicketStatus,
+} from './ticket-protocol.js'
+export { defaultSlaForPriority, isDevOsTicket } from './ticket-protocol.js'
+```
+
+---
+
+**卡片 5.2-c — 自测命令**
+
+```bash
+pnpm --filter @patioer/devos-bridge typecheck
+pnpm --filter @patioer/devos-bridge test
+pnpm --filter @patioer/devos-bridge test:coverage
+```
+
+---
+
+**卡片 5.4-a — `docker-compose.devos.yml`（Day 2 增量）**
+
+| 项 | 说明 |
+|----|------|
+| `devos-postgres.healthcheck` | `pg_isready -U postgres -d devos` |
+| `devos-paperclip.depends_on` | `devos-postgres: condition: service_healthy` |
+
+（Paperclip 进程级 HTTP 探活因各项目路由不一致，仍以宿主机 `curl` 手测为准。）
+
+---
+
+**卡片 5.4-b — `docs/ops/devos-local.md`（Day 2 增量）**
+
+- 一小节说明：Postgres healthcheck、`depends_on` 行为。
+- 一小节说明：ElectroOS 库执行 `0006_devos_tickets.sql`（与 DevOS 独立库区分）。
+
+---
+
+**卡片 5.9-a — `packages/db/src/schema/devos-tickets.ts` + `schema/index.ts` 导出**
+
+Drizzle 表模板（与 §4.4 一致）：
+
+```typescript
+export const devosTickets = pgTable('devos_tickets', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: uuid('tenant_id').references(() => tenants.id),
+  type: text('type').notNull(),
+  priority: text('priority').notNull(),
+  title: text('title').notNull(),
+  description: text('description'),
+  context: jsonb('context'),
+  status: text('status').notNull().default('open'),
+  devosTicketId: text('devos_ticket_id'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+})
+```
+
+---
+
+**卡片 5.9-b — `packages/db/src/migrations/0006_devos_tickets.sql`**
+
+- `CREATE TABLE devos_tickets`（`tenant_id` 可空，FK → `tenants`）。
+- `ENABLE` + `FORCE` RLS；`CREATE POLICY tenant_or_system_devos_tickets`：`tenant_id IS NULL OR tenant_id = current_setting('app.tenant_id')::uuid`。
+
+**迁移静态测试：** `packages/db/src/migrations/0001_rls.test.ts` 增加对 `0006_devos_tickets.sql` 关键句断言。
+
+**集成测试（可选，需已跑迁移的 `DATABASE_URL`）：** `rls-all-tables.integration.test.ts` 增加 `devos_tickets` 描述块：租户仅见本租户 + `tenant_id IS NULL` 行；跨租户 id 查询为空。
+
+---
+
+**Day 2 完成定义（DoD）**
+
+- [ ] `ticket-protocol` 单测 + `defaultSlaForPriority` / `isDevOsTicket` 行为符合上表  
+- [ ] `0006` 迁移已应用于开发库；`pnpm --filter @patioer/db typecheck` + 迁移相关测试通过  
+- [ ] `docker-compose.devos.yml` 含 Postgres healthcheck 与 `depends_on` 条件  
+- [ ] `docs/ops/devos-local.md` 已更新 Day 2 说明  
+
+---
+
+#### Sprint 5 · Day 3 — 可复制任务卡（5.3 DevOsClient + 5.10 DB 隔离）
+
+对应每日简表：**5.3** HTTP 客户端；**5.10** ElectroOS / DevOS 两库隔离校验。可按 **5.3-a → 5.3-c → 5.10-a → 5.10-b** 顺序实现。
+
+---
+
+**卡片 5.3-a — `packages/devos-bridge/src/devos-client.ts`**
+
+HTTP 路由约定（与 Paperclip/DevOS 实现联调时可微调，但路径应稳定）：
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `POST` | `/api/v1/devos/tickets` | JSON body：`{ ticket: DevOsTicket }`；响应：`{ ticketId: string }` |
+| `GET` | `/api/v1/devos/tickets/:ticketId/status` | 响应 JSON：`{ status: TicketStatus }` 或纯字符串 `"open"` |
+| `POST` | `/api/v1/devos/tickets/:ticketId/acknowledge` | 成功：`2xx`，无 body 要求 |
+| `POST` | `/api/v1/devos/tickets/:ticketId/resolve` | 成功：`2xx`，无 body 要求 |
+
+请求头：`x-api-key: <DEVOS_API_KEY>`（若配置）；`Content-Type: application/json`（有 body 时）。
+
+函数签名模板：
+
+```typescript
+export class DevOsHttpError extends Error {
+  readonly status: number
+  readonly responseBody: string
+}
+
+export interface DevOsClient {
+  createTicket(ticket: DevOsTicket): Promise<{ ticketId: string }>
+  getTicketStatus(ticketId: string): Promise<TicketStatus>
+  acknowledgeTicket(ticketId: string): Promise<void>
+  resolveTicket(ticketId: string): Promise<void>
+}
+
+export interface DevOsClientOptions {
+  baseUrl: string
+  apiKey?: string
+  fetch?: typeof fetch
+}
+
+export function createDevOsClient(options: DevOsClientOptions): DevOsClient
+```
+
+---
+
+**卡片 5.3-b — `packages/devos-bridge/src/index.ts`**
+
+导出：`createDevOsClient`、`DevOsHttpError`、`DevOsClient`、`DevOsClientOptions`（以及既有 `ticket-protocol` 导出）。
+
+---
+
+**卡片 5.3-c — `packages/devos-bridge/src/devos-client.test.ts`**
+
+| 用例名（`it`） |
+|----------------|
+| `createTicket POSTs /api/v1/devos/tickets with ticket body` |
+| `getTicketStatus GETs .../tickets/:id/status` |
+| `getTicketStatus accepts bare string JSON` |
+| `acknowledgeTicket POSTs .../acknowledge` |
+| `resolveTicket POSTs .../resolve` |
+| `throws DevOsHttpError on non-OK` |
+| `throws when create response missing ticketId` |
+
+**自测：** `pnpm --filter @patioer/devos-bridge test`；`test:coverage`。
+
+---
+
+**卡片 5.10-a — `packages/devos-bridge/src/electroos-devos-db-isolation.ts`**
+
+用于启动脚本或运维：确保 `DATABASE_URL` 与 `DEVOS_DATABASE_URL` 未指向同一 `host:port/dbname`。
+
+```typescript
+export interface PostgresIdentity {
+  hostname: string
+  port: string
+  database: string
+}
+
+export function postgresIdentityFromUrl(urlString: string): PostgresIdentity
+
+export function isSamePostgresDatabase(a: string, b: string): boolean
+
+export function assertElectroOsAndDevOsDbIsolated(
+  electroOsDatabaseUrl: string,
+  devOsDatabaseUrl: string,
+): void
+```
+
+测试文件：`electroos-devos-db-isolation.test.ts`
+
+| 用例名（`describe` / `it`） |
+|---------------------------|
+| `describe('postgresIdentityFromUrl')` — `parses host port and database` · `defaults port to 5432` |
+| `describe('isSamePostgresDatabase')` — `returns true for identical URLs` · `returns false when database name differs` · `returns false when port differs` |
+| `describe('assertElectroOsAndDevOsDbIsolated')` — `does not throw when databases differ` · `throws when same host port and dbname` |
+
+---
+
+**卡片 5.10-b — 配置与文档**
+
+| 文件 | 动作 |
+|------|------|
+| 根目录 `.env.example` | 增加注释占位 `DEVOS_DATABASE_URL`（例：`postgres://postgres:postgres@localhost:5433/devos`） |
+| `docs/ops/devos-local.md` | 说明 `DATABASE_URL`（patioer）vs `DEVOS_DATABASE_URL`（devos）及 `assertElectroOsAndDevOsDbIsolated` 用途 |
+
+（原任务表写 `tests/`；本仓库将 5.10 逻辑收拢到 `@patioer/devos-bridge`，与 HTTP 桥同一版本发布。）
+
+---
+
+**Day 3 完成定义（DoD）**
+
+- [ ] `createDevOsClient` 单测覆盖创建 / 查询 / ack / resolve 与错误路径  
+- [ ] `assertElectroOsAndDevOsDbIsolated` 单测覆盖  
+- [ ] `.env.example` 含 `DEVOS_DATABASE_URL` 注释；`devos-local.md` 含双库说明  
+
+---
+
+#### Sprint 5 · Day 4 — 可复制任务卡（5.5 devos-seed + 5.3 联调收尾）
+
+对应每日简表：**5.5** Engineering Org + SRE Agent 初始化；**5.3** 与 DevOS HTTP 基座联调收尾。建议顺序：**5.5-a → 5.5-b → 5.5-c → 5.5-d → 5.3-a → 5.3-b**。
+
+---
+
+**卡片 5.5-a — `packages/devos-bridge/src/devos-org-chart.ts`**
+
+```typescript
+export interface DevOsOrgNode {
+  id: string
+  name: string
+  role: string
+  children?: DevOsOrgNode[]
+}
+
+/** 默认工程组织树根（Engineering → SRE 团队 → SRE Agent）。 */
+export const DEVOS_ENGINEERING_ORG: DevOsOrgNode
+
+/** 生成写入 DevOS 的 bootstrap `DevOsTicket`（`description` 内嵌 `devos-org-chart/v1` JSON）。 */
+export function buildSreBootstrapTicket(org?: DevOsOrgNode): DevOsTicket
+```
+
+测试文件：`devos-org-chart.test.ts`
+
+| 用例名 |
+|--------|
+| `has SRE team and agent nodes` |
+| `returns feature ticket with JSON org in description` |
+
+---
+
+**卡片 5.5-b — `packages/devos-bridge/src/devos-seed.ts`**
+
+```typescript
+export interface DevOsSeedResult {
+  ticketId: string
+  dryRun: boolean
+}
+
+export async function runDevOsSeed(params: {
+  client: DevOsClient
+  dryRun: boolean
+}): Promise<DevOsSeedResult>
+```
+
+测试文件：`devos-seed.test.ts`
+
+| 用例名 |
+|--------|
+| `does not call client when dryRun` |
+| `calls createTicket when not dryRun` |
+
+---
+
+**卡片 5.5-c — `packages/devos-bridge/src/index.ts`**
+
+导出：`DEVOS_ENGINEERING_ORG`、`buildSreBootstrapTicket`、`runDevOsSeed`、`DevOsSeedResult`、`DevOsOrgNode`。
+
+---
+
+**卡片 5.5-d — `scripts/devos.seed.ts` + 根 `package.json`**
+
+- 脚本：`pnpm seed:devos` → `tsx ./scripts/devos.seed.ts`
+- 行为：`loadDevOsBridgeEnv` → `isDevOsBridgeConfigured` 为 false 则退出码 1；**非 dry-run** 时默认 `probeDevOsHttpBaseUrl(DEVOS_BASE_URL)`，失败则退出（`--skip-probe` 跳过）；`createDevOsClient` + `runDevOsSeed`；stdout 打印 JSON。
+
+---
+
+**卡片 5.3-a — `packages/devos-bridge/src/devos-probe.ts`（联调收尾 · 可达性）**
+
+```typescript
+export interface ProbeDevOsOptions {
+  fetch?: typeof fetch
+  timeoutMs?: number
+}
+
+export async function probeDevOsHttpBaseUrl(
+  baseUrl: string,
+  options?: ProbeDevOsOptions,
+): Promise<boolean>
+```
+
+测试文件：`devos-probe.test.ts`
+
+| 用例名 |
+|--------|
+| `returns true on 200` |
+| `returns true on 404` |
+| `returns false on 502` |
+| `returns false when fetch throws` |
+
+---
+
+**卡片 5.3-b — 文档**
+
+| 文件 | 动作 |
+|------|------|
+| `docs/ops/devos-local.md` | 增加 `pnpm seed:devos` / `--dry-run` / `--skip-probe` 说明 |
+
+---
+
+**Day 4 完成定义（DoD）**
+
+- [ ] `buildSreBootstrapTicket` / `runDevOsSeed` / `probeDevOsHttpBaseUrl` 单测通过  
+- [ ] `pnpm seed:devos -- --dry-run` 可执行并输出 JSON  
+- [ ] `docs/ops/devos-local.md` 已更新种子段落  
+
+---
+
+#### Sprint 5 · Day 5 — 可复制任务卡（5.6 Harness 报错 → DevOS `harness_update`）
+
+对应每日简表：**5.6** ElectroOS → DevOS 自动 Ticket（`harness_update`）。建议顺序：**5.6-a → 5.6-b → 5.6-c → 5.6-d**。
+
+---
+
+**卡片 5.6-a — `packages/harness/src/harness-error.ts`（Wire 序列化）**
+
+在现有 `HarnessError` 旁追加：
+
+```typescript
+/** 与 `@patioer/devos-bridge` 的 `HarnessErrorReport` 对齐的纯数据，避免 harness 依赖 devos-bridge。 */
+export interface HarnessErrorWire {
+  platform: string
+  code: string
+  message: string
+}
+
+/** `HarnessError` → Wire；非 HarnessError 返回 `null`（调用方决定是否上报）。 */
+export function toHarnessErrorWire(err: unknown): HarnessErrorWire | null
+```
+
+测试文件：`harness-error.test.ts`（新建）
+
+| 用例名 |
+|--------|
+| `returns wire for HarnessError` |
+| `returns null for non-HarnessError` |
+
+`packages/harness/src/index.ts`：导出 `HarnessErrorWire`、`toHarnessErrorWire`。
+
+---
+
+**卡片 5.6-b — `packages/devos-bridge/src/harness-update-ticket.ts`**
+
+```typescript
+import type { DevOsTicket, DevOsTicketPriority } from './ticket-protocol.js'
+
+/** 与 `toHarnessErrorWire` 对齐，并可选附带租户 / Agent 上下文。 */
+export interface HarnessErrorReport {
+  platform: string
+  code: string
+  message: string
+  tenantId?: string
+  agentId?: string
+}
+
+/** 按 code 粗分 P1（默认严重）与 P2（典型「资源不存在」类），供 SRE 队列降噪。 */
+export function deriveHarnessUpdatePriority(report: HarnessErrorReport): DevOsTicketPriority
+
+/** 构造 `type: harness_update` 的 `DevOsTicket`（context.errorLog / reproSteps 可检索）。 */
+export function buildHarnessUpdateTicket(report: HarnessErrorReport): DevOsTicket
+
+export async function reportHarnessErrorToDevOs(params: {
+  client: import('./devos-client.js').DevOsClient
+  report: HarnessErrorReport
+  dryRun?: boolean
+}): Promise<{ ticketId: string; dryRun: boolean }>
+```
+
+测试文件：`harness-update-ticket.test.ts`
+
+| 用例名 |
+|--------|
+| `buildHarnessUpdateTicket uses type harness_update and valid DevOsTicket shape` |
+| `deriveHarnessUpdatePriority returns P2 for not-found style codes` |
+| `deriveHarnessUpdatePriority returns P1 for typical failure codes` |
+| `reportHarnessErrorToDevOs does not call client when dryRun` |
+| `reportHarnessErrorToDevOs calls createTicket when not dryRun` |
+
+---
+
+**卡片 5.6-c — `packages/devos-bridge/src/index.ts`**
+
+导出：`HarnessErrorReport`、`deriveHarnessUpdatePriority`、`buildHarnessUpdateTicket`、`reportHarnessErrorToDevOs`。
+
+---
+
+**卡片 5.6-d — `docs/ops/devos-local.md`（1 段）**
+
+说明：运行时可将 `toHarnessErrorWire(err)` 与 `reportHarnessErrorToDevOs` 组合（需已配置 `DEVOS_BASE_URL`）；与 `devos_tickets` 表持久化（后续 API 任务）的关系一句话即可。
+
+---
+
+**Day 5 完成定义（DoD）**
+
+- [ ] `toHarnessErrorWire` / `buildHarnessUpdateTicket` / `reportHarnessErrorToDevOs` 单测通过  
+- [ ] `pnpm --filter @patioer/harness test` 与 `pnpm --filter @patioer/devos-bridge test` 通过  
+- [ ] `docs/ops/devos-local.md` 含 Harness → DevOS 上报说明  
+
+---
+
+#### Sprint 5 · Day 6 — 可复制任务卡（5.7 SRE / Prometheus 告警规则）
+
+对应每日简表：**5.7** Prometheus 告警规则（依赖 `apps/api` `/metrics` 与 Sprint 3.10 指标名）。建议顺序：**5.7-a → 5.7-b → 5.7-c → 5.7-d → 5.7-e → 5.7-f**。
+
+---
+
+**卡片 5.7-a — `packages/devos-bridge/prometheus/electroos-alerts.yml`**
+
+静态 **Prometheus `rule_files`** 片段（可复制到 Prometheus / kube-prometheus-stack），包含至少四条告警，与计划表对齐：
+
+| 告警语义 | DevOS 优先级（`labels.devos_priority`） | 指标 / 表达式要点 |
+|----------|------------------------------------------|-------------------|
+| Harness 错误率相对租户请求过高（>5%） | P0 | `harness_error_total` / `tenant_request_total` + `rate[5m]` |
+| Agent 心跳过久未更新（staleness） | P1 | `agent_heartbeat_last_timestamp` + `time()` |
+| API 延迟 p99 过高（>5s） | P1 | `api_request_duration_seconds_bucket` + `histogram_quantile(0.99, …)` |
+| DB 连接池占用过高（>90%） | P0 | `electroos_db_pool_usage_ratio`（见 5.7-d） |
+
+无 TS 函数；文件内附简短注释说明部署方式（`rule_files`）。
+
+---
+
+**卡片 5.7-b — `packages/devos-bridge/src/sre-alert-catalog.ts`**
+
+```typescript
+import type { DevOsTicketPriority } from './ticket-protocol.js'
+
+/** 与 `prometheus/electroos-alerts.yml` 中 `alert:` 名称一一对应（供 SRE Agent / 文档生成 DevOS SLA）。 */
+export const SRE_PROMETHEUS_ALERT_NAMES: readonly string[]
+
+/** 告警名 → 建议 DevOS Ticket 优先级（与 YAML `labels.devos_priority` 一致）。 */
+export function sreAlertDevOsPriority(alertName: string): DevOsTicketPriority | undefined
+```
+
+测试文件：`sre-alert-catalog.test.ts`
+
+| 用例名 |
+|--------|
+| `SRE_PROMETHEUS_ALERT_NAMES lists four alert names` |
+| `sreAlertDevOsPriority returns P0 for harness and db pool alerts` |
+| `sreAlertDevOsPriority returns P1 for heartbeat and latency alerts` |
+| `electroos-alerts.yml contains every catalog alert name` |
+
+---
+
+**卡片 5.7-c — `packages/devos-bridge/src/index.ts`**
+
+导出：`SRE_PROMETHEUS_ALERT_NAMES`、`sreAlertDevOsPriority`。
+
+---
+
+**卡片 5.7-d — `apps/api/src/plugins/metrics.ts`（补齐 db 池指标 · S3.10 对齐）**
+
+```typescript
+/** 活跃连接数 / pool.max（0..1），供 Prometheus 规则 `electroos_db_pool_usage_ratio > 0.9`。 */
+export const dbPoolUsageRatio: Gauge
+```
+
+实现：`Gauge` 使用 **`collect()`** 回调（每次 scrape 从 `@patioer/db` 的 `pool` 读取 `totalCount` / `idleCount` / `options.max`），避免 `setInterval`。
+
+---
+
+**卡片 5.7-e — `apps/api/src/plugins/metrics.test.ts`**
+
+| 用例名（新增或扩展） |
+|----------------------|
+| `GET /metrics exposes electroos_db_pool_usage_ratio` |
+
+---
+
+**卡片 5.7-f — `docs/ops/prometheus-sre-alerts.md`（新建）**
+
+- 说明 `packages/devos-bridge/prometheus/electroos-alerts.yml` 的用途、`sre-alert-catalog` 与 DevOS 优先级映射。  
+- `docs/ops/devos-local.md` 增加一行链到该文档。
+
+---
+
+**Day 6 完成定义（DoD）**
+
+- [ ] `electroos-alerts.yml` 存在且四条告警与目录一致  
+- [ ] `sre-alert-catalog` 单测通过；YAML 与 catalog 名称一致  
+- [ ] `/metrics` 暴露 `electroos_db_pool_usage_ratio`  
+- [ ] `docs/ops/prometheus-sre-alerts.md` 已添加  
+
+---
+
+#### Sprint 5 · Day 7 — 可复制任务卡（5.7 续 · 规则↔指标对齐 + 冒烟检查）
+
+对应每日简表：**5.7 规则与指标对齐 / 本地或 staging 冒烟**。Day 6 产出了 YAML 规则与 `sre-alert-catalog`；Day 7 做三件事——① 编程验证 YAML 表达式引用的指标名在 `metrics.ts` 中确实注册；② 提供一个可复用的 `/metrics` 冒烟检查函数（CI 或本地一键跑）；③ 给 YAML 每条规则补齐 `description` 注解（Alertmanager 通知模板用）。建议顺序：**5.7-g → 5.7-h → 5.7-i → 5.7-j → 5.7-k**。
+
+---
+
+**卡片 5.7-g — `packages/devos-bridge/src/sre-alert-metric-alignment.ts`**
+
+```typescript
+/** 从 YAML 规则 expr 中提取引用到的 Prometheus metric 名。 */
+export function extractMetricNamesFromYaml(yamlContent: string): string[]
+
+/** 编程验证：所有 YAML 表达式引用的 metric 在 `knownMetrics` 集合中存在。 */
+export interface AlignmentResult {
+  ok: boolean
+  missingMetrics: string[]
+  extraAlerts: string[]
+}
+export function checkAlertMetricAlignment(params: {
+  yamlContent: string
+  knownMetricNames: string[]
+  catalogAlertNames: readonly string[]
+}): AlignmentResult
+```
+
+测试文件：`sre-alert-metric-alignment.test.ts`
+
+| 用例名 |
+|--------|
+| `extractMetricNamesFromYaml finds all four metric families` |
+| `checkAlertMetricAlignment returns ok when all metrics present` |
+| `checkAlertMetricAlignment detects missing metric` |
+| `checkAlertMetricAlignment detects extra alert not in catalog` |
+
+---
+
+**卡片 5.7-h — `packages/devos-bridge/src/sre-smoke-check.ts`**
+
+```typescript
+export interface SmokeCheckResult {
+  ok: boolean
+  missingMetrics: string[]
+  sampleCount: number
+}
+
+/** 拉取 /metrics 端点，校验所有 `requiredMetrics` 名出现在响应中。 */
+export async function sreMetricsSmokeCheck(params: {
+  metricsUrl: string
+  requiredMetrics: string[]
+  fetch?: typeof fetch
+  timeoutMs?: number
+}): Promise<SmokeCheckResult>
+```
+
+测试文件：`sre-smoke-check.test.ts`
+
+| 用例名 |
+|--------|
+| `returns ok when all required metrics present` |
+| `detects missing metric in response` |
+| `returns ok:false when fetch fails` |
+
+---
+
+**卡片 5.7-i — `packages/devos-bridge/prometheus/electroos-alerts.yml`（描述注解）**
+
+为每条告警 `annotations` 补齐 `description`（Alertmanager → DevOS Ticket 时用于 `ticket.description`），无逻辑变更。
+
+---
+
+**卡片 5.7-j — `packages/devos-bridge/src/index.ts`**
+
+导出：`extractMetricNamesFromYaml`、`checkAlertMetricAlignment`、`AlignmentResult`、`sreMetricsSmokeCheck`、`SmokeCheckResult`。
+
+---
+
+**卡片 5.7-k — `docs/ops/prometheus-sre-alerts.md`（补充）**
+
+增加 **「对齐验证」** 一段：说明 `checkAlertMetricAlignment` 用途与 CI 中可选集成思路。
+
+---
+
+**Day 7 完成定义（DoD）**
+
+- [ ] `checkAlertMetricAlignment` 返回 `ok:true`（YAML 所有 expr 引用的 metric 均已在 `metrics.ts` 注册）  
+- [ ] `sreMetricsSmokeCheck` 单测通过  
+- [ ] YAML 四条规则均含 `description` 注解  
+- [ ] `pnpm --filter @patioer/devos-bridge test` 通过  
+
+---
+
+#### Sprint 5 · Day 8 — 可复制任务卡（5.8 上 · Alertmanager webhook → DevOS Ticket → SRE 响应）
+
+对应每日简表：**5.8 Alertmanager webhook → DevOS Ticket → SRE 响应（上）**。建议顺序：**5.8-a → 5.8-b → 5.8-c → 5.8-d → 5.8-e**。
+
+数据流：`Alertmanager POST JSON → parseAlertmanagerPayload → alertToDevOsTicket → client.createTicket → buildSreResponseSuggestion`。
+
+---
+
+**卡片 5.8-a — `packages/devos-bridge/src/alertmanager-webhook-payload.ts`**
+
+Alertmanager webhook JSON 的类型定义与解析函数。
+
+```typescript
+/** Alertmanager v4 webhook alert entry（精简子集，只保留 DevOS 桥接用到的字段）。 */
+export interface AlertmanagerAlert {
+  status: 'firing' | 'resolved'
+  labels: Record<string, string>
+  annotations: Record<string, string>
+  startsAt: string
+  endsAt: string
+  fingerprint: string
+}
+
+/** Alertmanager webhook POST body 顶层结构（精简子集）。 */
+export interface AlertmanagerWebhookPayload {
+  version: string
+  status: 'firing' | 'resolved'
+  alerts: AlertmanagerAlert[]
+}
+
+/** 从 `request.body` 解析；返回 null 表示格式不符。 */
+export function parseAlertmanagerPayload(
+  body: unknown,
+): AlertmanagerWebhookPayload | null
+```
+
+测试文件：`alertmanager-webhook-payload.test.ts`
+
+| 用例名 |
+|--------|
+| `parses valid firing payload` |
+| `parses valid resolved payload` |
+| `returns null for non-object` |
+| `returns null when alerts missing` |
+| `returns null when alert entry lacks required fields` |
+
+---
+
+**卡片 5.8-b — `packages/devos-bridge/src/alertmanager-to-ticket.ts`**
+
+将单条 `AlertmanagerAlert` 转为 `DevOsTicket`，利用 `sreAlertDevOsPriority` 设定优先级。
+
+```typescript
+import type { AlertmanagerAlert } from './alertmanager-webhook-payload.js'
+import type { DevOsTicket } from './ticket-protocol.js'
+
+/** 单条 firing alert → DevOsTicket（performance / harness_update 类型由 alert name 推断）。 */
+export function alertToDevOsTicket(alert: AlertmanagerAlert): DevOsTicket
+
+export interface AlertWebhookResult {
+  created: number
+  skipped: number
+  errors: Array<{ fingerprint: string; error: string }>
+  ticketIds: string[]
+}
+
+/** 批量处理 webhook payload：仅对 firing 告警创建 Ticket，resolved 忽略。 */
+export async function handleAlertmanagerWebhook(params: {
+  payload: import('./alertmanager-webhook-payload.js').AlertmanagerWebhookPayload
+  client: import('./devos-client.js').DevOsClient
+}): Promise<AlertWebhookResult>
+```
+
+测试文件：`alertmanager-to-ticket.test.ts`
+
+| 用例名 |
+|--------|
+| `alertToDevOsTicket builds valid ticket from firing alert` |
+| `alertToDevOsTicket uses P0 for HarnessErrorRateHigh` |
+| `alertToDevOsTicket falls back to P1 for unknown alert` |
+| `handleAlertmanagerWebhook creates tickets for firing alerts` |
+| `handleAlertmanagerWebhook skips resolved alerts` |
+| `handleAlertmanagerWebhook records errors from createTicket failures` |
+
+---
+
+**卡片 5.8-c — `packages/devos-bridge/src/sre-response-suggestion.ts`**
+
+SRE Agent 对一条告警生成结构化的「初步响应建议」。
+
+```typescript
+export interface SreResponseSuggestion {
+  alertName: string
+  severity: string
+  suggestedAction: string
+  runbook: string
+}
+
+/** 根据告警名生成 SRE 标准响应建议（runbook 链接 + 建议操作）。 */
+export function buildSreResponseSuggestion(alertName: string): SreResponseSuggestion
+```
+
+测试文件：`sre-response-suggestion.test.ts`
+
+| 用例名 |
+|--------|
+| `returns runbook for ElectroOsHarnessErrorRateHigh` |
+| `returns runbook for ElectroOsDbPoolUsageHigh` |
+| `returns generic suggestion for unknown alert` |
+
+---
+
+**卡片 5.8-d — `packages/devos-bridge/src/index.ts`**
+
+导出：`AlertmanagerAlert`、`AlertmanagerWebhookPayload`、`parseAlertmanagerPayload`、`alertToDevOsTicket`、`AlertWebhookResult`、`handleAlertmanagerWebhook`、`SreResponseSuggestion`、`buildSreResponseSuggestion`。
+
+---
+
+**卡片 5.8-e — `docs/ops/devos-local.md`（1 段）**
+
+增加 **「Alertmanager → DevOS Ticket（Day 8–9）」** 段：`handleAlertmanagerWebhook` 用法简述、Alertmanager `webhook_configs` 配置要点。
+
+---
+
+**Day 8 完成定义（DoD）**
+
+- [ ] `parseAlertmanagerPayload` / `alertToDevOsTicket` / `handleAlertmanagerWebhook` / `buildSreResponseSuggestion` 单测通过  
+- [ ] `pnpm --filter @patioer/devos-bridge test` 通过  
+- [ ] `docs/ops/devos-local.md` 含 Alertmanager → DevOS 段落  
+
+---
+
+#### Sprint 5 · Day 9 — 可复制任务卡（5.8 下 · 通道收尾 + 端到端演练）
+
+对应每日简表：**5.8 通道收尾、端到端演练（伪造告警 → Ticket）**。Day 8 产出了解析 / 转 Ticket / 响应建议三个原子函数；Day 9 做三件事——① 一次性管道函数（raw body → Ticket + SRE 建议）；② fingerprint 幂等守卫（去重）；③ 完整端到端测试（伪造 Alertmanager payload → pipeline → 断言 Ticket 与 Suggestion）。建议顺序：**5.8-f → 5.8-g → 5.8-h → 5.8-i → 5.8-j**。
+
+---
+
+**卡片 5.8-f — `packages/devos-bridge/src/alert-dedup.ts`**
+
+Fingerprint 去重守卫，防止 Alertmanager 重复 webhook 创建重复 Ticket。
+
+```typescript
+export interface AlertDedupStore {
+  has(fingerprint: string): boolean
+  add(fingerprint: string): void
+  readonly size: number
+}
+
+/** 内存 TTL 去重（进程重启清空；适合单实例 + Paperclip 短窗口）。 */
+export function createAlertDedupStore(params?: {
+  ttlMs?: number
+  maxSize?: number
+}): AlertDedupStore
+```
+
+测试文件：`alert-dedup.test.ts`
+
+| 用例名 |
+|--------|
+| `returns false for unseen fingerprint` |
+| `returns true for seen fingerprint within TTL` |
+| `evicts expired fingerprints` |
+| `evicts oldest when maxSize exceeded` |
+
+---
+
+**卡片 5.8-g — `packages/devos-bridge/src/alertmanager-pipeline.ts`**
+
+一次性管道：raw body → parse → dedup → create tickets → SRE suggestions。
+
+```typescript
+import type { DevOsClient } from './devos-client.js'
+import type { AlertDedupStore } from './alert-dedup.js'
+import type { AlertWebhookResult } from './alertmanager-to-ticket.js'
+import type { SreResponseSuggestion } from './sre-response-suggestion.js'
+
+export interface AlertPipelineResult {
+  webhookResult: AlertWebhookResult
+  suggestions: SreResponseSuggestion[]
+  dedupSkipped: number
+}
+
+export async function runAlertmanagerPipeline(params: {
+  body: unknown
+  client: DevOsClient
+  dedup?: AlertDedupStore
+}): Promise<AlertPipelineResult>
+```
+
+测试文件：`alertmanager-pipeline.test.ts`
+
+| 用例名 |
+|--------|
+| `returns parse_error when body is invalid` |
+| `creates tickets and returns suggestions for firing alerts` |
+| `skips duplicate fingerprints via dedup store` |
+| `handles mixed firing and resolved alerts` |
+
+---
+
+**卡片 5.8-h — `packages/devos-bridge/src/alertmanager-e2e-fixtures.ts`**
+
+四条预制 firing payload（每种告警一条）+ 一条 resolved，供测试与演示脚本使用。
+
+```typescript
+import type { AlertmanagerWebhookPayload } from './alertmanager-webhook-payload.js'
+
+export const FIXTURE_HARNESS_ERROR_FIRING: AlertmanagerWebhookPayload
+export const FIXTURE_HEARTBEAT_STALE_FIRING: AlertmanagerWebhookPayload
+export const FIXTURE_LATENCY_P99_FIRING: AlertmanagerWebhookPayload
+export const FIXTURE_DB_POOL_FIRING: AlertmanagerWebhookPayload
+export const FIXTURE_RESOLVED: AlertmanagerWebhookPayload
+```
+
+测试文件：`alertmanager-e2e-fixtures.test.ts`
+
+| 用例名 |
+|--------|
+| `all firing fixtures pass parseAlertmanagerPayload` |
+| `resolved fixture has status resolved` |
+| `pipeline processes all four firing fixtures end-to-end` |
+
+---
+
+**卡片 5.8-i — `packages/devos-bridge/src/index.ts`**
+
+导出：`AlertDedupStore`、`createAlertDedupStore`、`AlertPipelineResult`、`runAlertmanagerPipeline`、五个 `FIXTURE_*` 常量。
+
+---
+
+**卡片 5.8-j — `docs/ops/devos-local.md`（更新 Alertmanager 段）**
+
+补充去重说明（`createAlertDedupStore` 默认 TTL / maxSize）与端到端演练命令（指向测试文件路径）。
+
+---
+
+**Day 9 完成定义（DoD）**
+
+- [ ] `createAlertDedupStore` / `runAlertmanagerPipeline` 单测通过  
+- [ ] 四条 fixture 端到端测试全部通过  
+- [ ] `pnpm --filter @patioer/devos-bridge test` 通过  
+- [ ] `docs/ops/devos-local.md` 含去重 + 演练说明  
+
+---
+
+#### Sprint 5 · Day 10 — 可复制任务卡（5.11 DevOS Bridge 测试套件 + Sprint 5 验收 checklist）
+
+对应每日简表：**5.11 DevOS Bridge 测试套件 │ Sprint 5 验收 checklist 全绿**。Day 1–9 各模块已有独立单测；Day 10 补齐三件事——① Sprint 5 验收清单模块（四项 checklist 可编程运行）；② 跨模块集成测试（harness→ticket / alert→pipeline→suggestion / seed→bootstrap 全链路）；③ 公共 API 表面验证（index.ts 每个导出均有值）。建议顺序：**5.11-a → 5.11-b → 5.11-c → 5.11-d → 5.11-e**。
+
+---
+
+**卡片 5.11-a — `packages/devos-bridge/src/sprint5-acceptance-checklist.ts`**
+
+四项 Sprint 5 验收标准的可编程检查，各自独立，汇总返回 `allPassed`。
+
+```typescript
+export interface AcceptanceCheck {
+  id: string
+  description: string
+  passed: boolean
+  detail?: string
+}
+
+export interface Sprint5AcceptanceResult {
+  checks: AcceptanceCheck[]
+  allPassed: boolean
+}
+
+/** AC-1: DevOsTicket 协议完整可用（type / priority / SLA / isDevOsTicket）。 */
+export function checkTicketProtocolIntegrity(): AcceptanceCheck
+
+/** AC-2: Harness 报错可生成合法 DevOsTicket（buildHarnessUpdateTicket → isDevOsTicket）。 */
+export function checkHarnessToDevOsFlow(): AcceptanceCheck
+
+/** AC-3: SRE alert catalog 覆盖全部 YAML 规则，且 priority 映射无漏。 */
+export function checkAlertRulesCatalogComplete(): AcceptanceCheck
+
+/** AC-4: DB 隔离逻辑正确拒绝同库、接受异库。 */
+export function checkDbIsolationLogic(): AcceptanceCheck
+
+/** 汇总运行。 */
+export function runSprint5AcceptanceChecklist(): Sprint5AcceptanceResult
+```
+
+测试文件：`sprint5-acceptance-checklist.test.ts`
+
+| 用例名 |
+|--------|
+| `AC-1 ticket protocol integrity passes` |
+| `AC-2 harness to DevOS flow passes` |
+| `AC-3 alert rules catalog complete passes` |
+| `AC-4 DB isolation logic passes` |
+| `runSprint5AcceptanceChecklist returns allPassed true` |
+
+---
+
+**卡片 5.11-b — `packages/devos-bridge/src/devos-bridge-integration.test.ts`**
+
+跨模块集成测试，验证完整数据链路。
+
+| 用例名 |
+|--------|
+| `harness error → buildHarnessUpdateTicket → client.createTicket round-trip` |
+| `alert fixture → runAlertmanagerPipeline → ticket + suggestion` |
+| `duplicate alert is skipped on second pipeline run` |
+| `seed bootstrap ticket passes isDevOsTicket validation` |
+| `all alertToDevOsTicket outputs pass isDevOsTicket` |
+
+---
+
+**卡片 5.11-c — `packages/devos-bridge/src/devos-bridge-exports.test.ts`**
+
+验证 `index.ts` 每个运行时导出（非纯 type）均为 defined 值。
+
+| 用例名 |
+|--------|
+| `all runtime exports from index.ts are defined` |
+| `exported functions are callable` |
+
+---
+
+**卡片 5.11-d — `packages/devos-bridge/src/index.ts`**
+
+导出：`AcceptanceCheck`、`Sprint5AcceptanceResult`、`runSprint5AcceptanceChecklist`、以及四个 `check*` 函数。
+
+---
+
+**卡片 5.11-e — `docs/ops/devos-local.md`（更新验收段）**
+
+新增「Sprint 5 验收 Checklist」段：`runSprint5AcceptanceChecklist()` 用法、四项检查说明、测试命令。
+
+---
+
+**Day 10 完成定义（DoD）**
+
+- [ ] `runSprint5AcceptanceChecklist` 返回 `allPassed: true`  
+- [ ] 跨模块集成测试全部通过  
+- [ ] 公共 API 表面验证通过  
+- [ ] `pnpm --filter @patioer/devos-bridge test` 全量通过  
+- [ ] `docs/ops/devos-local.md` 含验收 checklist 说明  
+
 ---
 
 ### Sprint 6 · Week 11–12 — 验证 + 压测 + 文档
@@ -7634,6 +8781,7 @@ export interface DevOsClient {
   createTicket(ticket: DevOsTicket): Promise<{ ticketId: string }>
   getTicketStatus(ticketId: string): Promise<TicketStatus>
   acknowledgeTicket(ticketId: string): Promise<void>
+  resolveTicket(ticketId: string): Promise<void>
 }
 ```
 

@@ -132,6 +132,8 @@ importers:
         specifier: latest
         version: 0.31.10
 
+  packages/devos-bridge: {}
+
   packages/harness:
     devDependencies:
       tsx:

@@ -46,3 +46,16 @@ export class HarnessError extends Error {
     this.name = 'HarnessError'
   }
 }
+
+/** 与 `@patioer/devos-bridge` 的 `HarnessErrorReport` 对齐的纯数据，避免 harness 依赖 devos-bridge。 */
+export interface HarnessErrorWire {
+  platform: string
+  code: string
+  message: string
+}
+
+/** `HarnessError` → Wire；非 HarnessError 返回 `null`（调用方决定是否上报）。 */
+export function toHarnessErrorWire(err: unknown): HarnessErrorWire | null {
+  if (!(err instanceof HarnessError)) return null
+  return { platform: err.platform, code: err.code, message: err.message }
+}
