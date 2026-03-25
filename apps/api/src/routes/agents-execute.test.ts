@@ -252,6 +252,7 @@ describe('agents execute route', () => {
     const app = createApp([
       [{ id: '123e4567-e89b-12d3-a456-426614174001', type: 'price-sentinel', goalContext: '' }],
       ...HARNESS_CONTEXT_DB_TAIL,
+      undefined,
     ])
     const response = await app.inject({
       method: 'POST',
@@ -377,6 +378,7 @@ describe('agents execute route', () => {
     const app = createApp([
       [{ id: '123e4567-e89b-12d3-a456-426614174001', type: 'price-sentinel', goalContext: '' }],
       ...HARNESS_CONTEXT_DB_TAIL,
+      undefined,
     ])
     const response = await app.inject({
       method: 'POST',

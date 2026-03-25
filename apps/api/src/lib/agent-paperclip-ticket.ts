@@ -14,6 +14,7 @@ export async function createIssueForAgentTicket(
   tenantId: string,
   agentId: string,
   params: TicketParams,
+  paperclipCompanyId?: string | null,
 ): Promise<AgentPaperclipTicketResult> {
   if (!bridge) return {}
 
@@ -22,6 +23,7 @@ export async function createIssueForAgentTicket(
       title: params.title,
       description: params.body,
       priority: 'medium',
+      companyId: paperclipCompanyId ?? undefined,
       agentId,
       context: { tenantId, source: 'electroos-agent' },
     })

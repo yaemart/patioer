@@ -91,6 +91,41 @@ export interface AgentContextOptions {
   agentId: string
 }
 
+/** Phase 3 · DataOS (optional; degraded when unavailable). */
+export interface DataOsFeatureSnapshot {
+  conv_rate_7d?: string | null
+  price_current?: string | null
+  product_id?: string
+  platform?: string
+  [key: string]: unknown
+}
+
+export interface DataOsPort {
+  getFeatures(platform: string, productId: string): Promise<DataOsFeatureSnapshot | null>
+  recallMemory(agentId: string, context: unknown): Promise<unknown[] | null>
+  recordMemory(input: {
+    agentId: string
+    platform?: string
+    entityId?: string
+    context: unknown
+    action: unknown
+  }): Promise<string | null>
+  recordLakeEvent(input: {
+    agentId: string
+    eventType: string
+    entityId?: string
+    payload: unknown
+    metadata?: unknown
+  }): Promise<void>
+  recordPriceEvent(input: {
+    productId: string
+    priceBefore: number
+    priceAfter: number
+    changePct: number
+    approved: boolean
+  }): Promise<void>
+}
+
 export interface CreateAgentContextDeps {
   harness: HarnessPort
   budget: BudgetPort
@@ -107,6 +142,8 @@ export interface CreateAgentContextDeps {
   approvalsQuery?: ApprovalsQueryPort
   /** When set, `ctx.getRecentEvents(n)` returns the last n agent_events for this agent. */
   events?: EventsPort
+  /** Phase 3 · DataOS client (Feature Store / Decision Memory / Event Lake). */
+  dataOS?: DataOsPort
 }
 
 export interface PriceSentinelRunInput {

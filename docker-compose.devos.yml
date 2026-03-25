@@ -4,7 +4,7 @@ version: '3.9'
 
 services:
   devos-postgres:
-    image: postgres:14
+    image: postgres:16
     container_name: devos-postgres
     environment:
       POSTGRES_USER: postgres
@@ -31,13 +31,20 @@ services:
       corepack enable && pnpm install && pnpm dev"
     volumes:
       - ./paperclip:/workspace/paperclip
+      - devos_paperclip_node_modules:/workspace/paperclip/node_modules
     ports:
-      - '3200:3000'
+      - '3101:3101'
+      - '3200:3101'
     environment:
       DATABASE_URL: postgres://postgres:postgres@devos-postgres:5432/devos
+      HOST: 0.0.0.0
+      PORT: 3101
+      PAPERCLIP_DEPLOYMENT_MODE: authenticated
+      BETTER_AUTH_SECRET: devos-local-secret
     depends_on:
       devos-postgres:
         condition: service_healthy
 
 volumes:
   devos_postgres_data:
+  devos_paperclip_node_modules:

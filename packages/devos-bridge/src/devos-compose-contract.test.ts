@@ -13,7 +13,8 @@ describe('docker-compose.devos.yml', () => {
   })
 
   it('keeps expected ports and startup guard', () => {
-    expect(composeYaml).toContain("'3200:3000'")
+    expect(composeYaml).toContain("'3200:3101'")
+    expect(composeYaml).toContain("'3101:3101'")
     expect(composeYaml).toContain("'5433:5432'")
     expect(composeYaml).toContain('Missing ./paperclip checkout.')
   })

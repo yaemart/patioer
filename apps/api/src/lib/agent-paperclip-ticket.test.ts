@@ -23,12 +23,13 @@ describe('createIssueForAgentTicket', () => {
     const out = await createIssueForAgentTicket(bridge, 'tenant-1', 'agent-1', {
       title: 'Low stock',
       body: 'SKU details',
-    })
+    }, 'company-1')
 
     expect(createIssue).toHaveBeenCalledWith({
       title: 'Low stock',
       description: 'SKU details',
       priority: 'medium',
+      companyId: 'company-1',
       agentId: 'agent-1',
       context: { tenantId: 'tenant-1', source: 'electroos-agent' },
     })

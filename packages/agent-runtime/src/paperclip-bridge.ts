@@ -47,6 +47,7 @@ export interface PaperclipIssuePayload {
   title: string
   description?: string
   priority?: 'low' | 'medium' | 'high'
+  companyId?: string
   agentId?: string
   context?: Record<string, unknown>
 }
@@ -97,7 +98,7 @@ export class PaperclipBridge {
   }
 
   async createIssue(payload: PaperclipIssuePayload): Promise<PaperclipIssueResult> {
-    const responseBody = await this.requestJson<unknown>('POST', '/api/issues', {
+    const body = {
       title: payload.title,
       description: payload.description ?? '',
       priority: payload.priority ?? 'medium',
@@ -105,10 +106,37 @@ export class PaperclipBridge {
         ...(payload.agentId !== undefined ? { agentId: payload.agentId } : {}),
         ...payload.context,
       },
-    })
+    }
+
+    let createdViaCompanyScopedEndpoint = false
+    const responseBody = await (async () => {
+      if (payload.companyId) {
+        try {
+          const res = await this.requestJson<unknown>(
+            'POST',
+            `/api/companies/${payload.companyId}/issues`,
+            body,
+          )
+          createdViaCompanyScopedEndpoint = true
+          return res
+        } catch (error) {
+          const bridgeError = error as PaperclipBridgeError
+          if (bridgeError.code !== 'not_found') throw error
+          // Fallback for older Paperclip servers that still expose /api/issues.
+        }
+      }
+      return this.requestJson<unknown>('POST', '/api/issues', body)
+    })()
+
     const data = this.asRecord(responseBody)
     const id = data.id
-    const url = data.url
+    const url =
+      data.url ??
+      (typeof id === 'string'
+        ? createdViaCompanyScopedEndpoint && payload.companyId
+          ? `${this.options.baseUrl}/companies/${payload.companyId}/issues/${id}`
+          : `${this.options.baseUrl}/issues/${id}`
+        : undefined)
     const status = data.status
     if (typeof id !== 'string' || typeof url !== 'string' || typeof status !== 'string') {
       throw new PaperclipBridgeError('Paperclip issue response missing id, url, or status', {

@@ -35,6 +35,10 @@ pnpm --filter api dev
 # Swagger UI at http://localhost:3100/api/v1/docs
 ```
 
+### DataOS（Phase 3，可选）
+
+本地分析湖与特征栈使用独立 Compose，见 [docs/ops/dataos-local.md](ops/dataos-local.md)。与主栈 `docker-compose.yml` 端口不冲突。
+
 ### Running Tests
 
 ```bash
@@ -259,6 +263,12 @@ The OpenAPI 3.0 JSON spec is available at:
 http://localhost:3100/api/v1/docs/json
 ```
 
+Sprint 6 supplemental static spec (new platform routes + onboarding + ads/inventory):
+
+```
+docs/openapi/sprint6-api.openapi.yaml
+```
+
 ### Route Groups
 
 | Tag | Endpoints | Auth |
@@ -427,3 +437,39 @@ curl http://localhost:3100/api/v1/agents \
 # Full reset (destroys DB volumes)
 ./scripts/staging-up.sh reset
 ```
+
+---
+
+## 8. DevOS Local Deployment (Phase 2)
+
+Use `docker-compose.devos.yml` for the isolated DevOS stack:
+
+- DevOS Paperclip: `http://localhost:3101` (primary) and `http://localhost:3200` (compat)
+- DevOS PostgreSQL: `localhost:5433/devos`
+- ElectroOS API: `http://localhost:3100` (separate stack)
+
+Quick commands:
+
+```bash
+docker compose -f docker-compose.devos.yml up -d
+docker compose -f docker-compose.devos.yml ps
+curl http://localhost:3101/api/health
+curl http://localhost:3200/api/health
+```
+
+Detailed runbook: `docs/ops/devos-local.md`.
+
+---
+
+## 9. Prometheus / SRE Alerts
+
+Prometheus rule and Alertmanager-to-DevOS ticket bridge details are documented in:
+
+- `docs/ops/prometheus-sre-alerts.md`
+- `packages/devos-bridge/prometheus/electroos-alerts.yml`
+
+This includes:
+
+- Required `/metrics` names
+- DevOS priority mapping (`P0` / `P1`)
+- Alertmanager webhook pipeline and dedup behavior

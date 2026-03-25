@@ -4,6 +4,7 @@ import type {
   AgentContextOptions,
   ApprovalRequest,
   CreateAgentContextDeps,
+  DataOsPort,
   LlmParams,
   LlmResponse,
   PendingApprovalItem,
@@ -14,6 +15,9 @@ import type {
 export interface AgentContext {
   tenantId: string
   agentId: string
+
+  /** Phase 3 · DataOS; present when API wires `deps.dataOS`. */
+  dataOS?: DataOsPort
 
   /**
    * Without `platform`, returns the default harness for this run (same as single-platform Phase 1).
@@ -95,6 +99,10 @@ export function createAgentContext(
   ctx.getRecentEvents = (limit: number) => {
     if (!deps.events) return Promise.resolve([])
     return deps.events.getRecent(tenantId, agentId, limit)
+  }
+
+  if (deps.dataOS) {
+    ctx.dataOS = deps.dataOS
   }
 
   if (deps.market) {

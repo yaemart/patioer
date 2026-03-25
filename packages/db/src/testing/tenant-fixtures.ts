@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { eq, isNull } from 'drizzle-orm'
 import { db, pool, withTenantDb } from '../client.js'
 import * as schema from '../schema/index.js'
 
@@ -9,16 +9,31 @@ export interface TenantFixture {
 
 export interface SeedResult {
   agentId: string
+  agentIds: string[]
   productId: string
   orderId: string
   eventId: string
   approvalId: string
   credentialId: string
+  credentialIds: string[]
   adsCampaignId: string
   inventoryLevelId: string
 }
 
+export interface SeedTenantOptions {
+  credentialsPlatforms?: string[]
+  dataPlatform?: string
+  agentCount?: number
+}
+
 const suffix = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+
+/**
+ * Non-existent tenant UUID used only for teardown: under `devos_tickets` RLS, this
+ * context can see rows with `tenant_id IS NULL` (system) but not other tenants'
+ * scoped rows — same idea as `rls-all-tables.integration.test.ts` phantom tenant.
+ */
+const DEVOS_SYSTEM_CLEANUP_TENANT_ID = '00000000-0000-0000-0000-000000000000'
 
 export async function setupTwoTenants(): Promise<TenantFixture> {
   const tag = suffix()
@@ -39,35 +54,65 @@ export async function setupTwoTenants(): Promise<TenantFixture> {
 export async function seedTenantData(
   tenantId: string,
   label: string,
+  options: SeedTenantOptions = {},
 ): Promise<SeedResult> {
   return withTenantDb(tenantId, async (tdb) => {
-    const [cred] = await tdb
-      .insert(schema.platformCredentials)
-      .values({
-        tenantId,
-        platform: 'shopify',
-        region: 'global',
-        shopDomain: `${label}.myshopify.com`,
-        accessToken: `enc-token-${label}`,
-      })
-      .returning()
+    const credentialsPlatforms = options.credentialsPlatforms ?? ['shopify']
+    const dataPlatform = options.dataPlatform ?? credentialsPlatforms[0] ?? 'shopify'
+    const agentCount = Math.max(1, options.agentCount ?? 1)
 
-    const [agent] = await tdb
-      .insert(schema.agents)
-      .values({
-        tenantId,
-        name: `Agent ${label}`,
-        type: 'price-sentinel',
-        status: 'active',
-      })
-      .returning()
+    const credentials = [] as { id: string }[]
+
+    for (const platform of credentialsPlatforms) {
+      const region =
+        platform === 'amazon'
+          ? 'NA'
+          : platform === 'shopee'
+            ? 'SG'
+            : platform === 'tiktok'
+              ? 'global'
+              : 'global'
+
+      const shopDomain = platform === 'shopify' ? `${label}.myshopify.com` : null
+      const credentialType = platform === 'amazon' ? 'lwa' : platform === 'shopify' ? 'oauth' : 'hmac'
+
+      const [cred] = await tdb
+        .insert(schema.platformCredentials)
+        .values({
+          tenantId,
+          platform,
+          credentialType,
+          region,
+          shopDomain,
+          accessToken: `enc-token-${label}-${platform}`,
+          metadata: { seededBy: 'seedTenantData', label, platform },
+        })
+        .returning()
+
+      credentials.push({ id: cred!.id })
+    }
+
+    const agentRows = [] as { id: string }[]
+    for (let i = 0; i < agentCount; i += 1) {
+      const [agent] = await tdb
+        .insert(schema.agents)
+        .values({
+          tenantId,
+          name: `Agent ${label}-${i + 1}`,
+          type: 'price-sentinel',
+          status: 'active',
+        })
+        .returning()
+      agentRows.push({ id: agent!.id })
+    }
+    const agentId = agentRows[0]!.id
 
     const [product] = await tdb
       .insert(schema.products)
       .values({
         tenantId,
-        platformProductId: `pid-${label}`,
-        platform: 'shopify',
+        platformProductId: `pid-${label}-${dataPlatform}`,
+        platform: dataPlatform,
         title: `Product ${label}`,
         price: '29.99',
       })
@@ -77,8 +122,8 @@ export async function seedTenantData(
       .insert(schema.adsCampaigns)
       .values({
         tenantId,
-        platform: 'shopify',
-        platformCampaignId: `camp-${label}`,
+        platform: dataPlatform,
+        platformCampaignId: `camp-${label}-${dataPlatform}`,
         name: `Campaign ${label}`,
         status: 'active',
         dailyBudget: '100.00',
@@ -92,7 +137,7 @@ export async function seedTenantData(
       .values({
         tenantId,
         productId: product!.id,
-        platform: 'shopify',
+        platform: dataPlatform,
         quantity: 12,
         safetyThreshold: 10,
         status: 'normal',
@@ -103,8 +148,8 @@ export async function seedTenantData(
       .insert(schema.orders)
       .values({
         tenantId,
-        platformOrderId: `oid-${label}`,
-        platform: 'shopify',
+        platformOrderId: `oid-${label}-${dataPlatform}`,
+        platform: dataPlatform,
         status: 'fulfilled',
         totalPrice: '59.99',
       })
@@ -114,7 +159,7 @@ export async function seedTenantData(
       .insert(schema.agentEvents)
       .values({
         tenantId,
-        agentId: agent!.id,
+        agentId,
         action: 'test.seed',
         payload: { label },
       })
@@ -124,7 +169,7 @@ export async function seedTenantData(
       .insert(schema.approvals)
       .values({
         tenantId,
-        agentId: agent!.id,
+        agentId,
         action: 'price.change',
         payload: { label },
         status: 'pending',
@@ -132,12 +177,14 @@ export async function seedTenantData(
       .returning()
 
     return {
-      agentId: agent!.id,
+      agentId,
+      agentIds: agentRows.map((a) => a.id),
       productId: product!.id,
       orderId: order!.id,
       eventId: event!.id,
       approvalId: approval!.id,
-      credentialId: cred!.id,
+      credentialId: credentials[0]!.id,
+      credentialIds: credentials.map((c) => c.id),
       adsCampaignId: adsCampaign!.id,
       inventoryLevelId: inventoryLevel!.id,
     }
@@ -152,6 +199,7 @@ export async function teardownTwoTenants(fixture: TenantFixture): Promise<void> 
       await tdb.delete(schema.approvals).where(eq(schema.approvals.tenantId, tenantId))
       await tdb.delete(schema.agentEvents).where(eq(schema.agentEvents.tenantId, tenantId))
       await tdb.delete(schema.agents).where(eq(schema.agents.tenantId, tenantId))
+      await tdb.delete(schema.devosTickets).where(eq(schema.devosTickets.tenantId, tenantId))
       await tdb.delete(schema.inventoryLevels).where(eq(schema.inventoryLevels.tenantId, tenantId))
       await tdb.delete(schema.adsCampaigns).where(eq(schema.adsCampaigns.tenantId, tenantId))
       await tdb.delete(schema.products).where(eq(schema.products.tenantId, tenantId))
@@ -162,6 +210,12 @@ export async function teardownTwoTenants(fixture: TenantFixture): Promise<void> 
     })
     await db.delete(schema.tenants).where(eq(schema.tenants.id, tenantId))
   }
+
+  // System-scope devos rows (tenant_id IS NULL): not tenant-scoped; clean once in a
+  // context that only matches those rows (see DEVOS_SYSTEM_CLEANUP_TENANT_ID).
+  await withTenantDb(DEVOS_SYSTEM_CLEANUP_TENANT_ID, async (tdb) => {
+    await tdb.delete(schema.devosTickets).where(isNull(schema.devosTickets.tenantId))
+  })
 }
 
 export async function closePool(): Promise<void> {

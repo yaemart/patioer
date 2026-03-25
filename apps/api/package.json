@@ -17,6 +17,8 @@
     "@fastify/swagger-ui": "^5.2.5",
     "@patioer/agent-runtime": "workspace:*",
     "@patioer/db": "workspace:*",
+    "@patioer/dataos-client": "workspace:*",
+    "@patioer/devos-bridge": "workspace:*",
     "@patioer/harness": "workspace:*",
     "@patioer/market": "workspace:*",
     "@patioer/shared": "workspace:*",

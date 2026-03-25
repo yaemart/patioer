@@ -1,0 +1,76 @@
+# DataOS：ClickHouse（Event Lake）+ PostgreSQL/pgvector + Redis（Feature 缓存）+ DataOS API（3300）。
+# 与 ElectroOS（docker-compose.yml 5432/6379/3100）及 DevOS（docker-compose.devos.yml 5433/3200）端口隔离。
+
+services:
+  dataos-clickhouse:
+    image: clickhouse/clickhouse-server:24
+    container_name: patioer-dataos-clickhouse
+    ports:
+      - '8123:8123'
+      - '9000:9000'
+    environment:
+      CLICKHOUSE_DB: electroos_events
+      CLICKHOUSE_USER: dataos
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-dataos}
+    volumes:
+      - dataos_clickhouse_data:/var/lib/clickhouse
+
+  dataos-postgres:
+    image: pgvector/pgvector:pg16
+    container_name: patioer-dataos-postgres
+    environment:
+      POSTGRES_USER: dataos
+      POSTGRES_PASSWORD: ${DATAOS_PG_PASSWORD:-dataos}
+      POSTGRES_DB: dataos
+    ports:
+      - '5434:5432'
+    volumes:
+      - dataos_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U dataos -d dataos']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  dataos-redis:
+    image: redis:7-alpine
+    container_name: patioer-dataos-redis
+    ports:
+      - '6380:6379'
+    volumes:
+      - dataos_redis_data:/data
+
+  dataos-api:
+    image: node:22-alpine
+    container_name: patioer-dataos-api
+    working_dir: /workspace
+    command: >-
+      sh -c "corepack enable && pnpm install && pnpm --filter @patioer/dataos-api dev"
+    volumes:
+      - ./:/workspace
+    environment:
+      NODE_ENV: development
+      PORT: '3300'
+      DATAOS_INTERNAL_KEY: ${DATAOS_INTERNAL_KEY:-dev-dataos-internal-key}
+      DATABASE_URL: postgres://dataos:${DATAOS_PG_PASSWORD:-dataos}@dataos-postgres:5432/dataos
+      CLICKHOUSE_URL: http://dataos-clickhouse:8123
+      CLICKHOUSE_USER: dataos
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-dataos}
+      REDIS_URL: redis://dataos-redis:6379
+      BULLMQ_CONNECTION_URL: ${BULLMQ_CONNECTION_URL:-redis://dataos-redis:6379}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    ports:
+      - '3300:3300'
+    depends_on:
+      dataos-postgres:
+        condition: service_healthy
+      dataos-clickhouse:
+        condition: service_started
+      dataos-redis:
+        condition: service_started
+
+volumes:
+  dataos_clickhouse_data:
+  dataos_pg_data:
+  dataos_redis_data:

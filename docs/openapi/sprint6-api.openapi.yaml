@@ -1,0 +1,363 @@
+openapi: 3.0.3
+info:
+  title: ElectroOS API - Sprint 6 Additions
+  version: 0.1.0-sprint6
+  description: |
+    Supplemental OpenAPI spec for Sprint 6 task 6.7.
+    Covers new multi-platform routes and the onboarding + ads/inventory APIs.
+servers:
+  - url: http://localhost:3100
+    description: ElectroOS API local
+tags:
+  - name: Onboarding
+  - name: Ads
+  - name: Inventory
+  - name: Amazon
+  - name: TikTok
+  - name: Shopee
+  - name: Platform Credentials
+paths:
+  /api/v1/onboarding/register:
+    post:
+      tags: [Onboarding]
+      summary: Register a new tenant
+      parameters:
+        - in: header
+          name: x-onboarding-key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, slug]
+              properties:
+                name: { type: string }
+                slug: { type: string, pattern: "^[a-z0-9-]+$" }
+      responses:
+        "201":
+          description: Tenant created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantRegistered"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409":
+          description: Slug already taken
+  /api/v1/onboarding/initialize-agents:
+    post:
+      tags: [Onboarding]
+      summary: Initialize default agents for tenant
+      security:
+        - tenantId: []
+      responses:
+        "200":
+          description: Agents initialized (idempotent)
+          content:
+            application/json:
+              schema:
+                type: object
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/onboarding/health:
+    get:
+      tags: [Onboarding]
+      summary: Onboarding health probe
+      security:
+        - tenantId: []
+      responses:
+        "200":
+          description: Health summary
+          content:
+            application/json:
+              schema:
+                type: object
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/ads/campaigns:
+    get:
+      tags: [Ads]
+      summary: List synced ad campaigns
+      security:
+        - tenantId: []
+      parameters:
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 250
+      responses:
+        "200":
+          description: Campaign list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  campaigns:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AdsCampaign"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/ads/performance:
+    get:
+      tags: [Ads]
+      summary: Campaign performance metrics
+      security:
+        - tenantId: []
+      parameters:
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 250
+      responses:
+        "200":
+          description: Performance rows
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AdsCampaignPerformance"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/inventory:
+    get:
+      tags: [Inventory]
+      summary: List inventory rows
+      security:
+        - tenantId: []
+      parameters:
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 250
+      responses:
+        "200":
+          description: Inventory list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/InventoryLevel"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/inventory/alerts:
+    get:
+      tags: [Inventory]
+      summary: Low/out-of-stock alerts
+      security:
+        - tenantId: []
+      responses:
+        "200":
+          description: Alert rows
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/InventoryLevel"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/platform-credentials:
+    get:
+      tags: [Platform Credentials]
+      summary: List connected platforms
+      security:
+        - tenantId: []
+      responses:
+        "200":
+          description: Credential list (token redacted)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  credentials:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PlatformCredential"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/amazon/auth:
+    get:
+      tags: [Amazon]
+      summary: Start Amazon OAuth
+      responses:
+        "302":
+          description: Redirect to Amazon consent page
+  /api/v1/amazon/auth/callback:
+    get:
+      tags: [Amazon]
+      summary: Amazon OAuth callback
+      responses:
+        "302":
+          description: Redirect back to frontend after credential persistence
+  /api/v1/webhooks/amazon:
+    post:
+      tags: [Amazon]
+      summary: Amazon webhook intake
+      parameters:
+        - in: header
+          name: x-tenant-id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Webhook accepted
+  /api/v1/tiktok/auth:
+    get:
+      tags: [TikTok]
+      summary: Start TikTok OAuth
+      responses:
+        "302":
+          description: Redirect to TikTok authorization
+  /api/v1/webhooks/tiktok:
+    post:
+      tags: [TikTok]
+      summary: TikTok webhook intake
+      parameters:
+        - in: header
+          name: authorization
+          required: true
+          schema: { type: string }
+        - in: header
+          name: x-timestamp
+          required: true
+          schema: { type: string }
+        - in: header
+          name: x-nonce
+          required: true
+          schema: { type: string }
+        - in: header
+          name: x-tenant-id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Webhook accepted
+  /api/v1/shopee/auth:
+    get:
+      tags: [Shopee]
+      summary: Start Shopee OAuth
+      responses:
+        "302":
+          description: Redirect to Shopee authorization
+  /api/v1/shopee/auth/callback:
+    get:
+      tags: [Shopee]
+      summary: Shopee OAuth callback
+      responses:
+        "302":
+          description: Redirect after credential persistence
+  /api/v1/webhooks/shopee:
+    post:
+      tags: [Shopee]
+      summary: Shopee webhook intake
+      parameters:
+        - in: header
+          name: x-tenant-id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Webhook accepted
+components:
+  securitySchemes:
+    tenantId:
+      type: apiKey
+      in: header
+      name: x-tenant-id
+  responses:
+    Unauthorized:
+      description: Missing or invalid auth header
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: { type: string }
+    BadRequest:
+      description: Invalid request data
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: { type: string }
+  schemas:
+    TenantRegistered:
+      type: object
+      properties:
+        tenantId: { type: string, format: uuid }
+        name: { type: string }
+        slug: { type: string }
+      required: [tenantId, name, slug]
+    AdsCampaign:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        platform: { type: string }
+        platformCampaignId: { type: string }
+        name: { type: string }
+        status: { type: string }
+        dailyBudget: { type: number }
+        totalSpend: { type: number }
+        roas: { type: number }
+        syncedAt: { type: string, format: date-time, nullable: true }
+    AdsCampaignPerformance:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        platform: { type: string }
+        platformCampaignId: { type: string }
+        name: { type: string }
+        status: { type: string }
+        dailyBudget: { type: number }
+        totalSpend: { type: number }
+        roas: { type: number }
+        syncedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+    InventoryLevel:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        platform: { type: string }
+        region: { type: string, nullable: true }
+        quantity: { type: integer }
+        threshold: { type: integer }
+        status: { type: string }
+        createdAt: { type: string, format: date-time }
+    PlatformCredential:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        platform: { type: string }
+        credentialType: { type: string }
+        shopDomain: { type: string, nullable: true }
+        region: { type: string, nullable: true }
+        scopes:
+          type: array
+          items: { type: string }
+        metadata:
+          type: object
+          additionalProperties: true
+        expiresAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }

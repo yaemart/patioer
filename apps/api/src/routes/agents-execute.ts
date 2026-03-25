@@ -14,9 +14,12 @@ import {
   resolveFirstCredential,
 } from '../lib/resolve-credential.js'
 import { createIssueForAgentTicket } from '../lib/agent-paperclip-ticket.js'
+import { createDevOsTicketFromHarnessError } from '../lib/harness-error-devos-ticket.js'
 import { verifyPaperclipAuth } from '../lib/paperclip-auth.js'
 import { createLlmProvider } from '../lib/llm-client.js'
 import { getRunner, type ExecuteAgentResponse } from '../lib/agent-registry.js'
+import { enqueueDataOsLakeEvent } from '../lib/dataos-queue.js'
+import { tryCreateDataOsPort } from '../lib/dataos-port.js'
 import { getExecutionServices } from '../lib/execution-services.js'
 import type { BudgetStatus } from '../lib/execution-services.js'
 
@@ -134,6 +137,8 @@ async function buildExecutionContext(
     'agent.execute.context.ready',
   )
 
+  const dataOS = tryCreateDataOsPort(request.tenantId!, platform)
+
   const ctx = createAgentContext(
     { tenantId: request.tenantId, agentId: agentRow.id },
     {
@@ -141,13 +146,14 @@ async function buildExecutionContext(
       budget: {
         isExceeded: async (tid, aid) => (await getExecutionServices().getBudgetStatus(tid, aid)).exceeded,
       },
-      audit: buildAuditDeps(request),
+      audit: buildAuditDeps(request, { platform }),
       approvals: buildApprovalDeps(request, platform),
       tickets: buildTicketDeps(request),
       llm: createLlmProvider(agentRow.systemPrompt),
       market: getExecutionServices().getMarketContext(),
       approvalsQuery: buildApprovalsQueryDeps(request),
       events: buildEventsDeps(request),
+      dataOS,
     },
   )
 
@@ -179,11 +185,24 @@ function buildHarnessDeps(
   }
 }
 
-function buildAuditDeps(request: FastifyRequest) {
+function buildAuditDeps(request: FastifyRequest, opts: { platform: string }) {
   return {
     logAction: async (tenantId: string, agentId: string, action: string, payload: unknown) => {
       await request.withDb!(async (db) => {
         await db.insert(schema.agentEvents).values({ tenantId, agentId, action, payload })
+      })
+      const entityId =
+        typeof (payload as { productId?: string } | null)?.productId === 'string'
+          ? (payload as { productId: string }).productId
+          : undefined
+      await enqueueDataOsLakeEvent({
+        tenantId,
+        platform: opts.platform,
+        agentId,
+        eventType: action,
+        entityId,
+        payload: { action, payload },
+        metadata: { source: 'electroos-api' },
       })
     },
   }
@@ -212,7 +231,20 @@ function buildTicketDeps(request: FastifyRequest) {
   return {
     createTicket: async (tenantId: string, agentId: string, params: { title: string; body: string }) => {
       const bridge = getExecutionServices().getBridge()
-      const paperclip = await createIssueForAgentTicket(bridge, tenantId, agentId, params)
+      const [tenantRow] = await request.withDb!(async (db) =>
+        db
+          .select({ paperclipCompanyId: schema.tenants.paperclipCompanyId })
+          .from(schema.tenants)
+          .where(eq(schema.tenants.id, tenantId))
+          .limit(1),
+      )
+      const paperclip = await createIssueForAgentTicket(
+        bridge,
+        tenantId,
+        agentId,
+        params,
+        tenantRow?.paperclipCompanyId,
+      )
       await request.withDb!(async (db) => {
         await db.insert(schema.agentEvents).values({
           tenantId,
@@ -321,6 +353,13 @@ const agentsExecuteRoute: FastifyPluginAsync = async (app) => {
           registry.invalidate(`${request.tenantId}:${platform}`)
         }
         await ctx.logAction('agent.execute.harness_error', {
+          platform: error.platform,
+          code: error.code,
+          message: error.message,
+        })
+        await createDevOsTicketFromHarnessError(request, {
+          tenantId: request.tenantId,
+          agentId: agentRow.id,
           platform: error.platform,
           code: error.code,
           message: error.message,

@@ -94,3 +94,151 @@ jobs:
         run: pnpm --filter api test:coverage
         env:
           VITEST_REPORTER: github-actions
+
+  integration-isolation:
+    name: Integration · Tenant isolation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: patioer
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d patioer"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL_ADMIN: postgres://postgres:postgres@localhost:5432/patioer
+      TEST_DATABASE_URL: postgres://patioer_ci:patioer_ci@localhost:5432/patioer
+      REDIS_URL: redis://localhost:6379
+      VITEST_REPORTER: github-actions
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.x
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Push schema
+        run: DATABASE_URL="$DATABASE_URL_ADMIN" pnpm --filter @patioer/db db:push
+
+      - name: Apply RLS policies
+        run: DATABASE_URL="$DATABASE_URL_ADMIN" pnpm exec tsx ./scripts/apply-rls.ts
+
+      - name: Ensure non-super test role
+        run: DATABASE_URL="$DATABASE_URL_ADMIN" TEST_DATABASE_URL="$TEST_DATABASE_URL" pnpm exec tsx ./scripts/ensure-db-test-role.ts
+
+      - name: DB integration isolation
+        run: DATABASE_URL="$TEST_DATABASE_URL" pnpm --filter @patioer/db test -- rls-all-tables.integration.test.ts
+
+      - name: API integration isolation
+        run: DATABASE_URL="$TEST_DATABASE_URL" REDIS_URL="$REDIS_URL" pnpm --filter @patioer/api test -- e2e-tenant-isolation.integration.test.ts
+
+  integration-concurrency:
+    name: Integration · 10-tenant concurrency
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: patioer
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d patioer"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL_ADMIN: postgres://postgres:postgres@localhost:5432/patioer
+      TEST_DATABASE_URL: postgres://patioer_ci:patioer_ci@localhost:5432/patioer
+      REDIS_URL: redis://localhost:6379
+      VITEST_REPORTER: github-actions
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.x
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Push schema
+        run: DATABASE_URL="$DATABASE_URL_ADMIN" pnpm --filter @patioer/db db:push
+
+      - name: Apply RLS policies
+        run: DATABASE_URL="$DATABASE_URL_ADMIN" pnpm exec tsx ./scripts/apply-rls.ts
+
+      - name: Ensure non-super test role
+        run: DATABASE_URL="$DATABASE_URL_ADMIN" TEST_DATABASE_URL="$TEST_DATABASE_URL" pnpm exec tsx ./scripts/ensure-db-test-role.ts
+
+      - name: API integration concurrency
+        run: DATABASE_URL="$TEST_DATABASE_URL" REDIS_URL="$REDIS_URL" pnpm --filter @patioer/api test -- e2e-tenant-concurrency.integration.test.ts
+
+  integration-rate-limit:
+    name: Integration · Amazon 429 retry
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.x
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Harness 429 retry test
+        run: pnpm --filter @patioer/harness test -- amazon.harness.test.ts
+        env:
+          VITEST_REPORTER: github-actions

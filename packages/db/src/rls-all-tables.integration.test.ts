@@ -20,8 +20,14 @@ describe.skipIf(!isIntegration)('RLS cross-tenant isolation — all business tab
 
   beforeAll(async () => {
     fix = await setupTwoTenants()
-    seedA = await seedTenantData(fix.tenantAId, 'alpha')
-    seedB = await seedTenantData(fix.tenantBId, 'bravo')
+    seedA = await seedTenantData(fix.tenantAId, 'alpha', {
+      credentialsPlatforms: ['shopify', 'amazon'],
+      dataPlatform: 'amazon',
+    })
+    seedB = await seedTenantData(fix.tenantBId, 'bravo', {
+      credentialsPlatforms: ['tiktok', 'shopee'],
+      dataPlatform: 'tiktok',
+    })
   })
 
   afterAll(async () => {
@@ -117,8 +123,9 @@ describe.skipIf(!isIntegration)('RLS cross-tenant isolation — all business tab
       const rows = await withTenantDb(fix.tenantAId, (tdb) =>
         tdb.select().from(schema.platformCredentials),
       )
-      expect(rows).toHaveLength(1)
-      expect(rows[0]!.id).toBe(seedA.credentialId)
+      expect(rows).toHaveLength(2)
+      expect(rows.map((r) => r.platform).sort()).toEqual(['amazon', 'shopify'])
+      expect(rows.map((r) => r.id).sort()).toEqual(seedA.credentialIds.slice().sort())
     })
 
     it('tenant B cannot read tenant A credential by id', async () => {

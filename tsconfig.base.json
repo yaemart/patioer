@@ -10,7 +10,9 @@
       "@patioer/harness": ["packages/harness/src/index.ts"],
       "@patioer/agent-runtime": ["packages/agent-runtime/src/index.ts"],
       "@patioer/market": ["packages/market/src/index.ts"],
-      "@patioer/devos-bridge": ["packages/devos-bridge/src/index.ts"]
+      "@patioer/devos-bridge": ["packages/devos-bridge/src/index.ts"],
+      "@patioer/dataos": ["packages/dataos/src/index.ts"],
+      "@patioer/dataos-client": ["packages/dataos-client/src/index.ts"]
     },
     "strict": true,
     "esModuleInterop": true,

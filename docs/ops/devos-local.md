@@ -1,7 +1,7 @@
 # DevOS 本地栈
 
 - **Compose 文件：** 仓库根目录 `docker-compose.devos.yml`
-- **HTTP：** DevOS Paperclip 映射到宿主机 **3200**（容器内应用端口仍为 3000）
+- **HTTP：** DevOS Paperclip 映射到宿主机 **3101（主入口）** + **3200（兼容入口）**，容器内端口 **3101**
 - **数据库：** 独立 Postgres 服务 `devos-postgres`，库名 **`devos`**，数据卷 **`devos_postgres_data`**，与 ElectroOS 主库 **`patioer`** 分离
 
 启动：
@@ -17,14 +17,14 @@ docker compose -f docker-compose.devos.yml up -d
 在 `DEVOS_BASE_URL` 可达时，向 DevOS 创建一条 **Engineering / SRE Agent bootstrap** Ticket（组织树 JSON 写入 `description`）：
 
 ```bash
-export DEVOS_BASE_URL=http://localhost:3200
+export DEVOS_BASE_URL=http://localhost:3101
 # 可选：DEVOS_API_KEY=...
 pnpm seed:devos
 pnpm seed:devos -- --dry-run          # 仅打印结果，不调用 HTTP
 pnpm seed:devos -- --skip-probe       # 跳过 GET / 可达性探测（离线调试 createTicket 契约时）
 ```
 
-与 `@patioer/devos-bridge` 联调时，设置 `DEVOS_BASE_URL=http://localhost:3200`（见根目录 `.env.example`）。
+与 `@patioer/devos-bridge` 联调时，建议设置 `DEVOS_BASE_URL=http://localhost:3101`（`3200` 仍可用作兼容入口，见 `docker-compose.devos.yml`）。
 
 ## Harness 报错 → DevOS Ticket（Sprint 5 Day 5 · Task 5.6）
 
@@ -35,7 +35,7 @@ ElectroOS 侧表 `devos_tickets`（迁移 `0006_devos_tickets.sql`）用于**持
 ## 健康检查（Day 2）
 
 - **Postgres：** `devos-postgres` 使用 `pg_isready`；`devos-paperclip` 在 DB **healthy** 后才启动（`depends_on: condition: service_healthy`）。
-- **Paperclip HTTP：** compose 会显式挂载本地 `./paperclip` 到容器内 `/workspace/paperclip`。若缺少 `paperclip/package.json`，容器会直接报错退出，避免在错误目录里误跑。准备好本地副本后，可用 `curl -sfS http://localhost:3200/` 或项目实际 health 路径验证（以 `paperclip/` 实现为准）。
+- **Paperclip HTTP：** compose 会显式挂载本地 `./paperclip` 到容器内 `/workspace/paperclip`。若缺少 `paperclip/package.json`，容器会直接报错退出，避免在错误目录里误跑。准备好本地副本后，可用 `curl -sfS http://localhost:3101/`（或兼容入口 `http://localhost:3200/`）验证。
 
 ## ElectroOS 数据库迁移
 

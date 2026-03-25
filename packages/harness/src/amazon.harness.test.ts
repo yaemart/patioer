@@ -527,6 +527,59 @@ describe('AmazonHarness rate limiting', () => {
     // 1 token + 6 api calls (attempt 0..5 = MAX_RETRIES 5, last throws)
     expect(mockFetch).toHaveBeenCalledTimes(7)
   })
+
+  it('amazonFetch retries up to 5 times on persistent 429 then throws 429 error', async () => {
+    vi.useFakeTimers()
+    mockFetch
+      .mockResolvedValueOnce(ok({ access_token: 'token-1', token_type: 'bearer', expires_in: 3600 }))
+      .mockResolvedValue({
+        ok: false,
+        status: 429,
+        statusText: 'Too Many Requests',
+        headers: { get: () => null },
+        json: () => Promise.resolve({}),
+      })
+
+    const task = makeHarness().getProductsPage()
+    const assertion = expect(task).rejects.toMatchObject({
+      type: 'harness_error',
+      platform: 'amazon',
+      code: '429',
+    })
+    await vi.runAllTimersAsync()
+    await assertion
+
+    // 1 token + 6 api calls (attempt 0..5 = MAX_RETRIES 5, last throws)
+    expect(mockFetch).toHaveBeenCalledTimes(7)
+  })
+
+  it('amazonFetch falls back to jittered backoff when rate limit header is invalid', async () => {
+    vi.useFakeTimers()
+    const sleepSpy = vi.spyOn(globalThis, 'setTimeout')
+
+    mockFetch
+      .mockResolvedValueOnce(ok({ access_token: 'token-1', token_type: 'bearer', expires_in: 3600 }))
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        statusText: 'Too Many Requests',
+        headers: { get: (name: string) => (name === 'x-amzn-RateLimit-Limit' ? 'invalid' : null) },
+        json: () => Promise.resolve({}),
+      })
+      .mockResolvedValueOnce(ok({ items: [] }))
+
+    const task = makeHarness().getProductsPage()
+    await vi.runAllTimersAsync()
+    await task
+
+    // Invalid header => headerDelayMs = 0 => fallback to jittered backoff.
+    // First retry upper bound is BASE_DELAY_MS (=500ms), so scheduled timer should be <= 500ms.
+    const retryDelay = sleepSpy.mock.calls
+      .map((args) => args[1])
+      .find((v) => typeof v === 'number' && v > 0 && v <= 500)
+    expect(retryDelay).toBeDefined()
+    sleepSpy.mockRestore()
+  })
 })
 
 // ─── Phase 2 · Sprint 3 Day 9: useSandbox endpoint switching ─────────────────

@@ -1,0 +1,25 @@
+{
+  "name": "@patioer/dataos",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint src --ext .ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@clickhouse/client": "^1.11.0",
+    "ioredis": "^5.10.1",
+    "openai": "^4.0.0",
+    "pg": "latest"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.20.0"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts"
+}
