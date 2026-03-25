@@ -32,9 +32,10 @@ function ensureCheckPassed(checkJsonPath: string) {
 function updateAcIndex(root: string) {
   const path = resolve(root, 'docs/ops/sprint6/sprint6-ac-evidence-index.md')
   const text = readFileSync(path, 'utf-8')
+  const today = new Date().toISOString().slice(0, 10)
   const replaced = text.replace(
     /\| AC-P2-10 \| [^|]+ \| ([^|]+) \| `@davidgao` \| `[^`]+` \| [^\n]+ \|/,
-    '| AC-P2-10 | ✅ | $1 | `@davidgao` | `2026-03-26` | 48h 窗口达标：minActiveAgents>=5、maxErrorAgents=0、allCrashFree=true |',
+    `| AC-P2-10 | ✅ | $1 | \`@davidgao\` | \`${today}\` | 48h 窗口达标：minActiveAgents>=5、maxErrorAgents=0、allCrashFree=true |`,
   )
   if (replaced === text) throw new Error('failed to update AC-P2-10 row in sprint6-ac-evidence-index.md')
   writeFileSync(path, replaced, 'utf-8')

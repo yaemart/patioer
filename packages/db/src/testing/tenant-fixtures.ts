@@ -61,17 +61,10 @@ export async function seedTenantData(
     const dataPlatform = options.dataPlatform ?? credentialsPlatforms[0] ?? 'shopify'
     const agentCount = Math.max(1, options.agentCount ?? 1)
 
-    const credentials = [] as { id: string }[]
+    const credentials: { id: string }[] = []
 
     for (const platform of credentialsPlatforms) {
-      const region =
-        platform === 'amazon'
-          ? 'NA'
-          : platform === 'shopee'
-            ? 'SG'
-            : platform === 'tiktok'
-              ? 'global'
-              : 'global'
+      const region = platform === 'amazon' ? 'NA' : platform === 'shopee' ? 'SG' : 'global'
 
       const shopDomain = platform === 'shopify' ? `${label}.myshopify.com` : null
       const credentialType = platform === 'amazon' ? 'lwa' : platform === 'shopify' ? 'oauth' : 'hmac'
@@ -92,7 +85,7 @@ export async function seedTenantData(
       credentials.push({ id: cred!.id })
     }
 
-    const agentRows = [] as { id: string }[]
+    const agentRows: { id: string }[] = []
     for (let i = 0; i < agentCount; i += 1) {
       const [agent] = await tdb
         .insert(schema.agents)

@@ -14,13 +14,7 @@ import {
   suggestedRestockUnits,
 } from './inventory-guard.decision.js'
 import { getHourInTimeZone, INVENTORY_GUARD_LOCAL_HOUR } from './inventory-guard.schedule.js'
-
-function randomRunId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
-  }
-  return `run-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`
-}
+import { randomRunId } from '../run-id.js'
 
 function resolveTimeZone(input: InventoryGuardRunInput): string {
   if (input.timeZone && input.timeZone.length > 0) return input.timeZone
@@ -53,8 +47,6 @@ export async function runInventoryGuard(
     safetyThreshold,
     replenishApprovalMinUnits: replenishMin,
     timeZone,
-    /** Ops: cron `0 8 * * *` with `CRON_TZ` = tenant-local IANA zone for 08:00 local. */
-    scheduleDoc: '08:00 local = CRON_TZ + 0 8 * * *',
     enforceDailyWindow: input.enforceDailyWindow ?? false,
   })
 

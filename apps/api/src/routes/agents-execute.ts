@@ -191,10 +191,8 @@ function buildAuditDeps(request: FastifyRequest, opts: { platform: string }) {
       await request.withDb!(async (db) => {
         await db.insert(schema.agentEvents).values({ tenantId, agentId, action, payload })
       })
-      const entityId =
-        typeof (payload as { productId?: string } | null)?.productId === 'string'
-          ? (payload as { productId: string }).productId
-          : undefined
+      const p = payload as Record<string, unknown>
+      const entityId = typeof p?.productId === 'string' ? (p.productId as string) : undefined
       await enqueueDataOsLakeEvent({
         tenantId,
         platform: opts.platform,
@@ -294,16 +292,6 @@ function buildEventsDeps(request: FastifyRequest) {
   }
 }
 
-async function executeAgentByType(
-  request: FastifyRequest,
-  agentRow: { id: string; type: string; goalContext: string | null },
-  ctx: AgentContext,
-): Promise<ExecuteAgentResponse | null> {
-  const runner = getRunner(agentRow.type)
-  if (!runner) return null
-  return runner(request, agentRow, ctx)
-}
-
 const agentsExecuteRoute: FastifyPluginAsync = async (app) => {
   app.post('/api/v1/agents/:id/execute', {
     schema: { tags: ['Agent Execution'], summary: 'Execute an agent', security: [{ apiKey: [], tenantId: [] }] },
@@ -342,10 +330,11 @@ const agentsExecuteRoute: FastifyPluginAsync = async (app) => {
         await onBudgetExceeded(request, request.tenantId, agentRow.id, { remaining: budget.remaining })
         return reply.code(409).send({ error: 'budget exceeded', remaining: budget.remaining })
       }
-      const response = await executeAgentByType(request, agentRow, ctx)
-      if (!response) {
+      const runner = getRunner(agentRow.type)
+      if (!runner) {
         return reply.code(501).send({ error: `agent type ${agentRow.type} not implemented` })
       }
+      const response = await runner(request, agentRow, ctx)
       return reply.send(response satisfies ExecuteAgentResponse)
     } catch (error) {
       if (error instanceof HarnessError) {

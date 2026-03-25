@@ -1,5 +1,5 @@
 import { isAdsCapable } from '@patioer/harness'
-import type { AdsCapableHarness, HarnessAdsCampaign } from '@patioer/harness'
+import type { HarnessAdsCampaign } from '@patioer/harness'
 import type { AgentContext } from '../context.js'
 import type { AdsOptimizerRunInput, AdsOptimizerRunResult } from '../types.js'
 import { ADS_OPTIMIZER_HEARTBEAT_MS } from '../types.js'
@@ -7,17 +7,7 @@ import {
   APPROVAL_BUDGET_THRESHOLD_USD,
   decideBudgetOptimization,
 } from './ads-optimizer.decision.js'
-
-function randomRunId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
-  }
-  return `run-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`
-}
-
-function hasUpdateAdsBudget(h: unknown): h is AdsCapableHarness {
-  return typeof (h as AdsCapableHarness).updateAdsBudget === 'function'
-}
+import { randomRunId } from '../run-id.js'
 
 /**
  * Syncs campaigns, persists, then applies ROAS/budget rules (Sprint 4 Day 5).
@@ -184,7 +174,7 @@ export async function runAdsOptimizer(
           })
           approvalsRequested += 1
         }
-      } else if (hasUpdateAdsBudget(harness)) {
+      } else {
         await harness.updateAdsBudget(campaign.platformCampaignId, decision.proposedDailyBudgetUsd)
         await ctx.logAction('ads_optimizer.budget_applied', {
           runId,
@@ -193,12 +183,6 @@ export async function runAdsOptimizer(
           proposedUsd: decision.proposedDailyBudgetUsd,
         })
         budgetUpdatesApplied += 1
-      } else {
-        await ctx.logAction('ads_optimizer.budget_apply_skipped', {
-          runId,
-          platform,
-          reason: 'updateAdsBudget_not_available',
-        })
       }
     }
 

@@ -1,4 +1,4 @@
-import { PaperclipBridgeError } from './paperclip-bridge.errors.js'
+import { PaperclipBridgeError, type PaperclipErrorCode } from './paperclip-bridge.errors.js'
 
 const DEFAULT_TIMEOUT_MS = 5000
 const DEFAULT_MAX_RETRIES = 2
@@ -228,26 +228,14 @@ export class PaperclipBridge {
     }
   }
 
-  private async withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-    return await new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        reject(
-          new PaperclipBridgeError(`Paperclip request timed out after ${timeoutMs}ms`, {
-            code: 'network_error',
-          }),
-        )
-      }, timeoutMs)
-
-      promise
-        .then((result) => {
-          clearTimeout(timer)
-          resolve(result)
-        })
-        .catch((error) => {
-          clearTimeout(timer)
-          reject(error)
-        })
-    })
+  private withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new PaperclipBridgeError(`Paperclip request timed out after ${timeoutMs}ms`, { code: 'network_error' })),
+        timeoutMs,
+      ),
+    )
+    return Promise.race([promise, timeout])
   }
 
   private shouldRetry(status?: number): boolean {
@@ -256,53 +244,17 @@ export class PaperclipBridge {
   }
 
   private mapHttpError(status: number, payload: unknown): PaperclipBridgeError {
-    if (status === 401) {
-      return new PaperclipBridgeError('Paperclip unauthorized', {
-        code: 'unauthorized',
-        status,
-        details: payload,
-      })
+    const known: Record<number, [string, PaperclipErrorCode]> = {
+      401: ['Paperclip unauthorized', 'unauthorized'],
+      403: ['Paperclip forbidden', 'forbidden'],
+      404: ['Paperclip resource not found', 'not_found'],
+      409: ['Paperclip conflict', 'conflict'],
+      429: ['Paperclip rate limited', 'rate_limited'],
     }
-    if (status === 403) {
-      return new PaperclipBridgeError('Paperclip forbidden', {
-        code: 'forbidden',
-        status,
-        details: payload,
-      })
-    }
-    if (status === 404) {
-      return new PaperclipBridgeError('Paperclip resource not found', {
-        code: 'not_found',
-        status,
-        details: payload,
-      })
-    }
-    if (status === 409) {
-      return new PaperclipBridgeError('Paperclip conflict', {
-        code: 'conflict',
-        status,
-        details: payload,
-      })
-    }
-    if (status === 429) {
-      return new PaperclipBridgeError('Paperclip rate limited', {
-        code: 'rate_limited',
-        status,
-        details: payload,
-      })
-    }
-    if (status >= 500) {
-      return new PaperclipBridgeError('Paperclip server error', {
-        code: 'server_error',
-        status,
-        details: payload,
-      })
-    }
-    return new PaperclipBridgeError(`Paperclip request failed with status ${status}`, {
-      code: 'unknown',
-      status,
-      details: payload,
-    })
+    const entry = known[status]
+    if (entry) return new PaperclipBridgeError(entry[0], { code: entry[1], status, details: payload })
+    if (status >= 500) return new PaperclipBridgeError('Paperclip server error', { code: 'server_error', status, details: payload })
+    return new PaperclipBridgeError(`Paperclip request failed with status ${status}`, { code: 'unknown', status, details: payload })
   }
 
   private normalizeId(payload: unknown, entity: string): string {
