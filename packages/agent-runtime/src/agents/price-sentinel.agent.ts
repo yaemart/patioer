@@ -66,14 +66,14 @@ export async function runPriceSentinel(
   for (const proposal of input.proposals) {
     assertValidProposal(proposal)
     let features: unknown = null
-    let memories: unknown[] | null = null
     if (ctx.dataOS) {
       try {
         features = await ctx.dataOS.getFeatures(platform, proposal.productId)
-        memories = (await ctx.dataOS.recallMemory('price-sentinel', {
-          product: proposal,
-          features,
-        })) ?? []
+        const memories =
+          (await ctx.dataOS.recallMemory('price-sentinel', {
+            product: proposal,
+            features,
+          })) ?? []
         await ctx.logAction('price_sentinel.dataos_context', {
           productId: proposal.productId,
           features,
