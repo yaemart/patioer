@@ -55,7 +55,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  delete process.env['CREDENTIAL_ENCRYPTION_KEY']
+  delete process.env['CRED_ENCRYPTION_KEY']
 })
 
 describe('GET /api/v1/platform-credentials', () => {
@@ -155,7 +155,7 @@ describe('POST /api/v1/platform-credentials', () => {
   })
 
   it('returns 503 when encryption key is not set', async () => {
-    delete process.env['CREDENTIAL_ENCRYPTION_KEY']
+    delete process.env['CRED_ENCRYPTION_KEY']
     const app = createApp([])
     const res = await app.inject({
       method: 'POST',
@@ -168,7 +168,7 @@ describe('POST /api/v1/platform-credentials', () => {
   })
 
   it('returns 400 with invalid body', async () => {
-    process.env['CREDENTIAL_ENCRYPTION_KEY'] = TEST_ENC_KEY
+    process.env['CRED_ENCRYPTION_KEY'] = TEST_ENC_KEY
     const app = createApp([])
     const res = await app.inject({
       method: 'POST',
@@ -181,7 +181,7 @@ describe('POST /api/v1/platform-credentials', () => {
   })
 
   it('creates credential and invalidates harness cache', async () => {
-    process.env['CREDENTIAL_ENCRYPTION_KEY'] = TEST_ENC_KEY
+    process.env['CRED_ENCRYPTION_KEY'] = TEST_ENC_KEY
     const returned = { ...credRow, platform: 'amazon' }
     const app = createApp([[returned]])
     const res = await app.inject({
@@ -236,7 +236,7 @@ describe('PATCH /api/v1/platform-credentials/:id', () => {
   })
 
   it('returns 503 when updating accessToken without encryption key', async () => {
-    delete process.env['CREDENTIAL_ENCRYPTION_KEY']
+    delete process.env['CRED_ENCRYPTION_KEY']
     const app = createApp([])
     const res = await app.inject({
       method: 'PATCH',
@@ -262,7 +262,7 @@ describe('PATCH /api/v1/platform-credentials/:id', () => {
   })
 
   it('updates credential and invalidates harness cache', async () => {
-    process.env['CREDENTIAL_ENCRYPTION_KEY'] = TEST_ENC_KEY
+    process.env['CRED_ENCRYPTION_KEY'] = TEST_ENC_KEY
     const updated = { ...credRow, shopDomain: 'new.myshopify.com' }
     const app = createApp([[updated]])
     const res = await app.inject({

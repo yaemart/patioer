@@ -104,7 +104,7 @@ const platformCredentialsRoute: FastifyPluginAsync = async (app) => {
       return reply.code(401).send({ error: 'x-tenant-id required' })
     }
 
-    const encryptionKey = process.env['CREDENTIAL_ENCRYPTION_KEY']
+    const encryptionKey = process.env['CRED_ENCRYPTION_KEY']
     if (!encryptionKey) {
       return reply.code(503).send({ error: 'credential encryption not configured' })
     }
@@ -170,7 +170,7 @@ const platformCredentialsRoute: FastifyPluginAsync = async (app) => {
       return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? 'invalid body' })
     }
 
-    const encryptionKey = process.env['CREDENTIAL_ENCRYPTION_KEY']
+    const encryptionKey = process.env['CRED_ENCRYPTION_KEY']
     if (parsed.data.accessToken && !encryptionKey) {
       return reply.code(503).send({ error: 'credential encryption not configured' })
     }
