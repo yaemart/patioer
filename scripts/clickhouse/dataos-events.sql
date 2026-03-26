@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS electroos_events.events (
 ) ENGINE = MergeTree()
 PARTITION BY toYYYYMM(created_at)
 ORDER BY (tenant_id, agent_id, created_at)
-TTL created_at + INTERVAL 2 YEAR;
+TTL toDateTime(created_at) + INTERVAL 2 YEAR;
 
 CREATE TABLE IF NOT EXISTS electroos_events.price_events (
     event_id UUID DEFAULT generateUUIDv4(),
@@ -31,4 +31,6 @@ CREATE TABLE IF NOT EXISTS electroos_events.price_events (
     revenue_7d Float64 DEFAULT 0,
     created_at DateTime64(3) DEFAULT now64(3)
 ) ENGINE = MergeTree()
-ORDER BY (tenant_id, product_id, created_at);
+PARTITION BY toYYYYMM(created_at)
+ORDER BY (tenant_id, product_id, created_at)
+TTL toDateTime(created_at) + INTERVAL 2 YEAR;

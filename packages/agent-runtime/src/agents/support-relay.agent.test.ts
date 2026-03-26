@@ -32,6 +32,7 @@ function createMockContext(
     logAction: vi.fn().mockResolvedValue(undefined),
     requestApproval: vi.fn().mockResolvedValue(undefined),
     createTicket: vi.fn().mockResolvedValue(undefined),
+    describeDataOsCapabilities: () => 'DataOS not available',
     ...overrides,
   }
 }

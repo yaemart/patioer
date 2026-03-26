@@ -95,6 +95,21 @@ jobs:
         env:
           VITEST_REPORTER: github-actions
 
+      - name: Coverage check (dataos)
+        run: pnpm --filter @patioer/dataos test:coverage
+        env:
+          VITEST_REPORTER: github-actions
+
+      - name: Coverage check (dataos-client)
+        run: pnpm --filter @patioer/dataos-client test:coverage
+        env:
+          VITEST_REPORTER: github-actions
+
+      - name: Coverage check (dataos-api)
+        run: pnpm --filter @patioer/dataos-api test:coverage
+        env:
+          VITEST_REPORTER: github-actions
+
   integration-isolation:
     name: Integration · Tenant isolation
     runs-on: ubuntu-latest

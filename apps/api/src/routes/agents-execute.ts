@@ -18,10 +18,15 @@ import { createDevOsTicketFromHarnessError } from '../lib/harness-error-devos-ti
 import { verifyPaperclipAuth } from '../lib/paperclip-auth.js'
 import { createLlmProvider } from '../lib/llm-client.js'
 import { getRunner, type ExecuteAgentResponse } from '../lib/agent-registry.js'
-import { enqueueDataOsLakeEvent } from '../lib/dataos-queue.js'
+import { createLakeQueueEnqueuer } from '../lib/dataos-queue.js'
 import { tryCreateDataOsPort } from '../lib/dataos-port.js'
 import { getExecutionServices } from '../lib/execution-services.js'
 import type { BudgetStatus } from '../lib/execution-services.js'
+
+const enqueueDataOsLakeEvent = createLakeQueueEnqueuer({
+  enabled: process.env.DATAOS_LAKE_QUEUE_ENABLED === '1',
+  redisUrl: process.env.BULLMQ_CONNECTION_URL ?? process.env.REDIS_URL ?? 'redis://127.0.0.1:6379',
+})
 
 const paramsSchema = z.object({ id: z.string().uuid() })
 
@@ -293,6 +298,10 @@ function buildEventsDeps(request: FastifyRequest) {
 }
 
 const agentsExecuteRoute: FastifyPluginAsync = async (app) => {
+  app.addHook('onClose', async () => {
+    await enqueueDataOsLakeEvent.close()
+  })
+
   app.post('/api/v1/agents/:id/execute', {
     schema: { tags: ['Agent Execution'], summary: 'Execute an agent', security: [{ apiKey: [], tenantId: [] }] },
   }, async (request, reply) => {

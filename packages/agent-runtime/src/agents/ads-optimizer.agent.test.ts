@@ -47,6 +47,7 @@ function createCtx(overrides: {
     logAction,
     requestApproval,
     createTicket: vi.fn(),
+    describeDataOsCapabilities: () => 'DataOS not available',
   }
 }
 

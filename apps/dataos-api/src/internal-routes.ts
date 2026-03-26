@@ -3,8 +3,6 @@ import { z } from 'zod'
 import type { DataOsServices } from '@patioer/dataos'
 import { featureCacheHits, featureCacheMisses, lakeEventsInserted } from './metrics.js'
 
-type Services = DataOsServices
-
 const lakeEventSchema = z.object({
   tenantId: z.string().uuid(),
   platform: z.string().optional(),
@@ -25,73 +23,148 @@ const priceEventSchema = z.object({
   approved: z.boolean(),
 })
 
-function requireKey(request: FastifyRequest, reply: FastifyReply, expected: string): boolean {
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function safeInt(value: string | undefined): number | undefined {
+  if (!value) return undefined
+  const n = Number.parseInt(value, 10)
+  return Number.isFinite(n) && n >= 0 ? n : undefined
+}
+
+function requireKey(request: FastifyRequest, reply: FastifyReply, expectedKey: string): boolean {
   const k = request.headers['x-dataos-internal-key']
-  const got = typeof k === 'string' ? k : ''
-  if (got !== expected) {
+  if ((typeof k === 'string' ? k : '') !== expectedKey) {
     void reply.code(401).send({ error: 'unauthorized' })
     return false
   }
   return true
 }
 
-function tenantHeader(request: FastifyRequest, reply: FastifyReply): string | null {
+/** Validates API key + tenant UUID header. Returns tenantId on success, null after replying with error. */
+function authGuard(request: FastifyRequest, reply: FastifyReply, expectedKey: string): string | null {
+  if (!requireKey(request, reply, expectedKey)) return null
   const t = request.headers['x-tenant-id']
-  if (typeof t !== 'string' || !t) {
-    void reply.code(400).send({ error: 'X-Tenant-Id required' })
+  if (typeof t !== 'string' || !UUID_RE.test(t)) {
+    void reply.code(400).send({ error: 'X-Tenant-Id must be a valid UUID' })
     return null
   }
   return t
 }
 
+const CAPABILITIES_RESPONSE = {
+  version: '1.0.0',
+  entities: {
+    events: {
+      operations: [
+        { method: 'POST', path: '/internal/v1/lake/events', description: 'Insert a generic event into the Event Lake (ClickHouse)' },
+        { method: 'GET', path: '/internal/v1/lake/events', description: 'Query events by agentId, eventType, entityId with limit and time filter', parameters: { agentId: 'string', eventType: 'string', entityId: 'string', limit: 'number', sinceMs: 'number' } },
+      ],
+    },
+    priceEvents: {
+      operations: [
+        { method: 'POST', path: '/internal/v1/lake/price-events', description: 'Record a price change event' },
+        { method: 'GET', path: '/internal/v1/lake/price-events', description: 'Query price events by productId with limit and time filter', parameters: { productId: 'string', limit: 'number', sinceMs: 'number' } },
+      ],
+    },
+    features: {
+      operations: [
+        { method: 'GET', path: '/internal/v1/features', description: 'List product feature snapshots with optional platform filter', parameters: { platform: 'string', limit: 'number', offset: 'number' } },
+        { method: 'GET', path: '/internal/v1/features/:platform/:productId', description: 'Get a single product feature snapshot' },
+        { method: 'POST', path: '/internal/v1/features/upsert', description: 'Create or update a product feature row' },
+        { method: 'DELETE', path: '/internal/v1/features/:platform/:productId', description: 'Delete a product feature row' },
+      ],
+    },
+    decisions: {
+      operations: [
+        { method: 'POST', path: '/internal/v1/memory/recall', description: 'Semantic recall of past decisions similar to a given context (pgvector)', parameters: { agentId: 'string (required)', context: 'any (required)', limit: 'number', minSimilarity: 'number (0-1, default 0.85)' } },
+        { method: 'POST', path: '/internal/v1/memory/record', description: 'Record a new decision with context and action for future recall' },
+        { method: 'POST', path: '/internal/v1/memory/outcome', description: 'Write the observed outcome for a past decision (closes the feedback loop)' },
+        { method: 'GET', path: '/internal/v1/memory/decisions', description: 'List recent decisions for an agent', parameters: { agentId: 'string', limit: 'number' } },
+        { method: 'DELETE', path: '/internal/v1/memory/decisions/:decisionId', description: 'Delete a decision record by ID (CRUD completeness)' },
+      ],
+    },
+  },
+}
+
 export function registerInternalRoutes(
   app: FastifyInstance,
-  services: Services,
+  services: DataOsServices,
   internalKey: string,
 ): void {
-  app.post('/internal/v1/lake/events', async (request, reply) => {
+  app.get('/internal/v1/capabilities', async (request, reply) => {
     if (!requireKey(request, reply, internalKey)) return
+    return reply.send(CAPABILITIES_RESPONSE)
+  })
+
+  app.post('/internal/v1/lake/events', async (request, reply) => {
+    const tenantId = authGuard(request, reply, internalKey)
+    if (!tenantId) return
     const parsed = lakeEventSchema.safeParse(request.body)
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid body' })
     }
-    const b = parsed.data
-    await services.eventLake.insertEvent({
-      tenantId: b.tenantId,
-      platform: b.platform,
-      agentId: b.agentId,
-      eventType: b.eventType,
-      entityId: b.entityId,
-      payload: b.payload,
-      metadata: b.metadata,
-    })
+    if (parsed.data.tenantId !== tenantId) {
+      return reply.code(403).send({ error: 'body tenantId does not match X-Tenant-Id' })
+    }
+    await services.eventLake.insertEvent(parsed.data)
     lakeEventsInserted.inc()
     return reply.send({ ok: true })
   })
 
   app.post('/internal/v1/lake/price-events', async (request, reply) => {
-    if (!requireKey(request, reply, internalKey)) return
+    const tenantId = authGuard(request, reply, internalKey)
+    if (!tenantId) return
     const parsed = priceEventSchema.safeParse(request.body)
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid body' })
     }
-    const b = parsed.data
-    await services.eventLake.insertPriceEvent({
-      tenantId: b.tenantId,
-      platform: b.platform,
-      productId: b.productId,
-      priceBefore: b.priceBefore,
-      priceAfter: b.priceAfter,
-      changePct: b.changePct,
-      approved: b.approved,
-    })
+    if (parsed.data.tenantId !== tenantId) {
+      return reply.code(403).send({ error: 'body tenantId does not match X-Tenant-Id' })
+    }
+    await services.eventLake.insertPriceEvent(parsed.data)
     lakeEventsInserted.inc()
     return reply.send({ ok: true })
   })
 
+  app.get('/internal/v1/lake/events', async (request, reply) => {
+    const tenantId = authGuard(request, reply, internalKey)
+    if (!tenantId) return
+    const q = request.query as Record<string, string>
+    const rows = await services.eventLake.queryEvents(tenantId, {
+      agentId: q.agentId || undefined,
+      eventType: q.eventType || undefined,
+      entityId: q.entityId || undefined,
+      limit: safeInt(q.limit),
+      sinceMs: safeInt(q.sinceMs),
+    })
+    return reply.send({ events: rows })
+  })
+
+  app.get('/internal/v1/lake/price-events', async (request, reply) => {
+    const tenantId = authGuard(request, reply, internalKey)
+    if (!tenantId) return
+    const q = request.query as Record<string, string>
+    const rows = await services.eventLake.queryPriceEvents(tenantId, {
+      productId: q.productId || undefined,
+      limit: safeInt(q.limit),
+      sinceMs: safeInt(q.sinceMs),
+    })
+    return reply.send({ events: rows })
+  })
+
+  app.get('/internal/v1/features', async (request, reply) => {
+    const tenantId = authGuard(request, reply, internalKey)
+    if (!tenantId) return
+    const q = request.query as Record<string, string>
+    const rows = await services.featureStore.list(tenantId, q.platform || undefined, {
+      limit: safeInt(q.limit),
+      offset: safeInt(q.offset),
+    })
+    return reply.send({ features: rows })
+  })
+
   app.get('/internal/v1/features/:platform/:productId', async (request, reply) => {
-    if (!requireKey(request, reply, internalKey)) return
-    const tenantId = tenantHeader(request, reply)
+    const tenantId = authGuard(request, reply, internalKey)
     if (!tenantId) return
     const { platform, productId } = request.params as { platform: string; productId: string }
     const row = await services.featureStore.get(tenantId, platform, productId, {
@@ -99,6 +172,24 @@ export function registerInternalRoutes(
       cacheMiss: () => featureCacheMisses.inc(),
     })
     return reply.send(row ?? null)
+  })
+
+  app.delete('/internal/v1/features/:platform/:productId', async (request, reply) => {
+    const tenantId = authGuard(request, reply, internalKey)
+    if (!tenantId) return
+    const { platform, productId } = request.params as { platform: string; productId: string }
+    const deleted = await services.featureStore.delete(tenantId, platform, productId)
+    return reply.send({ ok: true, deleted })
+  })
+
+  app.get('/internal/v1/memory/decisions', async (request, reply) => {
+    const tenantId = authGuard(request, reply, internalKey)
+    if (!tenantId) return
+    const q = request.query as Record<string, string>
+    const rows = await services.decisionMemory.listRecent(tenantId, q.agentId || undefined, {
+      limit: safeInt(q.limit),
+    })
+    return reply.send({ decisions: rows })
   })
 
   const upsertSchema = z.object({
@@ -113,39 +204,35 @@ export function registerInternalRoutes(
   })
 
   app.post('/internal/v1/features/upsert', async (request, reply) => {
-    if (!requireKey(request, reply, internalKey)) return
+    const tenantId = authGuard(request, reply, internalKey)
+    if (!tenantId) return
     const parsed = upsertSchema.safeParse(request.body)
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid body' })
     }
-    const b = parsed.data
-    await services.featureStore.upsert({
-      tenantId: b.tenantId,
-      platform: b.platform,
-      productId: b.productId,
-      priceCurrent: b.priceCurrent,
-      convRate7d: b.convRate7d,
-      competitorMinPrice: b.competitorMinPrice,
-      competitorAvgPrice: b.competitorAvgPrice,
-      pricePosition: b.pricePosition,
-    })
+    if (parsed.data.tenantId !== tenantId) {
+      return reply.code(403).send({ error: 'body tenantId does not match X-Tenant-Id' })
+    }
+    await services.featureStore.upsert(parsed.data)
     return reply.send({ ok: true })
   })
 
   const recallSchema = z.object({
     agentId: z.string(),
     context: z.unknown(),
+    limit: z.number().int().min(1).max(50).optional(),
+    minSimilarity: z.number().min(0).max(1).optional(),
   })
 
   app.post('/internal/v1/memory/recall', async (request, reply) => {
-    if (!requireKey(request, reply, internalKey)) return
-    const tenantId = tenantHeader(request, reply)
+    const tenantId = authGuard(request, reply, internalKey)
     if (!tenantId) return
     const parsed = recallSchema.safeParse(request.body)
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid body' })
     }
-    const memories = await services.decisionMemory.recall(tenantId, parsed.data.agentId, parsed.data.context)
+    const { agentId, context, limit, minSimilarity } = parsed.data
+    const memories = await services.decisionMemory.recall(tenantId, agentId, context, { limit, minSimilarity })
     return reply.send({ memories })
   })
 
@@ -158,22 +245,13 @@ export function registerInternalRoutes(
   })
 
   app.post('/internal/v1/memory/record', async (request, reply) => {
-    if (!requireKey(request, reply, internalKey)) return
-    const tenantId = tenantHeader(request, reply)
+    const tenantId = authGuard(request, reply, internalKey)
     if (!tenantId) return
     const parsed = recordSchema.safeParse(request.body)
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid body' })
     }
-    const b = parsed.data
-    const id = await services.decisionMemory.record({
-      tenantId,
-      agentId: b.agentId,
-      platform: b.platform,
-      entityId: b.entityId,
-      context: b.context,
-      action: b.action,
-    })
+    const id = await services.decisionMemory.record({ tenantId, ...parsed.data })
     return reply.send({ id })
   })
 
@@ -184,13 +262,27 @@ export function registerInternalRoutes(
   })
 
   app.post('/internal/v1/memory/outcome', async (request, reply) => {
-    if (!requireKey(request, reply, internalKey)) return
+    const tenantId = authGuard(request, reply, internalKey)
+    if (!tenantId) return
     const parsed = outcomeSchema.safeParse(request.body)
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid body' })
     }
-    const b = parsed.data
-    await services.decisionMemory.writeOutcome(b.decisionId, b.tenantId, b.outcome)
+    if (parsed.data.tenantId !== tenantId) {
+      return reply.code(403).send({ error: 'body tenantId does not match X-Tenant-Id' })
+    }
+    await services.decisionMemory.writeOutcome(parsed.data.decisionId, tenantId, parsed.data.outcome)
     return reply.send({ ok: true })
+  })
+
+  app.delete('/internal/v1/memory/decisions/:decisionId', async (request, reply) => {
+    const tenantId = authGuard(request, reply, internalKey)
+    if (!tenantId) return
+    const { decisionId } = request.params as { decisionId: string }
+    if (!UUID_RE.test(decisionId)) {
+      return reply.code(400).send({ error: 'decisionId must be a valid UUID' })
+    }
+    const deleted = await services.decisionMemory.delete(decisionId, tenantId)
+    return reply.send({ ok: true, deleted })
   })
 }

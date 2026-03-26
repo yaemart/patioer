@@ -102,7 +102,7 @@ export interface DataOsFeatureSnapshot {
 
 export interface DataOsPort {
   getFeatures(platform: string, productId: string): Promise<DataOsFeatureSnapshot | null>
-  recallMemory(agentId: string, context: unknown): Promise<unknown[] | null>
+  recallMemory(agentId: string, context: unknown, opts?: { limit?: number; minSimilarity?: number }): Promise<unknown[] | null>
   recordMemory(input: {
     agentId: string
     platform?: string
@@ -124,6 +124,14 @@ export interface DataOsPort {
     changePct: number
     approved: boolean
   }): Promise<void>
+
+  writeOutcome(decisionId: string, outcome: unknown): Promise<boolean>
+  upsertFeature(input: {
+    platform: string
+    productId: string
+    [key: string]: unknown
+  }): Promise<boolean>
+  getCapabilities(): Promise<unknown | null>
 }
 
 export interface CreateAgentContextDeps {

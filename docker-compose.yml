@@ -45,6 +45,8 @@ services:
       PORT: "3100"
       PAPERCLIP_API_URL: http://paperclip:3000
       REDIS_URL: redis://redis:6379
+      DATAOS_LAKE_QUEUE_ENABLED: ${DATAOS_LAKE_QUEUE_ENABLED:-0}
+      BULLMQ_CONNECTION_URL: ${BULLMQ_CONNECTION_URL:-redis://redis:6379}
     ports:
       - '3100:3100'
     depends_on:

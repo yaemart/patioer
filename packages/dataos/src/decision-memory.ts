@@ -1,5 +1,5 @@
 import type { Pool } from 'pg'
-import { embedText } from './embeddings.js'
+import { embedText, type EmbeddingPort } from './embeddings.js'
 import type { DecisionMemoryRow } from './types.js'
 
 export interface DecisionMemoryRecordInput {
@@ -14,7 +14,7 @@ export interface DecisionMemoryRecordInput {
 export class DecisionMemoryService {
   constructor(
     private readonly pool: Pool,
-    private readonly openaiApiKey?: string,
+    private readonly embedding?: EmbeddingPort,
   ) {}
 
   async recall(
@@ -26,7 +26,7 @@ export class DecisionMemoryService {
     const limit = options?.limit ?? 5
     const minSim = options?.minSimilarity ?? 0.85
     const text = JSON.stringify(currentContext)
-    const vector = await embedText(text, { openaiApiKey: this.openaiApiKey })
+    const vector = await embedText(text, this.embedding)
     const vecLiteral = `[${vector.join(',')}]`
     const { rows } = await this.pool.query<DecisionMemoryRow & { similarity: string }>(
       `SELECT id, tenant_id, agent_id, platform, entity_id, context, action, outcome,
@@ -49,7 +49,7 @@ export class DecisionMemoryService {
 
   async record(input: DecisionMemoryRecordInput): Promise<string> {
     const text = JSON.stringify(input.context)
-    const vector = await embedText(text, { openaiApiKey: this.openaiApiKey })
+    const vector = await embedText(text, this.embedding)
     const vecLiteral = `[${vector.join(',')}]`
     const { rows } = await this.pool.query<{ id: string }>(
       `INSERT INTO decision_memory (tenant_id, agent_id, platform, entity_id, context, action, context_vector)
@@ -76,18 +76,30 @@ export class DecisionMemoryService {
     )
   }
 
-  async listPendingOutcomesOlderThan(days: number): Promise<
-    Array<{ id: string; tenant_id: string; entity_id: string | null; decided_at: Date }>
-  > {
-    const { rows } = await this.pool.query(
-      `SELECT id, tenant_id, entity_id, decided_at
-       FROM decision_memory
-       WHERE outcome IS NULL
-         AND decided_at <= NOW() - ($1::int * INTERVAL '1 day')
-       ORDER BY decided_at ASC
-       LIMIT 500`,
-      [days],
+  async delete(decisionId: string, tenantId: string): Promise<boolean> {
+    const { rowCount } = await this.pool.query(
+      `DELETE FROM decision_memory WHERE id = $1 AND tenant_id = $2`,
+      [decisionId, tenantId],
     )
-    return rows as Array<{ id: string; tenant_id: string; entity_id: string | null; decided_at: Date }>
+    return (rowCount ?? 0) > 0
   }
+
+  async listRecent(
+    tenantId: string,
+    agentId?: string,
+    opts?: { limit?: number },
+  ): Promise<DecisionMemoryRow[]> {
+    const limit = Math.min(opts?.limit ?? 20, 200)
+    const params: unknown[] = [tenantId]
+    const agentFilter = agentId ? ` AND agent_id = $${params.push(agentId)}` : ''
+    const { rows } = await this.pool.query<DecisionMemoryRow>(
+      `SELECT id, tenant_id, agent_id, platform, entity_id, context, action, outcome, decided_at, outcome_at
+       FROM decision_memory
+       WHERE tenant_id = $1${agentFilter}
+       ORDER BY decided_at DESC LIMIT $${params.push(limit)}`,
+      params,
+    )
+    return rows
+  }
+
 }

@@ -7,29 +7,17 @@ export function tryCreateDataOsPort(tenantId: string, defaultPlatform: string): 
 
   return {
     getFeatures: (platform, productId) => client.getFeatures(platform, productId),
-    recallMemory: (agentId, context) => client.recallMemory(agentId, context),
+    recallMemory: (agentId, context, opts) => client.recallMemory(agentId, context, opts),
     recordMemory: (input) =>
       client.recordMemory({
         ...input,
         platform: input.platform ?? defaultPlatform,
       }),
-    recordLakeEvent: async (input) => {
-      await client.recordLakeEvent({
-        tenantId,
-        platform: defaultPlatform,
-        agentId: input.agentId,
-        eventType: input.eventType,
-        entityId: input.entityId,
-        payload: input.payload,
-        metadata: input.metadata,
-      })
-    },
-    recordPriceEvent: async (input) => {
-      await client.recordPriceEvent({
-        tenantId,
-        platform: defaultPlatform,
-        ...input,
-      })
-    },
+    recordLakeEvent: (input) => client.recordLakeEvent({ tenantId, platform: defaultPlatform, ...input }).then(() => undefined),
+    recordPriceEvent: (input) => client.recordPriceEvent({ tenantId, platform: defaultPlatform, ...input }).then(() => undefined),
+
+    writeOutcome: (decisionId, outcome) => client.writeOutcome(decisionId, outcome),
+    upsertFeature: (input) => client.upsertFeature({ ...input, platform: input.platform ?? defaultPlatform }),
+    getCapabilities: () => client.getCapabilities(),
   }
 }

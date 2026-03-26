@@ -1,19 +1,23 @@
 import { Worker } from 'bullmq'
-import { DATAOS_LAKE_QUEUE_NAME, type DataOsServices } from '@patioer/dataos'
-import { ingestionJobsProcessed } from '../metrics.js'
+import { z } from 'zod'
+import { DATAOS_LAKE_QUEUE_NAME } from '@patioer/dataos-client'
+import type { DataOsServices } from '@patioer/dataos'
+import { ingestionJobsProcessed, ingestionJobsFailed } from '../metrics.js'
 import type { RedisConnection } from '../redis-url.js'
 
-export const DATAOS_LAKE_QUEUE = DATAOS_LAKE_QUEUE_NAME
+const INGESTION_MAX_ATTEMPTS = 3
 
-export interface LakeIngestJob {
-  tenantId: string
-  platform?: string
-  agentId: string
-  eventType: string
-  entityId?: string
-  payload: unknown
-  metadata?: unknown
-}
+const lakeIngestJobSchema = z.object({
+  tenantId: z.string().uuid(),
+  platform: z.string().optional(),
+  agentId: z.string().min(1),
+  eventType: z.string().min(1),
+  entityId: z.string().optional(),
+  payload: z.unknown(),
+  metadata: z.unknown().optional(),
+})
+
+type LakeIngestJob = z.infer<typeof lakeIngestJobSchema>
 
 export function startIngestionWorker(
   services: DataOsServices,
@@ -22,16 +26,8 @@ export function startIngestionWorker(
   const worker = new Worker<LakeIngestJob>(
     DATAOS_LAKE_QUEUE_NAME,
     async (job) => {
-      const d = job.data
-      await services.eventLake.insertEvent({
-        tenantId: d.tenantId,
-        platform: d.platform,
-        agentId: d.agentId,
-        eventType: d.eventType,
-        entityId: d.entityId,
-        payload: d.payload,
-        metadata: d.metadata,
-      })
+      const d = lakeIngestJobSchema.parse(job.data)
+      await services.eventLake.insertEvent(d)
       ingestionJobsProcessed.inc()
     },
     {
@@ -44,7 +40,12 @@ export function startIngestionWorker(
     },
   )
   worker.on('failed', (job, err) => {
-    console.error('[dataos-ingestion] job failed', job?.id, err)
+    const isFinal = !job || (job.attemptsMade ?? 0) >= (job.opts?.attempts ?? INGESTION_MAX_ATTEMPTS)
+    if (isFinal) ingestionJobsFailed.inc()
+    console.error(
+      `[dataos-ingestion] job ${job?.id} failed (attempt ${job?.attemptsMade ?? '?'})${isFinal ? ' — moved to DLQ' : ', will retry'}`,
+      err,
+    )
   })
   return worker
 }

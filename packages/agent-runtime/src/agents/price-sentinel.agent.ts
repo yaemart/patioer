@@ -1,3 +1,4 @@
+import { HarnessError } from '@patioer/harness'
 import type { AgentContext } from '../context.js'
 import type { PriceDecision, PriceSentinelRunInput } from '../types.js'
 
@@ -100,15 +101,50 @@ export async function runPriceSentinel(
         reason: `price delta ${decision.deltaPercent.toFixed(2)}% exceeds ${threshold}% threshold`,
       })
       await ctx.logAction('price_sentinel.approval_requested', { decision })
+      if (ctx.dataOS) {
+        try {
+          await ctx.dataOS.recordLakeEvent({
+            agentId: ctx.agentId,
+            eventType: 'price_change_pending',
+            entityId: proposal.productId,
+            payload: decision,
+            metadata: { agentType: 'price-sentinel', reason: 'approval_required' },
+          })
+          await ctx.dataOS.recordPriceEvent({
+            productId: proposal.productId,
+            priceBefore: decision.currentPrice,
+            priceAfter: decision.proposedPrice,
+            changePct: decision.deltaPercent,
+            approved: false,
+          })
+        } catch {
+          await ctx.logAction('price_sentinel.dataos_write_failed', { productId: proposal.productId })
+        }
+      }
       continue
     }
 
-    await ctx.getHarness().updatePrice(decision.productId, decision.proposedPrice)
+    // Constitution §2.3 + §4.3: harness calls must be wrapped; HarnessError (rate-limit,
+    // auth-expired, 5xx) is caught, logged as a structured harness_error event, and the
+    // proposal is skipped so subsequent proposals can still be processed.
+    try {
+      await ctx.getHarness().updatePrice(decision.productId, decision.proposedPrice)
+    } catch (err) {
+      const code = err instanceof HarnessError ? err.code : 'unknown'
+      await ctx.logAction('price_sentinel.harness_error', {
+        type: 'harness_error',
+        platform,
+        code,
+        productId: proposal.productId,
+        message: err instanceof Error ? err.message : String(err),
+      })
+      continue
+    }
     await ctx.logAction('price_sentinel.price_updated', { decision })
 
     if (ctx.dataOS) {
       try {
-        await ctx.dataOS.recordMemory({
+        const decisionId = await ctx.dataOS.recordMemory({
           agentId: 'price-sentinel',
           entityId: proposal.productId,
           context: { product: proposal, features },
@@ -117,6 +153,16 @@ export async function runPriceSentinel(
             reason: decision.reason,
           },
         })
+        // Close the learning loop: write outcome immediately since the price was already applied.
+        // recall() only returns memories where outcome IS NOT NULL, so without this call
+        // no historical context would ever surface in future runs.
+        if (decisionId) {
+          await ctx.dataOS.writeOutcome(decisionId, {
+            applied: true,
+            actualPrice: decision.proposedPrice,
+            appliedAt: new Date().toISOString(),
+          })
+        }
         await ctx.dataOS.recordLakeEvent({
           agentId: ctx.agentId,
           eventType: 'price_changed',
@@ -129,7 +175,7 @@ export async function runPriceSentinel(
           priceBefore: decision.currentPrice,
           priceAfter: decision.proposedPrice,
           changePct: decision.deltaPercent,
-          approved: false,
+          approved: !decision.requiresApproval,
         })
       } catch {
         await ctx.logAction('price_sentinel.dataos_write_failed', { productId: proposal.productId })

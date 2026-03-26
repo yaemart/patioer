@@ -1,8 +1,9 @@
--- DataOS PostgreSQL (separate from ElectroOS). Run via: pnpm exec tsx scripts/dataos-migrate.ts
+-- DataOS PostgreSQL (separate from ElectroOS). Run via: pnpm dataos:migrate
 
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
+-- Feature Store 持久化表
 CREATE TABLE IF NOT EXISTS product_features (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id UUID NOT NULL,
@@ -30,6 +31,12 @@ CREATE TABLE IF NOT EXISTS product_features (
 
 CREATE INDEX IF NOT EXISTS product_features_tenant_idx ON product_features (tenant_id);
 
+-- RLS: Constitution Ch6.1 — 强制租户隔离
+ALTER TABLE product_features ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation_product_features ON product_features
+  USING (tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+-- Decision Memory 表
 CREATE TABLE IF NOT EXISTS decision_memory (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id UUID NOT NULL,
@@ -46,5 +53,12 @@ CREATE TABLE IF NOT EXISTS decision_memory (
 
 CREATE INDEX IF NOT EXISTS decision_memory_tenant_agent_decided_idx
     ON decision_memory (tenant_id, agent_id, decided_at DESC);
+
+ALTER TABLE decision_memory ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation_decision_memory ON decision_memory
+  USING (tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+-- Application role: bypasses RLS via BYPASSRLS or SET app.tenant_id before each request.
+-- The DataOS API service sets `app.tenant_id` per-request to enforce isolation at the DB layer.
 
 -- IVFFlat optional: requires sufficient rows; see scripts/dataos-pgvector-ivfflat.sql

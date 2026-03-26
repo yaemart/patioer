@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { HarnessError } from '@patioer/harness'
 import type { TenantHarness } from '@patioer/harness'
 import type { AgentContext } from '../context.js'
 import { runPriceSentinel } from './price-sentinel.agent.js'
@@ -40,6 +41,7 @@ function createCtx(overrides?: {
     logAction,
     requestApproval,
     createTicket,
+    describeDataOsCapabilities: () => 'DataOS not available',
   }
 
   return { ctx, harness }
@@ -226,5 +228,51 @@ describe('runPriceSentinel', () => {
     expect(result.decisions).toHaveLength(2)
     expect(result.decisions[0]?.productId).toBe('p-1')
     expect(result.decisions[1]?.productId).toBe('p-2')
+  })
+
+  describe('HarnessError handling — Constitution §2.3 + §4.3', () => {
+    it('catches HarnessError from updatePrice and logs harness_error without crashing', async () => {
+      const { ctx, harness } = createCtx()
+      vi.mocked(harness.updatePrice).mockRejectedValue(
+        new HarnessError('shopify', '429', 'rate limited'),
+      )
+      const result = await runPriceSentinel(ctx, {
+        proposals: [{ productId: 'p-1', currentPrice: 100, proposedPrice: 110, reason: 'small move' }],
+      })
+      expect(result.decisions).toHaveLength(1)
+      expect(ctx.logAction).toHaveBeenCalledWith(
+        'price_sentinel.harness_error',
+        expect.objectContaining({ type: 'harness_error', code: '429', productId: 'p-1' }),
+      )
+      expect(ctx.logAction).not.toHaveBeenCalledWith('price_sentinel.price_updated', expect.anything())
+    })
+
+    it('continues to process subsequent proposals after a HarnessError', async () => {
+      const { ctx, harness } = createCtx()
+      vi.mocked(harness.updatePrice)
+        .mockRejectedValueOnce(new HarnessError('shopify', '429', 'rate limited'))
+        .mockResolvedValueOnce(undefined)
+      const result = await runPriceSentinel(ctx, {
+        proposals: [
+          { productId: 'p-1', currentPrice: 100, proposedPrice: 110, reason: 'first — fails' },
+          { productId: 'p-2', currentPrice: 100, proposedPrice: 105, reason: 'second — succeeds' },
+        ],
+      })
+      expect(result.decisions).toHaveLength(2)
+      expect(harness.updatePrice).toHaveBeenCalledTimes(2)
+      expect(ctx.logAction).toHaveBeenCalledWith('price_sentinel.price_updated', expect.objectContaining({ decision: expect.objectContaining({ productId: 'p-2' }) }))
+    })
+
+    it('catches generic Error from updatePrice and logs with code=unknown', async () => {
+      const { ctx, harness } = createCtx()
+      vi.mocked(harness.updatePrice).mockRejectedValue(new Error('network timeout'))
+      await runPriceSentinel(ctx, {
+        proposals: [{ productId: 'p-1', currentPrice: 100, proposedPrice: 110, reason: 'any' }],
+      })
+      expect(ctx.logAction).toHaveBeenCalledWith(
+        'price_sentinel.harness_error',
+        expect.objectContaining({ code: 'unknown', message: 'network timeout' }),
+      )
+    })
   })
 })

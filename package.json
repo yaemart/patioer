@@ -20,7 +20,8 @@
     "seed:agents": "pnpm exec tsx ./scripts/agents.seed.ts",
     "seed:devos": "pnpm exec tsx ./scripts/devos.seed.ts",
     "test:scripts": "pnpm --filter @patioer/api exec vitest run src/lib/seed-default-agents.test.ts",
-    "dataos:clickhouse:apply-ddl": "pnpm exec tsx ./scripts/clickhouse-apply-ddl.ts"
+    "dataos:clickhouse:apply-ddl": "pnpm exec tsx ./scripts/clickhouse-apply-ddl.ts",
+    "dataos:migrate": "pnpm exec tsx ./scripts/dataos-migrate.ts"
   },
   "pnpm": {
     "overrides": {
@@ -31,13 +32,14 @@
     "@clickhouse/client": "^1.11.0",
     "@eslint/js": "^10.0.1",
     "@types/node": "latest",
+    "@vitest/coverage-istanbul": "^4.1.1",
     "@vitest/coverage-v8": "^4.1.0",
     "concurrently": "latest",
     "eslint": "latest",
     "globals": "^17.4.0",
     "prettier": "latest",
     "tsx": "latest",
-    "typescript": "latest",
+    "typescript": "~5.8.0",
     "typescript-eslint": "^8.57.1",
     "vitest": "latest"
   }

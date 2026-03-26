@@ -483,7 +483,7 @@ patioer/                              # ElectroOS Monorepo root
 > |---|--------|------|
 > | 1 | `product_features` 表存在 | `\dt` 可见 |
 > | 2 | `decision_memory` 表存在 | `\dt` 可见 |
-> | 3 | `vector` 类型可用 | `SELECT '[]'::vector(3)` 不报错 |
+> | 3 | `vector` 类型可用 | `SELECT '[1,2,3]'::vector(3)` 不报错（空向量字面量无效） |
 > | 4 | UNIQUE 约束生效 | 重复 INSERT 同 `(tenant_id, platform, product_id)` 报 conflict |
 > | 5 | 迁移脚本幂等 | 再次执行 `dataos-migrate.ts` 不报错 |
 > | 6 | 现有测试不受影响 | `pnpm test` exit 0 |
@@ -976,11 +976,564 @@ patioer/                              # ElectroOS Monorepo root
 | 2.10 | Sprint 2 集成验证 + 检查点 | all | 2.1–2.9 | 0.5d |
 
 **Sprint 2 验收：**
-- [ ] Agent 执行后 ClickHouse `events` 表有对应记录
-- [ ] BullMQ ingestion 队列处理消息，无积压
-- [ ] 失败消息进入死信队列（可重试或告警）
-- [ ] ElectroOS 主路径不受 DataOS 失败阻塞
-- [ ] `pnpm test` 全量通过
+- [x] Agent 执行后 ClickHouse `events` 表有对应记录
+- [x] BullMQ ingestion 队列处理消息，无积压
+- [x] 失败消息进入死信队列（可重试或告警）
+- [x] ElectroOS 主路径不受 DataOS 失败阻塞
+- [x] `pnpm test` 全量通过
+
+---
+
+#### Sprint 2 · Day-by-Day 实施细节
+
+---
+
+##### Day 11 — BullMQ 队列骨架 · Lake Envelope 类型 · ElectroOS 生产者
+
+---
+
+> **🃏 CARD-D11-01 · `packages/dataos/src/constants.ts`：队列名常量**
+>
+> **类型：** 代码变更（Sprint 1 Day 3 已创建，本 Card 确认内容对齐）
+> **耗时：** 5 min
+> **目标文件：** `packages/dataos/src/constants.ts`
+>
+> **内容确认：**
+> ```typescript
+> export const DATAOS_LAKE_QUEUE_NAME = 'dataos-lake-ingest'
+> ```
+>
+> **验证：** `grep DATAOS_LAKE_QUEUE_NAME packages/dataos/src/constants.ts`
+>
+> **产出：** 生产者 / 消费者共享队列名
+
+---
+
+> **🃏 CARD-D11-02 · `packages/dataos-client/src/index.ts`：`DataOsLakeEventPayload` 类型 + `DATAOS_LAKE_QUEUE_NAME` re-export**
+>
+> **类型：** 代码变更
+> **耗时：** 20 min
+> **目标文件：** `packages/dataos-client/src/index.ts`
+>
+> **需包含：**
+> ```typescript
+> export const DATAOS_LAKE_QUEUE_NAME = 'dataos-lake-ingest'
+>
+> export interface DataOsLakeEventPayload {
+>   tenantId: string
+>   platform?: string
+>   agentId: string
+>   eventType: string
+>   entityId?: string
+>   payload: unknown
+>   metadata?: unknown
+> }
+> ```
+>
+> **设计原则：** `dataos-client` 仅含 ElectroOS 侧需要的轻量类型（不依赖 `@clickhouse/client` 等重型依赖）；队列名与 `@patioer/dataos` 保持字面量一致。
+>
+> **验证：** `pnpm --filter @patioer/dataos-client typecheck`
+>
+> **产出：** 生产者侧类型定义
+
+---
+
+> **🃏 CARD-D11-03 · `apps/api/src/lib/dataos-queue.ts`：BullMQ 生产者**
+>
+> **类型：** 新建文件
+> **耗时：** 45 min
+> **目标文件：** `apps/api/src/lib/dataos-queue.ts`（新建）
+>
+> **实现要点：**
+> - 懒初始化 `Queue` 单例（模块级 `let _queue = null`）
+> - 仅当 `DATAOS_LAKE_QUEUE_ENABLED === '1'` 时创建队列（降级友好）
+> - `Queue` 构造时设置 `defaultJobOptions`：`attempts: 3` · `backoff: exponential 1s` · `removeOnComplete: 1000` · `removeOnFail: false`（失败保留入 DLQ）
+> - `enqueueDataOsLakeEvent()` 捕获所有错误并 `console.warn`，**绝不 throw**（不阻塞主路径）
+>
+> **验证：**
+> ```bash
+> pnpm --filter @patioer/api typecheck
+> # 期望：Done（无 TS 错误）
+> ```
+>
+> **产出：** ElectroOS BullMQ 生产者可用
+
+---
+
+> **🃏 CARD-D11-04 · Day 11 回归**
+>
+> ```bash
+> pnpm --filter @patioer/dataos typecheck
+> pnpm --filter @patioer/dataos-client typecheck
+> pnpm --filter @patioer/api typecheck
+> pnpm test
+> ```
+>
+> **期望：** 0 failures · 所有新代码 typecheck 通过
+
+---
+
+**Day 11 卡片执行顺序汇总：**
+
+```
+09:00  CARD-D11-01  constants.ts 队列名确认        (5min)
+09:05  CARD-D11-02  DataOsLakeEventPayload 类型     (20min)
+09:25  CARD-D11-03  dataos-queue.ts 生产者          (45min)
+10:10  CARD-D11-04  回归                             (20min)
+10:30  Day 11 完成
+```
+
+---
+
+##### Day 12 — Ingestion Worker（BullMQ 消费 → ClickHouse insert）
+
+---
+
+> **🃏 CARD-D12-01 · `apps/dataos-api/src/workers/ingestion.ts`**
+>
+> **类型：** 新建文件
+> **耗时：** 2h
+> **目标文件：** `apps/dataos-api/src/workers/ingestion.ts`（新建）
+>
+> **类 API：**
+> ```typescript
+> export const INGESTION_MAX_ATTEMPTS = 3
+>
+> export interface LakeIngestJob {
+>   tenantId: string; platform?: string
+>   agentId: string; eventType: string
+>   entityId?: string; payload: unknown; metadata?: unknown
+> }
+>
+> export function startIngestionWorker(
+>   services: DataOsServices,
+>   redis: RedisConnection,
+> ): Worker<LakeIngestJob>
+> ```
+>
+> **实现约束：**
+> - `Worker` 处理器调用 `services.eventLake.insertEvent()`
+> - 成功后调用 `ingestionJobsProcessed.inc()`
+> - `worker.on('failed', ...)` 调用 `ingestionJobsFailed.inc()`，并区分"仍会重试"vs"已进 DLQ"的日志
+> - **注意：** 重试策略（`attempts` / `backoff`）设置在生产者 Queue 的 `defaultJobOptions`，Worker 本身不设此字段
+>
+> **集成说明：** 在 `apps/dataos-api/src/server.ts` 中 `startIngestionWorker(services, redisConn)` 已调用。
+>
+> **测试用例（Day 15 编写，此处列出名字）：**
+> - `creates a BullMQ Worker on the correct queue`
+> - `worker processor calls eventLake.insertEvent with correct fields`
+> - `worker processor calls insertEvent successfully for minimal job data`
+> - `INGESTION_MAX_ATTEMPTS is defined and greater than 1`
+> - `worker processor propagates insertEvent error for BullMQ retry`
+>
+> **验证：** `pnpm --filter @patioer/dataos-api typecheck`
+>
+> **产出：** Ingestion Worker 落地
+
+---
+
+> **🃏 CARD-D12-02 · `apps/dataos-api/src/server.ts` 集成 Ingestion Worker**
+>
+> **类型：** 代码变更
+> **耗时：** 30 min
+> **目标文件：** `apps/dataos-api/src/server.ts`
+>
+> **变更：** 在 Fastify 启动前调用 `startIngestionWorker(services, redisConn)`；`shutdown()` 中加入 `worker.close()`。
+>
+> **验证：**
+> ```bash
+> # 启动 DataOS API（需 docker-compose 已运行）
+> docker-compose -f docker-compose.dataos.yml up -d
+> curl -s http://localhost:3300/health | jq .
+> # 期望：{ "ok": true, "service": "dataos-api" }
+> ```
+>
+> **产出：** Ingestion Worker 随服务启动自动运行
+
+---
+
+> **🃏 CARD-D12-03 · Day 12 回归**
+>
+> ```bash
+> pnpm --filter @patioer/dataos-api typecheck
+> pnpm test
+> ```
+
+---
+
+**Day 12 卡片执行顺序汇总：**
+
+```
+09:00  CARD-D12-01  ingestion.ts Worker             (2h)
+11:00  CARD-D12-02  server.ts 集成                   (30min)
+11:30  CARD-D12-03  回归                              (15min)
+11:45  Day 12 完成
+```
+
+---
+
+##### Day 13 — ElectroOS `buildAuditDeps` 扩展 + 死信队列/重试策略
+
+---
+
+> **🃏 CARD-D13-01 · `apps/api/src/routes/agents-execute.ts`：`buildAuditDeps` 扩展**
+>
+> **类型：** 代码变更
+> **耗时：** 1h
+> **目标文件：** `apps/api/src/routes/agents-execute.ts`
+>
+> **变更位置：** `buildAuditDeps()` 函数内的 `logAction` 实现。
+>
+> **在原有 PG `agent_events` 写入后追加：**
+> ```typescript
+> await enqueueDataOsLakeEvent({
+>   tenantId,
+>   platform: opts.platform,
+>   agentId,
+>   eventType: action,
+>   entityId: /* 从 payload 提取 productId */,
+>   payload: { action, payload },
+>   metadata: { source: 'electroos-api' },
+> })
+> ```
+>
+> **约束：**
+> - `enqueueDataOsLakeEvent` 调用在 PG 写入**之后**（PG 为审计真相源，不受影响）
+> - DataOS enqueue 失败不 throw，`try/catch` 在 `enqueueDataOsLakeEvent` 内部处理
+>
+> **验证：**
+> ```bash
+> # 确认测试中 logAction 相关测试通过
+> pnpm --filter @patioer/api test -- --reporter=verbose 2>&1 | grep "logAction"
+> ```
+>
+> **产出：** 每次 Agent 执行自动异步写入 Event Lake
+
+---
+
+> **🃏 CARD-D13-02 · 死信队列策略验证 + 文档**
+>
+> **类型：** 验证 + 文档
+> **耗时：** 30 min
+>
+> **BullMQ DLQ 机制说明：**
+>
+> | 机制 | 配置位置 | 配置值 |
+> |------|----------|--------|
+> | 最大重试次数 | `Queue.defaultJobOptions.attempts` | `3` |
+> | 退避策略 | `Queue.defaultJobOptions.backoff` | `exponential, delay: 1000ms` |
+> | 失败后保留 | `Queue.defaultJobOptions.removeOnFail` | `false`（永不自动删除） |
+> | DLQ 查询 | BullMQ `getJobs(['failed'])` | 返回失败 Job 列表 |
+>
+> **BullMQ 原生 DLQ：** 耗尽 `attempts` 次重试的 Job 自动进入 Redis `{queue}:failed` sorted set，不再触发 Worker，可通过 BullMQ Board 或 `queue.getJobs(['failed'])` 查看。
+>
+> **告警集成（可选，Phase 4）：** 设置 `queue.on('failed', ...)` 在 `attemptsMade >= maxAttempts` 时发送 Slack/DevOS Ticket。
+>
+> **验证：**
+> ```bash
+> # 确认 INGESTION_MAX_ATTEMPTS > 1
+> grep INGESTION_MAX_ATTEMPTS apps/dataos-api/src/workers/ingestion.ts
+> # 期望：export const INGESTION_MAX_ATTEMPTS = 3
+>
+> # 确认 Queue defaultJobOptions
+> grep -A5 "defaultJobOptions" apps/api/src/lib/dataos-queue.ts
+> # 期望：attempts: 3, backoff: exponential
+> ```
+>
+> **产出：** 死信队列策略落地并有文档记录
+
+---
+
+> **🃏 CARD-D13-03 · Day 13 回归**
+>
+> ```bash
+> pnpm --filter @patioer/api typecheck
+> pnpm test
+> ```
+
+---
+
+**Day 13 卡片执行顺序汇总：**
+
+```
+09:00  CARD-D13-01  buildAuditDeps → enqueue 扩展   (1h)
+10:00  CARD-D13-02  DLQ 策略验证 + 文档              (30min)
+10:30  CARD-D13-03  回归                              (20min)
+10:50  Day 13 完成
+```
+
+---
+
+##### Day 14 — ClickHouse 批量 Insert + Price Sentinel `price_events` 写入
+
+---
+
+> **🃏 CARD-D14-01 · `packages/dataos/src/event-lake.ts`：`insertEventBatch` + `insertPriceEventBatch`**
+>
+> **类型：** 代码变更
+> **耗时：** 1.5h
+> **目标文件：** `packages/dataos/src/event-lake.ts`
+>
+> **新增方法：**
+> ```typescript
+> // 抽取私有序列化辅助
+> private serializeEvent(row: DataOsEventLakeRecord): CHEventRow
+>
+> // 批量 insert：单次 ClickHouse 请求写多行
+> async insertEventBatch(rows: DataOsEventLakeRecord[]): Promise<void>
+> async insertPriceEventBatch(rows: DataOsPriceEventRecord[]): Promise<void>
+> ```
+>
+> **约束：**
+> - `insertEvent()` 保持向后兼容（内部复用 `serializeEvent`）
+> - `insertPriceEvent()` 改为调用 `insertPriceEventBatch([row])`（单行也走批量路径）
+> - 空数组时**立即 return**，不调用 CH client
+>
+> **新增测试用例（event-lake.test.ts 追加）：**
+> - `insertEventBatch inserts all rows in a single client.insert call`
+> - `insertEventBatch is a no-op for empty array`
+> - `insertPriceEventBatch inserts all rows in a single client.insert call`
+>
+> **验证：** `pnpm --filter @patioer/dataos test`
+>
+> **产出：** ClickHouse 批量 insert 路径就绪
+
+---
+
+> **🃏 CARD-D14-02 · Price Sentinel 调价写入 `price_events`（via `DataOsPort.recordPriceEvent`）**
+>
+> **类型：** 验证/代码确认
+> **耗时：** 30 min
+> **目标文件：** `packages/agent-runtime/src/agents/price-sentinel.agent.ts`、`apps/api/src/lib/dataos-port.ts`
+>
+> **调用链：**
+> ```
+> price-sentinel.agent.ts
+>   → ctx.dataOS?.recordPriceEvent({ productId, priceBefore, priceAfter, changePct, approved })
+>     → DataOsPort (dataos-port.ts)
+>       → DataOsClient.recordPriceEvent()
+>         → POST /internal/v1/lake/price-events
+>           → EventLakeService.insertPriceEvent()  ← 本 Day 已优化为 batch 路径
+>             → ClickHouse price_events 表
+> ```
+>
+> **验证：**
+> ```bash
+> grep -n "recordPriceEvent" packages/agent-runtime/src/agents/price-sentinel.agent.ts
+> # 期望：ctx.dataOS.recordPriceEvent 调用存在
+>
+> grep -n "recordPriceEvent" apps/api/src/lib/dataos-port.ts
+> # 期望：client.recordPriceEvent 映射存在
+>
+> pnpm --filter @patioer/agent-runtime typecheck
+> ```
+>
+> **产出：** Price Sentinel 调价事件端到端路径可追踪
+
+---
+
+> **🃏 CARD-D14-03 · Day 14 回归**
+>
+> ```bash
+> pnpm --filter @patioer/dataos test
+> pnpm typecheck
+> pnpm test
+> ```
+
+---
+
+**Day 14 卡片执行顺序汇总：**
+
+```
+09:00  CARD-D14-01  insertEventBatch / insertPriceEventBatch  (1.5h)
+10:30  CARD-D14-02  price_events 调用链验证                    (30min)
+11:00  CARD-D14-03  回归                                       (20min)
+11:20  Day 14 完成
+```
+
+---
+
+##### Day 15 — Prometheus 指标补全 + 单元测试（Ingestion Worker + BullMQ 生产者）
+
+---
+
+> **🃏 CARD-D15-01 · `apps/dataos-api/src/metrics.ts`：补充失败计数器 + 队列深度 Gauge**
+>
+> **类型：** 代码变更
+> **耗时：** 30 min
+> **目标文件：** `apps/dataos-api/src/metrics.ts`
+>
+> **新增指标：**
+>
+> | 指标名 | 类型 | 含义 |
+> |--------|------|------|
+> | `dataos_ingestion_jobs_failed_total` | Counter | 耗尽所有重试后进入 DLQ 的 Job 数 |
+> | `dataos_ingestion_queue_depth` | Gauge | 队列当前 waiting + active Job 数（供 AlertManager 阈值告警） |
+>
+> **说明：** `ingestionQueueDepth` Gauge 由外部定时刷新逻辑（或 Bull Board webhook）设置，本 Day 仅定义指标对象；Phase 4 接入实际队列深度轮询。
+>
+> **验证：** `pnpm --filter @patioer/dataos-api typecheck`
+>
+> **产出：** Sprint 2 所有 Prometheus 指标就绪
+
+---
+
+> **🃏 CARD-D15-02 · `apps/dataos-api/vitest.config.ts` + `apps/dataos-api/src/workers/ingestion.test.ts`**
+>
+> **类型：** 新建文件
+> **耗时：** 1.5h
+>
+> **vitest.config.ts：**
+> ```typescript
+> export default defineConfig({ test: { include: ['src/**/*.test.ts'] } })
+> ```
+>
+> **ingestion.test.ts 测试策略：**
+> - 使用 `vi.mock('bullmq', ...)` class mock（Worker 为 class，捕获 `processor` 参数到模块变量）
+> - 每个 `it` 里直接调用 `capturedProcessor` 绕过实际 BullMQ Redis 连接
+> - 测试处理器逻辑、错误传播、队列名、`INGESTION_MAX_ATTEMPTS` 常量
+>
+> **测试用例：**
+> ```
+> ✓ creates a BullMQ Worker on the correct queue
+> ✓ worker processor calls eventLake.insertEvent with correct fields
+> ✓ worker processor calls insertEvent successfully for minimal job data
+> ✓ INGESTION_MAX_ATTEMPTS is defined and greater than 1
+> ✓ worker processor propagates insertEvent error for BullMQ retry
+> ```
+>
+> **验证：** `pnpm --filter @patioer/dataos-api test`  → `5 passed`
+>
+> **产出：** Ingestion Worker 测试覆盖完整
+
+---
+
+> **🃏 CARD-D15-03 · `apps/api/src/lib/dataos-queue.test.ts`**
+>
+> **类型：** 新建文件
+> **耗时：** 45 min
+>
+> **测试策略：**
+> - `vi.mock('bullmq', ...)` 使用 class mock（`Queue` 为 class，`add` 方法为 `vi.fn()`）
+> - `vi.resetModules()` 在 `beforeEach` 中重置模块缓存（单例 `_queue` 随之重置）
+> - 通过 `process.env.DATAOS_LAKE_QUEUE_ENABLED` 控制 feature flag
+>
+> **测试用例：**
+> ```
+> ✓ is a no-op when DATAOS_LAKE_QUEUE_ENABLED is not set
+> ✓ enqueues with correct payload when DATAOS_LAKE_QUEUE_ENABLED=1
+> ✓ swallows errors without throwing (non-blocking for main agent path)
+> ```
+>
+> **验证：** `pnpm --filter @patioer/api test` → 原有 385 + 3 新增 = 388 passed
+>
+> **产出：** 生产者单元测试完整
+
+---
+
+> **🃏 CARD-D15-04 · Day 15 回归**
+>
+> ```bash
+> pnpm typecheck
+> pnpm test
+> # 期望：dataos-api 5 passed · api 388 passed · 全量 0 failures
+> ```
+
+---
+
+**Day 15 卡片执行顺序汇总：**
+
+```
+09:00  CARD-D15-01  metrics.ts 补全                    (30min)
+09:30  CARD-D15-02  ingestion.test.ts + vitest.config  (1.5h)
+11:00  CARD-D15-03  dataos-queue.test.ts               (45min)
+11:45  CARD-D15-04  回归                                (15min)
+12:00  Day 15 完成
+```
+
+---
+
+##### Day 16 — Sprint 2 全量集成验证 + 检查点
+
+---
+
+> **🃏 CARD-D16-01 · Sprint 2 全量验证**
+>
+> **类型：** 验证
+> **耗时：** 1.5h
+>
+> **验证步骤：**
+>
+> ```bash
+> # 1. 类型检查
+> pnpm typecheck
+> # 期望：全 Done，0 errors
+>
+> # 2. 全量测试
+> pnpm test
+> # 期望：0 failures
+>
+> # 3. 基础设施启动
+> docker-compose -f docker-compose.dataos.yml up -d
+> sleep 5
+>
+> # 4. DataOS API 健康
+> curl -s http://localhost:3300/health | jq .
+> # 期望：{ "ok": true, "service": "dataos-api" }
+>
+> # 5. Event Lake 写入冒烟
+> curl -s -X POST http://localhost:3300/internal/v1/lake/events \
+>   -H 'Content-Type: application/json' \
+>   -H 'X-DataOS-Internal-Key: dev-dataos-internal-key' \
+>   -d '{"tenantId":"00000000-0000-0000-0000-000000000001","agentId":"price-sentinel","eventType":"price.updated","payload":{"before":10,"after":12}}' | jq .
+> # 期望：{ "ok": true }
+>
+> # 6. 验证 CH 有写入
+> curl -s 'http://localhost:8123/?query=SELECT%20count()%20FROM%20electroos_events.events'
+> # 期望：1（或更多）
+>
+> # 7. Price Events 写入冒烟
+> curl -s -X POST http://localhost:3300/internal/v1/lake/price-events \
+>   -H 'Content-Type: application/json' \
+>   -H 'X-DataOS-Internal-Key: dev-dataos-internal-key' \
+>   -d '{"tenantId":"00000000-0000-0000-0000-000000000001","productId":"sku-1","priceBefore":29.99,"priceAfter":27.99,"changePct":-0.067,"approved":true}' | jq .
+> # 期望：{ "ok": true }
+>
+> # 8. Prometheus 指标可读
+> curl -s http://localhost:3300/metrics | grep dataos_ingestion
+> # 期望：dataos_ingestion_jobs_processed_total 0
+> #        dataos_ingestion_jobs_failed_total 0
+> #        dataos_ingestion_queue_depth 0
+> ```
+>
+> **Sprint 2 检查点清单：**
+>
+> | # | 检查项 | 期望 |
+> |---|--------|------|
+> | 1 | `constants.ts` 有 `DATAOS_LAKE_QUEUE_NAME` | grep 可见 |
+> | 2 | `DataOsLakeEventPayload` 类型可从 `@patioer/dataos-client` 导入 | typecheck 通过 |
+> | 3 | `enqueueDataOsLakeEvent` 在 `DATAOS_LAKE_QUEUE_ENABLED=0` 时静默 no-op | 测试验证 |
+> | 4 | `logAction` 调用后 `enqueueDataOsLakeEvent` 被触发 | `agents-execute.test.ts` 验证 |
+> | 5 | 死信队列：`attempts:3` · `backoff:exponential` · `removeOnFail:false` | `dataos-queue.ts` grep |
+> | 6 | `insertEventBatch([])` 立即返回不调用 CH | 测试验证 |
+> | 7 | `insertEventBatch([r1,r2])` 单次 CH 请求 | 测试验证 |
+> | 8 | Price Sentinel `recordPriceEvent` 链路完整 | typecheck 通过 |
+> | 9 | `dataos_ingestion_jobs_failed_total` 指标可见 | `/metrics` curl |
+> | 10 | `dataos_ingestion_queue_depth` 指标可见 | `/metrics` curl |
+> | 11 | `ingestion.test.ts` 5 passed | vitest |
+> | 12 | `dataos-queue.test.ts` 3 passed | vitest |
+> | 13 | 全量 `pnpm test` 0 failures | CI green |
+>
+> **产出：** Sprint 2 全部验收通过 · 代码可安全合并
+
+---
+
+**Day 16 卡片执行顺序汇总：**
+
+```
+09:00  CARD-D16-01  全量验证                           (1.5h)
+10:30  Sprint 2 完成 → 进入 Sprint 3
+```
 
 ---
 
