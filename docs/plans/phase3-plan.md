@@ -579,18 +579,24 @@ patioer/                              # ElectroOS Monorepo root
 
 ---
 
-> **🃏 CARD-D3-04 · `packages/dataos/src/constants.ts`**
+> **🃏 CARD-D3-04 · `DATAOS_LAKE_QUEUE_NAME` 常量**
 >
-> **类型：** 新建文件  
+> **类型：** 新建（已实施为合并到 `packages/dataos-client`）  
 > **耗时：** 5 min  
-> **目标文件：** `packages/dataos/src/constants.ts`（新建）
+> **目标文件：** `packages/dataos-client/src/index.ts`（唯一真相源）
+>
+> **实施说明（code-simplicity 对齐）：** `packages/dataos/src/constants.ts` 已删除，
+> 队列名常量统一由 `@patioer/dataos-client` 导出，消除双重定义。
 >
 > **内容：**
 > ```typescript
+> // packages/dataos-client/src/index.ts
 > export const DATAOS_LAKE_QUEUE_NAME = 'dataos-lake-ingest'
 > ```
 >
-> **产出：** 共享常量
+> **验证：** `grep DATAOS_LAKE_QUEUE_NAME packages/dataos-client/src/index.ts`
+>
+> **产出：** 队列名单一来源（`@patioer/dataos-client`）
 
 ---
 
@@ -992,20 +998,21 @@ patioer/                              # ElectroOS Monorepo root
 
 ---
 
-> **🃏 CARD-D11-01 · `packages/dataos/src/constants.ts`：队列名常量**
+> **🃏 CARD-D11-01 · `DATAOS_LAKE_QUEUE_NAME` 常量确认**
 >
-> **类型：** 代码变更（Sprint 1 Day 3 已创建，本 Card 确认内容对齐）
+> **类型：** 确认（已合并到 `packages/dataos-client`，见 CARD-D3-04 说明）
 > **耗时：** 5 min
-> **目标文件：** `packages/dataos/src/constants.ts`
+> **目标文件：** `packages/dataos-client/src/index.ts`（唯一真相源）
 >
 > **内容确认：**
 > ```typescript
+> // packages/dataos-client/src/index.ts
 > export const DATAOS_LAKE_QUEUE_NAME = 'dataos-lake-ingest'
 > ```
 >
-> **验证：** `grep DATAOS_LAKE_QUEUE_NAME packages/dataos/src/constants.ts`
+> **验证：** `grep DATAOS_LAKE_QUEUE_NAME packages/dataos-client/src/index.ts`
 >
-> **产出：** 生产者 / 消费者共享队列名
+> **产出：** 生产者 / 消费者共享队列名（单一来源）
 
 ---
 
@@ -1510,18 +1517,18 @@ patioer/                              # ElectroOS Monorepo root
 >
 > | # | 检查项 | 期望 |
 > |---|--------|------|
-> | 1 | `constants.ts` 有 `DATAOS_LAKE_QUEUE_NAME` | grep 可见 |
+> | 1 | `DATAOS_LAKE_QUEUE_NAME` 在 `@patioer/dataos-client` 可见（`constants.ts` 已删除，唯一来源为 `dataos-client`） | `grep DATAOS_LAKE_QUEUE_NAME packages/dataos-client/src/index.ts` |
 > | 2 | `DataOsLakeEventPayload` 类型可从 `@patioer/dataos-client` 导入 | typecheck 通过 |
-> | 3 | `enqueueDataOsLakeEvent` 在 `DATAOS_LAKE_QUEUE_ENABLED=0` 时静默 no-op | 测试验证 |
-> | 4 | `logAction` 调用后 `enqueueDataOsLakeEvent` 被触发 | `agents-execute.test.ts` 验证 |
+> | 3 | `createLakeQueueEnqueuer` 在 `enabled: false` 时静默 no-op | 测试验证 |
+> | 4 | `logAction` 调用后 lake event 入队 | `agents-execute.test.ts` 验证 |
 > | 5 | 死信队列：`attempts:3` · `backoff:exponential` · `removeOnFail:false` | `dataos-queue.ts` grep |
 > | 6 | `insertEventBatch([])` 立即返回不调用 CH | 测试验证 |
 > | 7 | `insertEventBatch([r1,r2])` 单次 CH 请求 | 测试验证 |
 > | 8 | Price Sentinel `recordPriceEvent` 链路完整 | typecheck 通过 |
 > | 9 | `dataos_ingestion_jobs_failed_total` 指标可见 | `/metrics` curl |
-> | 10 | `dataos_ingestion_queue_depth` 指标可见 | `/metrics` curl |
-> | 11 | `ingestion.test.ts` 5 passed | vitest |
-> | 12 | `dataos-queue.test.ts` 3 passed | vitest |
+> | 10 | ~~`dataos_ingestion_queue_depth` 指标可见~~ **（已删除）** `ingestionQueueDepth` 定义但从未写入值，code-simplicity 阶段移除 | N/A |
+> | 11 | `ingestion.test.ts` passed | vitest |
+> | 12 | `dataos-queue.test.ts` passed | vitest |
 > | 13 | 全量 `pnpm test` 0 failures | CI green |
 >
 > **产出：** Sprint 2 全部验收通过 · 代码可安全合并
@@ -1842,7 +1849,7 @@ Paperclip Heartbeat
 | `docs/adr/0003-phase3-dataos-stack.md` | 新建：DataOS 技术栈 ADR |
 | `docs/operations.md` | 追加 DataOS 运维章节 |
 | `docs/ops/dataos-local.md` | 新建：本地开发 DataOS 指南 |
-| `docs/openapi/dataos-internal-v1.yaml` | 新建：DataOS 对内 API OpenAPI 文档 |
+| `docs/openapi/sprint6-api.openapi.yaml` | 新建：DataOS 对内 API OpenAPI 文档（实际文件名） |
 
 ---
 
