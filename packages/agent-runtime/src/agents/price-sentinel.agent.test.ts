@@ -2,24 +2,9 @@ import { describe, expect, it, vi } from 'vitest'
 import { HarnessError } from '@patioer/harness'
 import type { TenantHarness } from '@patioer/harness'
 import type { AgentContext } from '../context.js'
+import type { DataOsPort } from '../types.js'
 import { runPriceSentinel } from './price-sentinel.agent.js'
-
-function createHarnessMock(): TenantHarness {
-  return {
-    tenantId: 'tenant-a',
-    platformId: 'shopify',
-    getProduct: vi.fn().mockResolvedValue(null),
-    getProductsPage: vi.fn().mockResolvedValue({ items: [] }),
-    getProducts: vi.fn().mockResolvedValue([]),
-    updatePrice: vi.fn().mockResolvedValue(undefined),
-    updateInventory: vi.fn().mockResolvedValue(undefined),
-    getOrdersPage: vi.fn().mockResolvedValue({ items: [] }),
-    getOrders: vi.fn().mockResolvedValue([]),
-    replyToMessage: vi.fn().mockResolvedValue(undefined),
-    getOpenThreads: vi.fn().mockResolvedValue([]),
-    getAnalytics: vi.fn().mockResolvedValue({ revenue: 0, orders: 0 }),
-  }
-}
+import { createHarnessMock, createDataOsMock } from './test-helpers.js'
 
 function createCtx(overrides?: {
   budgetExceeded?: boolean
@@ -273,6 +258,55 @@ describe('runPriceSentinel', () => {
         'price_sentinel.harness_error',
         expect.objectContaining({ code: 'unknown', message: 'network timeout' }),
       )
+    })
+  })
+
+  describe('DataOS degradation — ADR-03 / AC-P3-19', () => {
+    const smallProposal = { productId: 'p-1', currentPrice: 100, proposedPrice: 105, reason: 'small' }
+
+    it('processes proposals without dataOS (ctx.dataOS = undefined)', async () => {
+      const { ctx, harness } = createCtx()
+      const result = await runPriceSentinel(ctx, { proposals: [smallProposal] })
+
+      expect(result.decisions).toHaveLength(1)
+      expect(harness.updatePrice).toHaveBeenCalledWith('p-1', 105)
+    })
+
+    it('still updates price when dataOS.recordMemory throws', async () => {
+      const { ctx, harness } = createCtx()
+      const dataOS = createDataOsMock()
+      vi.mocked(dataOS.recordMemory).mockRejectedValue(new Error('write failed'))
+      ctx.dataOS = dataOS
+
+      const result = await runPriceSentinel(ctx, { proposals: [smallProposal] })
+
+      expect(result.decisions).toHaveLength(1)
+      expect(harness.updatePrice).toHaveBeenCalled()
+      expect(ctx.logAction).toHaveBeenCalledWith('price_sentinel.dataos_write_failed', { productId: 'p-1' })
+    })
+
+    it('still updates price when dataOS.recordLakeEvent throws', async () => {
+      const { ctx, harness } = createCtx()
+      const dataOS = createDataOsMock()
+      vi.mocked(dataOS.recordLakeEvent).mockRejectedValue(new Error('write failed'))
+      ctx.dataOS = dataOS
+
+      const result = await runPriceSentinel(ctx, { proposals: [smallProposal] })
+
+      expect(result.decisions).toHaveLength(1)
+      expect(harness.updatePrice).toHaveBeenCalled()
+    })
+
+    it('still updates price when dataOS.recordPriceEvent throws', async () => {
+      const { ctx, harness } = createCtx()
+      const dataOS = createDataOsMock()
+      vi.mocked(dataOS.recordPriceEvent).mockRejectedValue(new Error('write failed'))
+      ctx.dataOS = dataOS
+
+      const result = await runPriceSentinel(ctx, { proposals: [smallProposal] })
+
+      expect(result.decisions).toHaveLength(1)
+      expect(harness.updatePrice).toHaveBeenCalled()
     })
   })
 })

@@ -13,6 +13,8 @@ export const agentTypeEnum = pgEnum('agent_type', [
   'support-relay',
   'ads-optimizer',
   'inventory-guard',
+  'content-writer',
+  'market-intel',
 ])
 
 export const agentStatusEnum = pgEnum('agent_status', [

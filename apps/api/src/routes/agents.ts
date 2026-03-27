@@ -10,6 +10,8 @@ const AGENT_TYPES = [
   'support-relay',
   'ads-optimizer',
   'inventory-guard',
+  'content-writer',
+  'market-intel',
 ] as const
 
 export type AgentType = (typeof AGENT_TYPES)[number]
@@ -41,6 +43,16 @@ const goalContextSchemas: Partial<Record<AgentType, z.ZodTypeAny>> = {
     replenishApprovalMinUnits: z.number().int().positive().optional(),
     timeZone: z.string().optional(),
     enforceDailyWindow: z.boolean().optional(),
+  }).passthrough(),
+  'content-writer': z.object({
+    productId: z.string(),
+    platform: z.string().optional(),
+    tone: z.enum(['professional', 'casual', 'luxury', 'value']).optional(),
+    maxLength: z.number().int().positive().optional(),
+  }).passthrough(),
+  'market-intel': z.object({
+    platforms: z.array(z.string()).optional(),
+    maxProducts: z.number().int().positive().optional(),
   }).passthrough(),
 }
 

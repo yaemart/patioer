@@ -63,6 +63,8 @@ export {
   buildSupportRelayInput,
   buildAdsOptimizerInput,
   buildInventoryGuardInput,
+  buildContentWriterInput,
+  buildMarketIntelInput,
 } from '../lib/agent-inputs.js'
 
 type AgentContext = ReturnType<typeof createAgentContext>
@@ -343,7 +345,26 @@ const agentsExecuteRoute: FastifyPluginAsync = async (app) => {
       if (!runner) {
         return reply.code(501).send({ error: `agent type ${agentRow.type} not implemented` })
       }
+
+      const dataosMode = ctx.dataOS ? 'enabled' : 'degraded'
+      const startTime = Date.now()
+
       const response = await runner(request, agentRow, ctx)
+
+      const durationSec = (Date.now() - startTime) / 1000
+      enqueueDataOsLakeEvent({
+        tenantId: request.tenantId,
+        platform,
+        agentId: agentRow.id,
+        eventType: 'ab_metric',
+        payload: {
+          agentType: agentRow.type,
+          dataosMode,
+          durationSec,
+        },
+        metadata: { source: 'electroos-api', metric: 'execution' },
+      }).catch(() => {})
+
       return reply.send(response satisfies ExecuteAgentResponse)
     } catch (error) {
       if (error instanceof HarnessError) {

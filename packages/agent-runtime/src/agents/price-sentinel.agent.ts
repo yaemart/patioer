@@ -66,24 +66,6 @@ export async function runPriceSentinel(
 
   for (const proposal of input.proposals) {
     assertValidProposal(proposal)
-    let features: unknown = null
-    if (ctx.dataOS) {
-      try {
-        features = await ctx.dataOS.getFeatures(platform, proposal.productId)
-        const memories =
-          (await ctx.dataOS.recallMemory('price-sentinel', {
-            product: proposal,
-            features,
-          })) ?? []
-        await ctx.logAction('price_sentinel.dataos_context', {
-          productId: proposal.productId,
-          features,
-          memories,
-        })
-      } catch {
-        await ctx.logAction('price_sentinel.dataos_degraded', { productId: proposal.productId })
-      }
-    }
 
     const decision = buildDecision(
       proposal.productId,
@@ -147,7 +129,7 @@ export async function runPriceSentinel(
         const decisionId = await ctx.dataOS.recordMemory({
           agentId: 'price-sentinel',
           entityId: proposal.productId,
-          context: { product: proposal, features },
+          context: { product: proposal },
           action: {
             newPrice: decision.proposedPrice,
             reason: decision.reason,
@@ -175,7 +157,7 @@ export async function runPriceSentinel(
           priceBefore: decision.currentPrice,
           priceAfter: decision.proposedPrice,
           changePct: decision.deltaPercent,
-          approved: !decision.requiresApproval,
+          approved: true,
         })
       } catch {
         await ctx.logAction('price_sentinel.dataos_write_failed', { productId: proposal.productId })

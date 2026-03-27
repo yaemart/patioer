@@ -1,7 +1,9 @@
 import type { FastifyRequest } from 'fastify'
 import {
   runAdsOptimizer,
+  runContentWriter,
   runInventoryGuard,
+  runMarketIntel,
   runPriceSentinel,
   runProductScout,
   runSupportRelay,
@@ -9,14 +11,18 @@ import {
 import type { AgentContext } from '@patioer/agent-runtime'
 import type {
   AdsOptimizerPlatformResult,
+  ContentWriterResult,
   InventoryGuardPlatformResult,
+  MarketIntelResult,
   PriceDecision,
   RelayedThread,
   ScoutedProduct,
 } from '@patioer/agent-runtime'
 import {
   buildAdsOptimizerInput,
+  buildContentWriterInput,
   buildInventoryGuardInput,
+  buildMarketIntelInput,
   buildPriceSentinelInput,
   buildProductScoutInput,
   buildSupportRelayInput,
@@ -47,6 +53,8 @@ export interface ExecuteAgentResponse {
     replenishApprovalsRequested?: number
     skippedDueToSchedule?: boolean
   }
+  contentWriter?: ContentWriterResult
+  marketIntel?: MarketIntelResult
 }
 
 export type AgentRunner = (
@@ -119,4 +127,16 @@ registerRunner('inventory-guard', async (request, agentRow, ctx) => {
       skippedDueToSchedule: result.skippedDueToSchedule,
     },
   }
+})
+
+registerRunner('content-writer', async (_req, agentRow, ctx) => {
+  const input = buildContentWriterInput(agentRow.goalContext ?? '')
+  const result = await runContentWriter(ctx, input)
+  return { ok: true, agentId: agentRow.id, executedAt: new Date().toISOString(), contentWriter: result }
+})
+
+registerRunner('market-intel', async (_req, agentRow, ctx) => {
+  const input = buildMarketIntelInput(agentRow.goalContext ?? '')
+  const result = await runMarketIntel(ctx, input)
+  return { ok: true, agentId: agentRow.id, executedAt: new Date().toISOString(), marketIntel: result }
 })

@@ -114,35 +114,8 @@ export function createAgentContext(
 
   if (deps.dataOS) {
     ctx.dataOS = deps.dataOS
-    ctx.describeDataOsCapabilities = () => [
-      '## DataOS Capabilities (Learning Layer)',
-      '',
-      'You have access to DataOS via `ctx.dataOS`. Available operations:',
-      '',
-      '### Event Lake (ClickHouse)',
-      '- `recordLakeEvent({ agentId, eventType, entityId?, payload, metadata? })` — write any event',
-      '- `recordPriceEvent({ productId, priceBefore, priceAfter, changePct, approved })` — write price change',
-      '- `queryEvents({ agentId?, eventType?, entityId?, limit?, sinceMs? })` — query events',
-      '- `queryPriceEvents({ productId?, limit?, sinceMs? })` — query price events',
-      '',
-      '### Feature Store (PostgreSQL + Redis cache)',
-      '- `getFeatures(platform, productId)` — get product feature snapshot',
-      '- `listFeatures(platform?, { limit? })` — browse features',
-      '- `upsertFeature({ platform, productId, ...fields })` — create/update features',
-      '- `deleteFeature(platform, productId)` — remove a feature row',
-      '',
-      '### Decision Memory (pgvector semantic search)',
-      '- `recallMemory(agentId, context, { limit?, minSimilarity? })` — find similar past decisions (only returns entries where outcome was recorded)',
-      '- `recordMemory({ agentId, context, action, platform?, entityId? })` — save a decision, returns decisionId',
-      '- `writeOutcome(decisionId, outcome)` — close the learning loop: record what actually happened after a decision (required for future recall to surface this memory)',
-      '- `listDecisions(agentId?, limit?)` — browse recent decisions',
-      '- `deleteDecision(decisionId)` — remove a decision record',
-      '',
-      '### Discovery',
-      '- `getCapabilities()` — introspect all available endpoints and their schemas',
-      '',
-      'Use these to learn from past decisions, build context, and improve over time.',
-    ].join('\n')
+    ctx.describeDataOsCapabilities = () =>
+      'DataOS learning layer is available (Event Lake, Feature Store, Decision Memory).'
   }
 
   if (deps.market) {

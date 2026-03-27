@@ -92,13 +92,7 @@ export interface AgentContextOptions {
 }
 
 /** Phase 3 · DataOS (optional; degraded when unavailable). */
-export interface DataOsFeatureSnapshot {
-  conv_rate_7d?: string | null
-  price_current?: string | null
-  product_id?: string
-  platform?: string
-  [key: string]: unknown
-}
+export type DataOsFeatureSnapshot = Record<string, unknown>
 
 export interface DataOsPort {
   getFeatures(platform: string, productId: string): Promise<DataOsFeatureSnapshot | null>
@@ -288,4 +282,48 @@ export interface InventoryGuardRunResult {
   /** `requestApproval` calls for large restock (`inventory.adjust`); harness write only after approval in worker. */
   replenishApprovalsRequested?: number
   skippedDueToSchedule?: boolean
+}
+
+// ---------------------------------------------------------------------------
+// Content Writer (E-07) — Phase 3 Sprint 5
+// ---------------------------------------------------------------------------
+
+export interface ContentWriterRunInput {
+  productId: string
+  platform?: string
+  tone?: 'professional' | 'casual' | 'luxury' | 'value'
+  maxLength?: number
+}
+
+export interface ContentWriterResult {
+  productId: string
+  title: string
+  description: string
+  bulletPoints: string[]
+  seoKeywords: string[]
+}
+
+// ---------------------------------------------------------------------------
+// Market Intel (E-08) — Phase 3 Sprint 5
+// ---------------------------------------------------------------------------
+
+export interface MarketIntelRunInput {
+  platforms?: string[]
+  maxProducts?: number
+}
+
+export interface MarketIntelCompetitorInsight {
+  productId: string
+  platform: string
+  competitorMinPrice: number
+  competitorAvgPrice: number
+  pricePosition: 'below' | 'at' | 'above'
+  recommendation?: string
+}
+
+export interface MarketIntelResult {
+  runId: string
+  analyzedProducts: number
+  insights: MarketIntelCompetitorInsight[]
+  featuresUpdated: number
 }

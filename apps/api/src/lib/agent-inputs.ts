@@ -7,7 +7,9 @@ import { and, eq } from 'drizzle-orm'
 import { schema } from '@patioer/db'
 import type {
   AdsOptimizerRunInput,
+  ContentWriterRunInput,
   InventoryGuardRunInput,
+  MarketIntelRunInput,
   PriceSentinelRunInput,
   ProductScoutRunInput,
   SupportRelayRunInput,
@@ -49,6 +51,18 @@ export function buildSupportRelayInput(goalContext: string): SupportRelayRunInpu
     return { autoReplyPolicy: policy }
   }
   return {}
+}
+
+export function buildContentWriterInput(goalContext: string): ContentWriterRunInput {
+  const parsed = parseGoalContext(goalContext)
+  if (!parsed) throw new Error('content-writer requires goalContext with productId')
+  const productId = typeof parsed.productId === 'string' && parsed.productId ? parsed.productId : ''
+  if (!productId) throw new Error('content-writer requires a non-empty productId')
+  const platform = typeof parsed.platform === 'string' ? parsed.platform : undefined
+  const tone = ['professional', 'casual', 'luxury', 'value'].includes(parsed.tone as string)
+    ? (parsed.tone as ContentWriterRunInput['tone'])
+    : undefined
+  return { productId, platform, tone, maxLength: getNum(parsed, 'maxLength') }
 }
 
 export function buildAdsOptimizerInput(
@@ -213,5 +227,16 @@ export function buildInventoryGuardInput(
       })
       return n
     },
+  }
+}
+
+export function buildMarketIntelInput(goalContext: string): MarketIntelRunInput {
+  const parsed = parseGoalContext(goalContext)
+  if (!parsed) return {}
+  return {
+    platforms: Array.isArray(parsed.platforms)
+      ? parsed.platforms.filter((p): p is string => typeof p === 'string')
+      : undefined,
+    maxProducts: getNum(parsed, 'maxProducts'),
   }
 }

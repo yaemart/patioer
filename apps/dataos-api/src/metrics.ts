@@ -81,6 +81,7 @@ export const insightAgentPendingDecisions = new Gauge({
   registers: [registry],
 })
 
+
 export async function renderMetrics(): Promise<string> {
   return registry.metrics()
 }
