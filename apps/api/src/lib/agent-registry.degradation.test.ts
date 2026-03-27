@@ -8,7 +8,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { FastifyRequest } from 'fastify'
 import type { TenantHarness } from '@patioer/harness'
-import { createAgentContext } from '@patioer/agent-runtime'
 import type { AgentContext } from '@patioer/agent-runtime'
 import { getRunner } from './agent-registry.js'
 

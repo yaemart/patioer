@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest'
 import { HarnessError } from '@patioer/harness'
 import type { TenantHarness } from '@patioer/harness'
 import type { AgentContext } from '../context.js'
-import type { DataOsPort } from '../types.js'
 import { runPriceSentinel } from './price-sentinel.agent.js'
 import { createHarnessMock, createDataOsMock } from './test-helpers.js'
 

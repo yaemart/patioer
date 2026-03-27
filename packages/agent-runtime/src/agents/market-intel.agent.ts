@@ -116,7 +116,7 @@ export async function runMarketIntel(
         }
       }
 
-      let insight: MarketIntelCompetitorInsight | null = null
+      let insight: MarketIntelCompetitorInsight | null
       try {
         const prompt = buildAnalysisPrompt(product, platform, features)
         const llmResponse = await ctx.llm({
