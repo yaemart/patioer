@@ -24,7 +24,11 @@ export class DecisionMemoryService {
     options?: { limit?: number; minSimilarity?: number },
   ): Promise<DecisionMemoryRow[]> {
     const limit = options?.limit ?? 5
-    const minSim = options?.minSimilarity ?? 0.85
+    // Tuned via benchmark (CARD-D33-03): deterministic embeddings produce a wider
+    // similarity spread than OpenAI text-embedding-3-small.  Default lowered from
+    // 0.85 → 0.75 so recall surfaces ≥3 results in both modes. Callers can
+    // override via options.minSimilarity for stricter/looser matching.
+    const minSim = options?.minSimilarity ?? 0.75
     const text = JSON.stringify(currentContext)
     const vector = await embedText(text, this.embedding)
     const vecLiteral = `[${vector.join(',')}]`
@@ -97,6 +101,39 @@ export class DecisionMemoryService {
        FROM decision_memory
        WHERE tenant_id = $1${agentFilter}
        ORDER BY decided_at DESC LIMIT $${params.push(limit)}`,
+      params,
+    )
+    return rows
+  }
+
+  async listPendingOutcomesOlderThan(
+    days: number,
+    opts?: { limit?: number; tenantId?: string },
+  ): Promise<
+    Array<
+      Pick<
+        DecisionMemoryRow,
+        'id' | 'tenant_id' | 'agent_id' | 'platform' | 'entity_id' | 'context' | 'action' | 'decided_at'
+      >
+    >
+  > {
+    const limit = Math.min(opts?.limit ?? 200, 1000)
+    const params: unknown[] = [days]
+    const tenantFilter = opts?.tenantId
+      ? ` AND tenant_id = $${params.push(opts.tenantId)}`
+      : ''
+    const { rows } = await this.pool.query<
+      Pick<
+        DecisionMemoryRow,
+        'id' | 'tenant_id' | 'agent_id' | 'platform' | 'entity_id' | 'context' | 'action' | 'decided_at'
+      >
+    >(
+      `SELECT id, tenant_id, agent_id, platform, entity_id, context, action, decided_at
+       FROM decision_memory
+       WHERE outcome IS NULL
+         AND decided_at < NOW() - make_interval(days => $1)${tenantFilter}
+       ORDER BY decided_at ASC
+       LIMIT $${params.push(limit)}`,
       params,
     )
     return rows

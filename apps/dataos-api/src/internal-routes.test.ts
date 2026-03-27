@@ -2,6 +2,11 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import Fastify, { type FastifyInstance } from 'fastify'
 import { registerInternalRoutes } from './internal-routes.js'
 import type { DataOsServices } from '@patioer/dataos'
+import { _runInsightAgentTick } from './workers/insight-agent.js'
+
+vi.mock('./workers/insight-agent.js', () => ({
+  _runInsightAgentTick: vi.fn().mockResolvedValue({ processed: 3, written: 2, failed: 1 }),
+}))
 
 const KEY = 'test-internal-key'
 const TENANT = '550e8400-e29b-41d4-a716-446655440001'
@@ -353,5 +358,177 @@ describe('GET /internal/v1/capabilities', () => {
       url: '/internal/v1/capabilities',
     })
     expect(res.statusCode).toBe(401)
+  })
+})
+
+describe('Memory routes — extended coverage (CARD-D32-02)', () => {
+  describe('POST /internal/v1/memory/recall', () => {
+    it('returns 401 without X-DataOS-Internal-Key', async () => {
+      const res = await app.inject({
+        method: 'POST', url: '/internal/v1/memory/recall',
+        headers: { 'x-tenant-id': TENANT, 'content-type': 'application/json' },
+        payload: { agentId: 'ps', context: {} },
+      })
+      expect(res.statusCode).toBe(401)
+    })
+
+    it('returns 400 without X-Tenant-Id', async () => {
+      const res = await app.inject({
+        method: 'POST', url: '/internal/v1/memory/recall',
+        headers: { 'x-dataos-internal-key': KEY, 'content-type': 'application/json' },
+        payload: { agentId: 'ps', context: {} },
+      })
+      expect(res.statusCode).toBe(400)
+    })
+
+    it('returns 400 with invalid body (missing agentId)', async () => {
+      const res = await app.inject({
+        method: 'POST', url: '/internal/v1/memory/recall',
+        headers: { ...headers(), 'content-type': 'application/json' },
+        payload: { context: { price: 10 } },
+      })
+      expect(res.statusCode).toBe(400)
+    })
+
+    it('passes limit and minSimilarity to decisionMemory.recall', async () => {
+      await app.inject({
+        method: 'POST', url: '/internal/v1/memory/recall',
+        headers: { ...headers(), 'content-type': 'application/json' },
+        payload: { agentId: 'ps', context: { p: 1 }, limit: 5, minSimilarity: 0.9 },
+      })
+      expect(svc.decisionMemory.recall).toHaveBeenCalledWith(
+        TENANT, 'ps', { p: 1 }, { limit: 5, minSimilarity: 0.9 },
+      )
+    })
+  })
+
+  describe('POST /internal/v1/memory/record', () => {
+    it('returns 401 without auth header', async () => {
+      const res = await app.inject({
+        method: 'POST', url: '/internal/v1/memory/record',
+        headers: { 'x-tenant-id': TENANT, 'content-type': 'application/json' },
+        payload: { agentId: 'ps', context: {}, action: {} },
+      })
+      expect(res.statusCode).toBe(401)
+    })
+
+    it('passes tenantId from X-Tenant-Id header (not body)', async () => {
+      await app.inject({
+        method: 'POST', url: '/internal/v1/memory/record',
+        headers: { ...headers(), 'content-type': 'application/json' },
+        payload: { agentId: 'ps', context: { x: 1 }, action: { y: 2 } },
+      })
+      expect(svc.decisionMemory.record).toHaveBeenCalledWith(
+        expect.objectContaining({ tenantId: TENANT, agentId: 'ps' }),
+      )
+    })
+  })
+
+  describe('POST /internal/v1/memory/outcome', () => {
+    it('returns 403 when body tenantId differs from X-Tenant-Id', async () => {
+      const res = await app.inject({
+        method: 'POST', url: '/internal/v1/memory/outcome',
+        headers: { ...headers(), 'content-type': 'application/json' },
+        payload: {
+          tenantId: '660e8400-e29b-41d4-a716-446655440099',
+          decisionId: '550e8400-e29b-41d4-a716-446655440002',
+          outcome: {},
+        },
+      })
+      expect(res.statusCode).toBe(403)
+    })
+
+    it('calls writeOutcome with correct params on success', async () => {
+      const decisionId = '550e8400-e29b-41d4-a716-446655440002'
+      await app.inject({
+        method: 'POST', url: '/internal/v1/memory/outcome',
+        headers: { ...headers(), 'content-type': 'application/json' },
+        payload: { tenantId: TENANT, decisionId, outcome: { revenue: 500 } },
+      })
+      expect(svc.decisionMemory.writeOutcome).toHaveBeenCalledWith(
+        decisionId, TENANT, { revenue: 500 },
+      )
+    })
+  })
+
+  describe('GET /internal/v1/memory/decisions', () => {
+    it('returns decisions list with agentId filter', async () => {
+      await app.inject({
+        method: 'GET', url: '/internal/v1/memory/decisions?agentId=price-sentinel&limit=10',
+        headers: headers(),
+      })
+      expect(svc.decisionMemory.listRecent).toHaveBeenCalledWith(
+        TENANT, 'price-sentinel', { limit: 10 },
+      )
+    })
+
+    it('returns empty list when no decisions', async () => {
+      svc.decisionMemory.listRecent = vi.fn().mockResolvedValue([])
+      const res = await app.inject({
+        method: 'GET', url: '/internal/v1/memory/decisions?agentId=ps',
+        headers: headers(),
+      })
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toEqual({ decisions: [] })
+    })
+  })
+
+  describe('DELETE /internal/v1/memory/decisions/:decisionId', () => {
+    it('returns { deleted: false } for cross-tenant attempt', async () => {
+      svc.decisionMemory.delete = vi.fn().mockResolvedValue(false)
+      const res = await app.inject({
+        method: 'DELETE',
+        url: '/internal/v1/memory/decisions/550e8400-e29b-41d4-a716-446655440002',
+        headers: headers(),
+      })
+      expect(res.statusCode).toBe(200)
+      expect(res.json().deleted).toBe(false)
+    })
+  })
+})
+
+describe('POST /internal/v1/insight/trigger', () => {
+  it('returns 401 without auth header', async () => {
+    const res = await app.inject({
+      method: 'POST', url: '/internal/v1/insight/trigger',
+    })
+    expect(res.statusCode).toBe(401)
+  })
+
+  it('returns tick result on success (no tenant scope)', async () => {
+    const res = await app.inject({
+      method: 'POST', url: '/internal/v1/insight/trigger',
+      headers: { 'x-dataos-internal-key': KEY },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ ok: true, processed: 3, written: 2, failed: 1 })
+    expect(_runInsightAgentTick).toHaveBeenCalledWith(
+      expect.anything(),
+      { outcomeLookbackDays: 7, maxDecisionsPerTick: 100, tenantId: undefined },
+    )
+  })
+
+  it('passes tenantId from X-Tenant-Id header when valid UUID (Constitution Ch2.5)', async () => {
+    const res = await app.inject({
+      method: 'POST', url: '/internal/v1/insight/trigger',
+      headers: { 'x-dataos-internal-key': KEY, 'x-tenant-id': TENANT },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(_runInsightAgentTick).toHaveBeenCalledWith(
+      expect.anything(),
+      { outcomeLookbackDays: 7, maxDecisionsPerTick: 100, tenantId: TENANT },
+    )
+  })
+
+  it('ignores invalid X-Tenant-Id header (falls back to all tenants)', async () => {
+    const res = await app.inject({
+      method: 'POST', url: '/internal/v1/insight/trigger',
+      headers: { 'x-dataos-internal-key': KEY, 'x-tenant-id': 'not-a-uuid' },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(_runInsightAgentTick).toHaveBeenCalledWith(
+      expect.anything(),
+      { outcomeLookbackDays: 7, maxDecisionsPerTick: 100, tenantId: undefined },
+    )
   })
 })

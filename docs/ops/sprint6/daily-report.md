@@ -289,3 +289,5 @@
 - AC-P2-12：`✅`（证据：`docs/ops/sprint6/evidence/tests/day10-harnesserror-devos-ticket-run-log.md`）
 - AC-P2-13：`✅`（证据：`docs/ops/sprint6/evidence/tests/day10-alertmanager-p0-run-log.md`）
 - AC-P2-07/08/09：`✅`（证据：`docs/ops/sprint6/evidence/tests/day10-ads-inventory-schedule-run-log.md`）
+
+- AC-P2-10：`✅`（自动收口时间：`2026-03-27T05:09:32.492Z`；证据：`docs/ops/sprint6/evidence/metrics/day8-stability-final-report.md`）

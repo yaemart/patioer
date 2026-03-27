@@ -40,7 +40,13 @@ describe('_runFeatureAgentTick', () => {
   it('calls aggregateRecentEntityEvents with intervalDays=1', async () => {
     aggregateRecentEntityEvents.mockResolvedValue([])
     await _runFeatureAgentTick(makeServices(), {})
-    expect(aggregateRecentEntityEvents).toHaveBeenCalledWith({ intervalDays: 1, limit: 500 })
+    expect(aggregateRecentEntityEvents).toHaveBeenCalledWith({ intervalDays: 1, limit: 500, tenantId: undefined })
+  })
+
+  it('passes tenantId to aggregateRecentEntityEvents when provided (Constitution Ch2.5)', async () => {
+    aggregateRecentEntityEvents.mockResolvedValue([])
+    await _runFeatureAgentTick(makeServices(), { tenantId: 'tenant-xyz' })
+    expect(aggregateRecentEntityEvents).toHaveBeenCalledWith({ intervalDays: 1, limit: 500, tenantId: 'tenant-xyz' })
   })
 
   it('upserts one row per aggregation result', async () => {

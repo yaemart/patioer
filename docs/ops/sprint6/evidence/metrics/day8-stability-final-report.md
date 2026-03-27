@@ -65,3 +65,13 @@
 
 - 当前判定：`AC-P2-10 = ⏳（阶段二进行中）`
 - 达成条件：完成 48h 窗口 + Active Agents 条件后，更新为 `✅`。
+
+## AC-P2-10 最终验收结果（自动收口）
+
+- 验收时间：`2026-03-27T05:09:32.491Z`
+- windowHours：`53.75`
+- snapshotCount：`14`
+- minActiveAgents：`5`
+- maxErrorAgents：`0`
+- allCrashFree：`true`
+- 判定：`AC-P2-10 = ✅`

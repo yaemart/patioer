@@ -97,6 +97,36 @@ describe('EventLakeService', () => {
     expect(close).toHaveBeenCalledTimes(1)
   })
 
+  it('insertEventBatch is a no-op for empty array', async () => {
+    const svc = new EventLakeService({ url: 'http://localhost:8123' })
+    await svc.insertEventBatch([])
+    expect(insert).not.toHaveBeenCalled()
+  })
+
+  it('insertEventBatch inserts all rows in a single client.insert call', async () => {
+    const svc = new EventLakeService({ url: 'http://localhost:8123' })
+    await svc.insertEventBatch([
+      { tenantId: 't1', agentId: 'a1', eventType: 'e1', payload: { x: 1 } },
+      { tenantId: 't2', agentId: 'a2', eventType: 'e2', payload: 'raw' },
+    ])
+    expect(insert).toHaveBeenCalledTimes(1)
+    const arg = insert.mock.calls[0][0] as { table: string; values: unknown[]; format: string }
+    expect(arg.table).toBe('events')
+    expect(arg.format).toBe('JSONEachRow')
+    expect(arg.values).toHaveLength(2)
+  })
+
+  it('insertEvent delegates to insertEventBatch', async () => {
+    const svc = new EventLakeService({ url: 'http://localhost:8123' })
+    await svc.insertEvent({
+      tenantId: 't1', agentId: 'a1', eventType: 'e', payload: {},
+    })
+    expect(insert).toHaveBeenCalledTimes(1)
+    const arg = insert.mock.calls[0][0] as { table: string; values: unknown[] }
+    expect(arg.table).toBe('events')
+    expect(arg.values).toHaveLength(1)
+  })
+
   it('insertPriceEventBatch inserts all rows in a single client.insert call', async () => {
     const svc = new EventLakeService({ url: 'http://localhost:8123' })
     await svc.insertPriceEventBatch([
@@ -253,6 +283,35 @@ describe('EventLakeService', () => {
       await svc.aggregateRecentEntityEvents()
       const arg = query.mock.calls[0][0] as { query: string }
       expect(arg.query).toContain("platform != ''")
+    })
+
+    it('aggregateRecentEntityEvents filters by tenantId when provided (Constitution Ch2.5)', async () => {
+      mockQuery([])
+      const svc = new EventLakeService({ url: 'http://localhost:8123' })
+      await svc.aggregateRecentEntityEvents({ tenantId: '00000000-0000-0000-0000-000000000001' })
+      const arg = query.mock.calls[0][0] as { query: string; query_params: Record<string, unknown> }
+      expect(arg.query).toContain('AND tenant_id = {tenantId:UUID}')
+      expect(arg.query_params.tenantId).toBe('00000000-0000-0000-0000-000000000001')
+    })
+
+    it('aggregateRecentEntityEvents omits tenant_id filter when tenantId is not provided', async () => {
+      mockQuery([])
+      const svc = new EventLakeService({ url: 'http://localhost:8123' })
+      await svc.aggregateRecentEntityEvents()
+      const arg = query.mock.calls[0][0] as { query: string; query_params: Record<string, unknown> }
+      expect(arg.query).not.toContain('tenant_id = {tenantId:UUID}')
+      expect(arg.query_params).not.toHaveProperty('tenantId')
+    })
+
+    it('aggregateRecentEntityEvents combines tenantId with other options', async () => {
+      mockQuery([])
+      const svc = new EventLakeService({ url: 'http://localhost:8123' })
+      await svc.aggregateRecentEntityEvents({ intervalDays: 3, limit: 200, tenantId: 't-abc' })
+      const arg = query.mock.calls[0][0] as { query: string; query_params: Record<string, unknown> }
+      expect(arg.query).toContain('tenant_id = {tenantId:UUID}')
+      expect(arg.query_params.days).toBe(3)
+      expect(arg.query_params.limit).toBe(200)
+      expect(arg.query_params.tenantId).toBe('t-abc')
     })
   })
 })

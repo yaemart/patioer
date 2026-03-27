@@ -13,7 +13,7 @@
 | AC-P2-07 | ✅ | `docs/ops/sprint6/evidence/tests/day10-ads-inventory-schedule-run-log.md` | `@davidgao` | `2026-03-26` | Day10 演练通过：4h cadence（3 tick）触发 Ads Optimizer 决策日志 |
 | AC-P2-08 | ✅ | `docs/ops/sprint6/evidence/tests/day10-ads-inventory-schedule-run-log.md` | `@davidgao` | `2026-03-26` | Day10 演练通过：预算 506 (>500) 请求审批且不执行预算更新 |
 | AC-P2-09 | ✅ | `docs/ops/sprint6/evidence/tests/day10-ads-inventory-schedule-run-log.md` | `@davidgao` | `2026-03-26` | Day10 演练通过：08:00 本地窗口运行并创建低库存补货 Ticket |
-| AC-P2-10 | ⏳ | `docs/ops/sprint6/evidence/metrics/day8-stability-final-report.md` | `@davidgao` | `2026-03-26` | Day8 已完成 5 Agent 运行态引导，等待 48h 窗口完成后置 ✅ |
+| AC-P2-10 | ✅ | `docs/ops/sprint6/evidence/metrics/day8-stability-final-report.md` | `@davidgao` | `2026-03-27` | 48h 窗口达标：minActiveAgents>=5、maxErrorAgents=0、allCrashFree=true |
 | AC-P2-11 | ✅ | `docs/ops/sprint6/evidence/tests/day9-devos-instance-run-log.md` | `@davidgao` | `2026-03-26` | DevOS 独立实例 3200/3101 双入口可访问，devos-postgres 5433 healthy |
 | AC-P2-12 | ✅ | `docs/ops/sprint6/evidence/tests/day10-harnesserror-devos-ticket-run-log.md` | `@davidgao` | `2026-03-26` | Day10 实跑通过：HarnessError 分支触发 DevOS ticket 链路（远端+本地审计） |
 | AC-P2-13 | ✅ | `docs/ops/sprint6/evidence/tests/day10-alertmanager-p0-run-log.md` | `@davidgao` | `2026-03-26` | Day10 已完成 P0 演练：告警管道创建 DevOS Ticket（P0, harness_update） |

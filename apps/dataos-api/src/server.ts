@@ -6,6 +6,7 @@ import { registerInternalRoutes } from './internal-routes.js'
 import { parseRedisConnection } from './redis-url.js'
 import { startIngestionWorker } from './workers/ingestion.js'
 import { startFeatureAgentInterval } from './workers/feature-agent.js'
+import { startInsightAgentInterval } from './workers/insight-agent.js'
 import { renderMetrics } from './metrics.js'
 
 const port = Number.parseInt(process.env.PORT ?? '3300', 10)
@@ -70,6 +71,13 @@ const featureEveryMs = Number.parseInt(process.env.DATAOS_FEATURE_AGENT_MS ?? `$
 const featureMaxItems = Number.parseInt(process.env.DATAOS_FEATURE_AGENT_MAX_ITEMS ?? '', 10) || undefined
 const featureTimer = startFeatureAgentInterval(services, featureEveryMs, { maxItemsPerTick: featureMaxItems })
 
+const insightEveryMs = Number.parseInt(
+  process.env.DATAOS_INSIGHT_AGENT_MS ?? `${7 * 24 * 60 * 60 * 1000}`, 10,
+)
+const insightTimer = startInsightAgentInterval(services, insightEveryMs, {
+  outcomeLookbackDays: Number.parseInt(process.env.DATAOS_INSIGHT_LOOKBACK_DAYS ?? '7', 10),
+})
+
 const app = Fastify({ logger: true })
 
 app.get('/health', async () => ({ ok: true, service: 'dataos-api' }))
@@ -86,6 +94,7 @@ async function shutdown(): Promise<void> {
   if (shuttingDown) return
   shuttingDown = true
   clearInterval(featureTimer)
+  clearInterval(insightTimer)
   try { await worker.close() } catch (e) { console.error('[dataos-api] worker close error', e) }
   try { await services.shutdown() } catch (e) { console.error('[dataos-api] services shutdown error', e) }
   try { await app.close() } catch (e) { console.error('[dataos-api] app close error', e) }

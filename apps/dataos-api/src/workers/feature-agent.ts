@@ -8,6 +8,8 @@ import {
 export interface FeatureAgentOptions {
   /** Max rows processed per tick (default 500). Excess triggers budget_exceeded (Constitution Ch5.3). */
   maxItemsPerTick?: number
+  /** When set, only aggregate events for this tenant (Constitution Ch2.5). */
+  tenantId?: string
 }
 
 /**
@@ -42,6 +44,7 @@ export async function _runFeatureAgentTick(
   const rows = await services.eventLake.aggregateRecentEntityEvents({
     intervalDays: 1,
     limit: maxItems,
+    tenantId: opts.tenantId,
   })
 
   // Constitution Ch4.3 + Ch5.3: structured budget_exceeded report when limit is reached

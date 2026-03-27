@@ -126,4 +126,74 @@ describe('DecisionMemoryService', () => {
     const deleted = await svc.delete(DECISION_ID, TENANT_B)
     expect(deleted).toBe(false)
   })
+
+  it('listPendingOutcomesOlderThan queries decisions without outcome older than N days', async () => {
+    const pendingRow = {
+      id: DECISION_ID,
+      tenant_id: TENANT_A,
+      agent_id: AGENT,
+      platform: 'shopify',
+      entity_id: 'P001',
+      context: { price: 29.99 },
+      action: { newPrice: 27.99 },
+      decided_at: '2026-03-01T00:00:00Z',
+    }
+    query.mockResolvedValue({ rows: [pendingRow] })
+    const svc = new DecisionMemoryService(pool)
+    const result = await svc.listPendingOutcomesOlderThan(7)
+    expect(result).toEqual([pendingRow])
+    const sql: string = query.mock.calls[0][0]
+    const params: unknown[] = query.mock.calls[0][1]
+    expect(sql).toContain('outcome IS NULL')
+    expect(sql).toContain('make_interval(days => $1)')
+    expect(sql).toContain('ORDER BY decided_at ASC')
+    expect(params[0]).toBe(7)
+    expect(params[1]).toBe(200)
+  })
+
+  it('listPendingOutcomesOlderThan respects custom limit capped at 1000', async () => {
+    query.mockResolvedValue({ rows: [] })
+    const svc = new DecisionMemoryService(pool)
+    await svc.listPendingOutcomesOlderThan(7, { limit: 9999 })
+    const params: unknown[] = query.mock.calls[0][1]
+    expect(params[0]).toBe(7)
+    expect(params[1]).toBe(1000)
+  })
+
+  it('listPendingOutcomesOlderThan returns empty array when no pending decisions', async () => {
+    query.mockResolvedValue({ rows: [] })
+    const svc = new DecisionMemoryService(pool)
+    const result = await svc.listPendingOutcomesOlderThan(7)
+    expect(result).toEqual([])
+  })
+
+  it('listPendingOutcomesOlderThan filters by tenantId when provided (Constitution Ch2.5)', async () => {
+    query.mockResolvedValue({ rows: [] })
+    const svc = new DecisionMemoryService(pool)
+    await svc.listPendingOutcomesOlderThan(7, { tenantId: TENANT_A })
+    const sql: string = query.mock.calls[0][0]
+    const params: unknown[] = query.mock.calls[0][1]
+    expect(sql).toContain('AND tenant_id = $2')
+    expect(params[0]).toBe(7)
+    expect(params[1]).toBe(TENANT_A)
+    expect(params[2]).toBe(200)
+  })
+
+  it('listPendingOutcomesOlderThan omits tenant_id filter when tenantId is not provided', async () => {
+    query.mockResolvedValue({ rows: [] })
+    const svc = new DecisionMemoryService(pool)
+    await svc.listPendingOutcomesOlderThan(7)
+    const sql: string = query.mock.calls[0][0]
+    expect(sql).not.toContain('AND tenant_id')
+  })
+
+  it('listPendingOutcomesOlderThan with tenantId and custom limit', async () => {
+    query.mockResolvedValue({ rows: [] })
+    const svc = new DecisionMemoryService(pool)
+    await svc.listPendingOutcomesOlderThan(14, { tenantId: TENANT_B, limit: 50 })
+    const params: unknown[] = query.mock.calls[0][1]
+    expect(params[0]).toBe(14)
+    expect(params[1]).toBe(TENANT_B)
+    expect(params[2]).toBe(50)
+  })
 })

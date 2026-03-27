@@ -50,6 +50,37 @@ export const featureAgentBudgetUtilization = new Gauge({
   registers: [registry],
 })
 
+/** Set externally by queue-depth poller (Phase 4). Registered now per Sprint 2 checkpoint #10. */
+export const ingestionQueueDepth = new Gauge({
+  name: 'dataos_ingestion_queue_depth',
+  help: 'BullMQ ingestion queue current depth (waiting + active jobs)',
+  registers: [registry],
+})
+
+export const insightAgentTicks = new Counter({
+  name: 'dataos_insight_agent_ticks_total',
+  help: 'Insight Agent tick executions',
+  registers: [registry],
+})
+
+export const insightAgentOutcomesWritten = new Counter({
+  name: 'dataos_insight_agent_outcomes_written_total',
+  help: 'Outcomes successfully written by Insight Agent',
+  registers: [registry],
+})
+
+export const insightAgentOutcomesFailed = new Counter({
+  name: 'dataos_insight_agent_outcomes_failed_total',
+  help: 'Outcome writes that failed in Insight Agent',
+  registers: [registry],
+})
+
+export const insightAgentPendingDecisions = new Gauge({
+  name: 'dataos_insight_agent_pending_decisions',
+  help: 'Pending decisions awaiting outcome at last Insight Agent tick',
+  registers: [registry],
+})
+
 export async function renderMetrics(): Promise<string> {
   return registry.metrics()
 }

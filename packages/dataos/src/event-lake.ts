@@ -36,9 +36,14 @@ export class EventLakeService {
   }
 
   async insertEvent(row: DataOsEventLakeRecord): Promise<void> {
+    await this.insertEventBatch([row])
+  }
+
+  async insertEventBatch(rows: DataOsEventLakeRecord[]): Promise<void> {
+    if (rows.length === 0) return
     await this.client.insert({
       table: 'events',
-      values: [this.serializeEvent(row)],
+      values: rows.map((r) => this.serializeEvent(r)),
       format: 'JSONEachRow',
     })
   }
@@ -47,9 +52,6 @@ export class EventLakeService {
     await this.insertPriceEventBatch([row])
   }
 
-  /**
-   * Batch-insert multiple price events in a single ClickHouse request.
-   */
   async insertPriceEventBatch(rows: DataOsPriceEventRecord[]): Promise<void> {
     if (rows.length === 0) return
     await this.client.insert({
@@ -120,23 +122,23 @@ export class EventLakeService {
   }
 
   async aggregateRecentEntityEvents(opts?: {
-    intervalDays?: number; limit?: number
+    intervalDays?: number; limit?: number; tenantId?: string
   }): Promise<Array<{ tenant_id: string; platform: string; product_id: string; evts: string }>> {
     const days = opts?.intervalDays ?? 1
     const limit = Math.min(opts?.limit ?? 500, 2000)
-    // Harness engineering: group by (tenant_id, platform, entity_id) so cross-platform
-    // events for the same product_id are kept separate — each (tenant, platform, product)
-    // triple maps to one Feature Store key. Filter platform='' to prevent 'unknown'
-    // entries from reaching FeatureStoreService (Constitution §2.3 Harness abstraction).
+    const params: Record<string, unknown> = { days, limit }
+    const tenantFilter = opts?.tenantId
+      ? (params.tenantId = opts.tenantId, ' AND tenant_id = {tenantId:UUID}')
+      : ''
     const res = await this.client.query({
       query: `SELECT tenant_id, platform, entity_id AS product_id, count() AS evts
               FROM events
               WHERE created_at > now() - INTERVAL {days:UInt32} DAY
                 AND entity_id != ''
-                AND platform != ''
+                AND platform != ''${tenantFilter}
               GROUP BY tenant_id, platform, entity_id
               LIMIT {limit:UInt32}`,
-      query_params: { days, limit },
+      query_params: params,
       format: 'JSONEachRow',
     })
     return (await res.json()) as Array<{ tenant_id: string; platform: string; product_id: string; evts: string }>

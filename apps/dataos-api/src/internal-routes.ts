@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { z } from 'zod'
 import type { DataOsServices } from '@patioer/dataos'
 import { featureCacheHits, featureCacheMisses, lakeEventsInserted } from './metrics.js'
+import { _runInsightAgentTick } from './workers/insight-agent.js'
 
 const lakeEventSchema = z.object({
   tenantId: z.string().uuid(),
@@ -76,7 +77,7 @@ const CAPABILITIES_RESPONSE = {
     },
     decisions: {
       operations: [
-        { method: 'POST', path: '/internal/v1/memory/recall', description: 'Semantic recall of past decisions similar to a given context (pgvector)', parameters: { agentId: 'string (required)', context: 'any (required)', limit: 'number', minSimilarity: 'number (0-1, default 0.85)' } },
+        { method: 'POST', path: '/internal/v1/memory/recall', description: 'Semantic recall of past decisions similar to a given context (pgvector)', parameters: { agentId: 'string (required)', context: 'any (required)', limit: 'number', minSimilarity: 'number (0-1, default 0.75)' } },
         { method: 'POST', path: '/internal/v1/memory/record', description: 'Record a new decision with context and action for future recall' },
         { method: 'POST', path: '/internal/v1/memory/outcome', description: 'Write the observed outcome for a past decision (closes the feedback loop)' },
         { method: 'GET', path: '/internal/v1/memory/decisions', description: 'List recent decisions for an agent', parameters: { agentId: 'string', limit: 'number' } },
@@ -284,5 +285,19 @@ export function registerInternalRoutes(
     }
     const deleted = await services.decisionMemory.delete(decisionId, tenantId)
     return reply.send({ ok: true, deleted })
+  })
+
+  app.post('/internal/v1/insight/trigger', async (request, reply) => {
+    if (!requireKey(request, reply, internalKey)) return
+    const tenantHeader = request.headers['x-tenant-id']
+    const tenantId = typeof tenantHeader === 'string' && UUID_RE.test(tenantHeader)
+      ? tenantHeader
+      : undefined
+    const result = await _runInsightAgentTick(services, {
+      outcomeLookbackDays: 7,
+      maxDecisionsPerTick: 100,
+      tenantId,
+    })
+    return reply.send({ ok: true, ...result })
   })
 }
