@@ -1,6 +1,7 @@
 import { isAdsCapable } from '@patioer/harness'
 import type { HarnessAdsCampaign } from '@patioer/harness'
 import type { AgentContext } from '../context.js'
+import { errorMessage } from '../error-message.js'
 import type { AdsOptimizerRunInput, AdsOptimizerRunResult } from '../types.js'
 import { ADS_OPTIMIZER_HEARTBEAT_MS } from '../types.js'
 import {
@@ -109,7 +110,7 @@ export async function runAdsOptimizer(
       await ctx.logAction('ads_optimizer.platform.fetch_failed', {
         runId,
         platform,
-        error: err instanceof Error ? err.message : String(err),
+        error: errorMessage(err),
       })
       continue
     }

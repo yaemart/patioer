@@ -1,5 +1,7 @@
 import { HarnessError } from '@patioer/harness'
 import type { AgentContext } from '../context.js'
+import { errorMessage } from '../error-message.js'
+import { extractFirstJsonObject } from '../extract-json.js'
 import type { ContentWriterRunInput, ContentWriterResult } from '../types.js'
 
 const DEFAULT_TONE = 'professional' as const
@@ -31,24 +33,26 @@ function buildGenerationPrompt(
     }
   }
 
-  lines.push(`\nTone: ${tone}`)
-  lines.push(`Max length: ${maxLength} characters`)
-  lines.push(`\nRespond with valid JSON in this exact shape:`)
-  lines.push(`{`)
-  lines.push(`  "title": "optimized product title",`)
-  lines.push(`  "description": "compelling product description",`)
-  lines.push(`  "bulletPoints": ["point1", "point2", ...],`)
-  lines.push(`  "seoKeywords": ["keyword1", "keyword2", ...]`)
-  lines.push(`}`)
+  lines.push(`
+Tone: ${tone}
+Max length: ${maxLength} characters
+
+Respond with valid JSON in this exact shape:
+{
+  "title": "optimized product title",
+  "description": "compelling product description",
+  "bulletPoints": ["point1", "point2", ...],
+  "seoKeywords": ["keyword1", "keyword2", ...]
+}`)
 
   return lines.join('\n')
 }
 
 function parseLlmResponse(text: string, productId: string): ContentWriterResult {
   try {
-    const jsonMatch = text.match(/\{[\s\S]*\}/)
+    const jsonMatch = extractFirstJsonObject(text)
     if (!jsonMatch) throw new Error('no JSON object found')
-    const parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>
+    const parsed = JSON.parse(jsonMatch) as Record<string, unknown>
     return {
       productId,
       title: typeof parsed.title === 'string' ? parsed.title : '',
@@ -64,7 +68,7 @@ function parseLlmResponse(text: string, productId: string): ContentWriterResult 
     return {
       productId,
       title: text.slice(0, 200),
-      description: text,
+      description: text.slice(0, 5000),
       bulletPoints: [],
       seoKeywords: [],
     }
@@ -93,13 +97,13 @@ export async function runContentWriter(
   if (ctx.dataOS) {
     try {
       features = await ctx.dataOS.getFeatures(platform, productId)
-    } catch {
-      await ctx.logAction('content_writer.dataos_degraded', { productId, op: 'getFeatures' })
+    } catch (err) {
+      await ctx.logAction('content_writer.dataos_degraded', { productId, op: 'getFeatures', error: errorMessage(err) })
     }
     try {
       memories = (await ctx.dataOS.recallMemory('content-writer', { productId, features })) ?? []
-    } catch {
-      await ctx.logAction('content_writer.dataos_degraded', { productId, op: 'recallMemory' })
+    } catch (err) {
+      await ctx.logAction('content_writer.dataos_degraded', { productId, op: 'recallMemory', error: errorMessage(err) })
     }
   }
 
@@ -121,14 +125,15 @@ export async function runContentWriter(
       platform,
       code,
       productId,
-      message: err instanceof Error ? err.message : String(err),
+      message: errorMessage(err),
     })
   }
 
   const prompt = buildGenerationPrompt(product, features, memories, tone, maxLength)
+  const dataOsContext = ctx.describeDataOsCapabilities()
   const llmResponse = await ctx.llm({
     prompt,
-    systemPrompt: 'You are an expert e-commerce content writer. Generate compelling, SEO-optimized product content. Always respond with valid JSON.',
+    systemPrompt: `You are an expert e-commerce content writer. Generate compelling, SEO-optimized product content. Always respond with valid JSON.\n\nData context: ${dataOsContext}`,
   })
 
   const result = parseLlmResponse(llmResponse.text, productId)
@@ -141,8 +146,8 @@ export async function runContentWriter(
         context: { productId, features, tone },
         action: { title: result.title, description: result.description, bulletPoints: result.bulletPoints },
       })
-    } catch {
-      await ctx.logAction('content_writer.dataos_write_failed', { productId, op: 'recordMemory' })
+    } catch (err) {
+      await ctx.logAction('content_writer.dataos_write_failed', { productId, op: 'recordMemory', error: errorMessage(err) })
     }
     try {
       await ctx.dataOS.recordLakeEvent({
@@ -152,8 +157,8 @@ export async function runContentWriter(
         payload: result,
         metadata: { agentType: 'content-writer', tone },
       })
-    } catch {
-      await ctx.logAction('content_writer.dataos_write_failed', { productId, op: 'recordLakeEvent' })
+    } catch (err) {
+      await ctx.logAction('content_writer.dataos_write_failed', { productId, op: 'recordLakeEvent', error: errorMessage(err) })
     }
   }
 

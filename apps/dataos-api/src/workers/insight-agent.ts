@@ -82,11 +82,26 @@ export async function _runInsightAgentTick(
     } catch (err) {
       insightAgentOutcomesFailed.inc()
       failed++
+      // Structured error event to Event Lake — provides the same audit-trail as
+      // ctx.logAction() for business agents (Constitution §4.3 / §5.3).
+      const errorMsg = err instanceof Error ? err.message : String(err)
       console.error('[dataos-insight-agent] outcome write failed', {
         decisionId: decision.id,
         tenantId: decision.tenant_id,
-        error: err instanceof Error ? err.message : String(err),
+        error: errorMsg,
       })
+      try {
+        await services.eventLake.insertEvent({
+          tenantId: decision.tenant_id,
+          agentId: 'insight-agent',
+          eventType: 'outcome_write_failed',
+          entityId: decision.id,
+          payload: { decisionId: decision.id, agentId: decision.agent_id, error: errorMsg },
+          metadata: { workerType: 'insight-agent' },
+        })
+      } catch {
+        // Event Lake write failure must not crash the worker loop.
+      }
     }
   }
 
@@ -112,6 +127,9 @@ async function _aggregateOutcome(
   },
 ): Promise<Record<string, unknown>> {
   const decidedAtMs = new Date(decision.decided_at).getTime()
+  if (!Number.isFinite(decidedAtMs)) {
+    throw new Error(`invalid decided_at: ${decision.decided_at}`)
+  }
   const windowEndMs = decidedAtMs + 7 * 24 * 60 * 60 * 1000
 
   const events = await services.eventLake.queryEvents(decision.tenant_id, {

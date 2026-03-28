@@ -112,6 +112,7 @@ export interface DataOsPort {
     metadata?: unknown
   }): Promise<void>
   recordPriceEvent(input: {
+    platform?: string
     productId: string
     priceBefore: number
     priceAfter: number

@@ -2,10 +2,11 @@ import type { FastifyPluginAsync } from 'fastify'
 import { and, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { schema } from '@patioer/db'
+import { UUID_LOOSE_RE } from '@patioer/shared'
 import { encryptToken } from '../lib/crypto.js'
 import { registry } from '../lib/harness-registry.js'
 
-const paramsSchema = z.object({ id: z.string().uuid() })
+const paramsSchema = z.object({ id: z.string().regex(UUID_LOOSE_RE).transform((v) => v.toLowerCase()) })
 
 const createBodySchema = z.object({
   platform: z.string().min(1),

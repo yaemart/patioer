@@ -31,6 +31,7 @@ function baseRow(overrides: Partial<ProductFeaturesRow> = {}): ProductFeaturesRo
     competitor_avg_price: '10.50',
     price_position: 'mid',
     updated_at: '2025-01-01T12:00:00.000Z',
+    deleted_at: null,
     ...overrides,
   }
 }
@@ -68,7 +69,7 @@ describe('FeatureStoreService', () => {
     expect(out).toEqual(row)
     expect(query).toHaveBeenCalledTimes(1)
     expect(setex).toHaveBeenCalledWith(
-      `feature:${TENANT}:${PLATFORM}:${PRODUCT}`,
+      `dataos:feature:${TENANT}:${PLATFORM}:${PRODUCT}`,
       900,
       JSON.stringify(row),
     )
@@ -98,7 +99,7 @@ describe('FeatureStoreService', () => {
     expect(sql).toContain('INSERT INTO product_features')
     expect(sql).toContain('ON CONFLICT')
     expect(setex).toHaveBeenCalledWith(
-      `feature:${TENANT}:${PLATFORM}:${PRODUCT}`,
+      `dataos:feature:${TENANT}:${PLATFORM}:${PRODUCT}`,
       900,
       JSON.stringify(row),
     )
@@ -125,7 +126,7 @@ describe('FeatureStoreService', () => {
     })
     expect(query).toHaveBeenCalledTimes(2)
     expect(setex).toHaveBeenLastCalledWith(
-      `feature:${TENANT}:${PLATFORM}:${PRODUCT}`,
+      `dataos:feature:${TENANT}:${PLATFORM}:${PRODUCT}`,
       900,
       JSON.stringify(rowV2),
     )
@@ -168,7 +169,7 @@ describe('FeatureStoreService', () => {
     it('get uses tenant-scoped Redis cache key (tenant A key ≠ tenant B key)', async () => {
       const row = baseRow()
       get.mockImplementation((key: string) => {
-        if (key === `feature:${TENANT_A}:${PLATFORM}:${PRODUCT}`) {
+        if (key === `dataos:feature:${TENANT_A}:${PLATFORM}:${PRODUCT}`) {
           return Promise.resolve(JSON.stringify(row))
         }
         return Promise.resolve(null)
@@ -196,6 +197,7 @@ describe('FeatureStoreService', () => {
       await svc.delete(TENANT_A, PLATFORM, PRODUCT)
       const sql = String(query.mock.calls[0][0])
       expect(sql).toContain('tenant_id = $1')
+      expect(sql).not.toContain('DELETE FROM')
     })
   })
 
@@ -207,7 +209,7 @@ describe('FeatureStoreService', () => {
       const svc = new FeatureStoreService(pool, redis)
       await svc.get(TENANT, PLATFORM, PRODUCT)
       expect(setex).toHaveBeenCalledWith(
-        `feature:${TENANT}:${PLATFORM}:${PRODUCT}`,
+        `dataos:feature:${TENANT}:${PLATFORM}:${PRODUCT}`,
         900,
         JSON.stringify(row),
       )
@@ -219,7 +221,7 @@ describe('FeatureStoreService', () => {
       const svc = new FeatureStoreService(pool, redis)
       await svc.upsert({ tenantId: TENANT, platform: PLATFORM, productId: PRODUCT })
       expect(setex).toHaveBeenCalledWith(
-        `feature:${TENANT}:${PLATFORM}:${PRODUCT}`,
+        `dataos:feature:${TENANT}:${PLATFORM}:${PRODUCT}`,
         900,
         JSON.stringify(row),
       )
@@ -318,7 +320,7 @@ describe('FeatureStoreService', () => {
       query.mockResolvedValue({ rowCount: 1 })
       const svc = new FeatureStoreService(pool, redis)
       await svc.delete(TENANT, PLATFORM, PRODUCT)
-      expect(del).toHaveBeenCalledWith(`feature:${TENANT}:${PLATFORM}:${PRODUCT}`)
+      expect(del).toHaveBeenCalledWith(`dataos:feature:${TENANT}:${PLATFORM}:${PRODUCT}`)
     })
 
     it('delete SQL always includes tenant_id filter (Ch6.1 compliance)', async () => {
@@ -327,6 +329,15 @@ describe('FeatureStoreService', () => {
       await svc.delete(TENANT, PLATFORM, PRODUCT)
       const sql = String(query.mock.calls[0][0])
       expect(sql).toContain('tenant_id = $1')
+      expect(sql).not.toContain('DELETE FROM')
+    })
+
+    it('delete uses soft-delete (UPDATE SET deleted_at) not hard-DELETE', async () => {
+      query.mockResolvedValue({ rowCount: 1 })
+      const svc = new FeatureStoreService(pool, redis)
+      await svc.delete(TENANT, PLATFORM, PRODUCT)
+      const sql = String(query.mock.calls[0][0])
+      expect(sql).toContain('UPDATE product_features SET deleted_at = NOW()')
     })
   })
 })

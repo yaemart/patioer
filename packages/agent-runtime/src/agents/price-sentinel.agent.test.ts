@@ -281,7 +281,7 @@ describe('runPriceSentinel', () => {
 
       expect(result.decisions).toHaveLength(1)
       expect(harness.updatePrice).toHaveBeenCalled()
-      expect(ctx.logAction).toHaveBeenCalledWith('price_sentinel.dataos_write_failed', { productId: 'p-1' })
+      expect(ctx.logAction).toHaveBeenCalledWith('price_sentinel.dataos_write_failed', expect.objectContaining({ productId: 'p-1' }))
     })
 
     it('still updates price when dataOS.recordLakeEvent throws', async () => {
@@ -306,6 +306,79 @@ describe('runPriceSentinel', () => {
 
       expect(result.decisions).toHaveLength(1)
       expect(harness.updatePrice).toHaveBeenCalled()
+    })
+  })
+
+  describe('adaptive threshold (AN-FIX-02 / AC-P3-14)', () => {
+    it('tightens threshold for high-converting product (conv_rate_7d ≥ 5%) — previously safe change needs approval', async () => {
+      const { ctx, harness } = createCtx()
+      const dataOS = createDataOsMock({ features: { conv_rate_7d: '0.08' } })
+      ctx.dataOS = dataOS
+      // base=15%, adapted=10% → +12% delta (>10) should now require approval
+      const result = await runPriceSentinel(ctx, {
+        proposals: [{ productId: 'p-1', currentPrice: 100, proposedPrice: 112, reason: 'small bump' }],
+      })
+      expect(result.decisions[0]?.requiresApproval).toBe(true)
+      expect(harness.updatePrice).not.toHaveBeenCalled()
+      expect(ctx.logAction).toHaveBeenCalledWith(
+        'price_sentinel.threshold_adapted',
+        expect.objectContaining({ adaptedThreshold: 10, conv_rate_7d: 0.08 }),
+      )
+    })
+
+    it('loosens threshold for low-converting product (conv_rate_7d ≤ 1%) — previously approval-required becomes auto', async () => {
+      const { ctx, harness } = createCtx()
+      const dataOS = createDataOsMock({ features: { conv_rate_7d: '0.005' } })
+      ctx.dataOS = dataOS
+      // base=15%, adapted=20% → +16% delta (<20) should now be auto-approved
+      const result = await runPriceSentinel(ctx, {
+        proposals: [{ productId: 'p-1', currentPrice: 100, proposedPrice: 116, reason: 'discount' }],
+      })
+      expect(result.decisions[0]?.requiresApproval).toBe(false)
+      expect(harness.updatePrice).toHaveBeenCalledWith('p-1', 116)
+      expect(ctx.logAction).toHaveBeenCalledWith(
+        'price_sentinel.threshold_adapted',
+        expect.objectContaining({ adaptedThreshold: 20, conv_rate_7d: 0.005 }),
+      )
+    })
+
+    it('keeps base threshold when conv_rate_7d is in normal range (1–5%)', async () => {
+      const { ctx } = createCtx()
+      const dataOS = createDataOsMock({ features: { conv_rate_7d: '0.03' } })
+      ctx.dataOS = dataOS
+      await runPriceSentinel(ctx, {
+        proposals: [{ productId: 'p-1', currentPrice: 100, proposedPrice: 110, reason: 'test' }],
+      })
+      expect(ctx.logAction).not.toHaveBeenCalledWith('price_sentinel.threshold_adapted', expect.anything())
+    })
+
+    it('uses base threshold and logs degraded when getFeatures throws', async () => {
+      const { ctx, harness } = createCtx()
+      const dataOS = createDataOsMock()
+      vi.mocked(dataOS.getFeatures).mockRejectedValue(new Error('DataOS unreachable'))
+      ctx.dataOS = dataOS
+      // +12% delta with base threshold (15%) → should auto-approve
+      const result = await runPriceSentinel(ctx, {
+        proposals: [{ productId: 'p-1', currentPrice: 100, proposedPrice: 112, reason: 'test' }],
+      })
+      expect(result.decisions[0]?.requiresApproval).toBe(false)
+      expect(harness.updatePrice).toHaveBeenCalled()
+      expect(ctx.logAction).toHaveBeenCalledWith(
+        'price_sentinel.dataos_degraded',
+        expect.objectContaining({ productId: 'p-1', op: 'getFeatures' }),
+      )
+    })
+
+    it('uses base threshold when feature row has no conv_rate_7d field', async () => {
+      const { ctx, harness } = createCtx()
+      const dataOS = createDataOsMock({ features: { price_current: '99.00' } })
+      ctx.dataOS = dataOS
+      const result = await runPriceSentinel(ctx, {
+        proposals: [{ productId: 'p-1', currentPrice: 100, proposedPrice: 112, reason: 'test' }],
+      })
+      expect(result.decisions[0]?.requiresApproval).toBe(false)
+      expect(harness.updatePrice).toHaveBeenCalled()
+      expect(ctx.logAction).not.toHaveBeenCalledWith('price_sentinel.threshold_adapted', expect.anything())
     })
   })
 })

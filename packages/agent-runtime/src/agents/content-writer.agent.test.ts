@@ -167,10 +167,10 @@ describe('runContentWriter', () => {
     const result = await runContentWriter(ctx, { productId: 'p-1' })
 
     expect(result.title).toBe('Amazing Widget Pro')
-    expect(ctx.logAction).toHaveBeenCalledWith('content_writer.dataos_degraded', {
+    expect(ctx.logAction).toHaveBeenCalledWith('content_writer.dataos_degraded', expect.objectContaining({
       productId: 'p-1',
       op: 'getFeatures',
-    })
+    }))
   })
 
   it('degrades gracefully when DataOS recallMemory fails', async () => {
@@ -180,10 +180,10 @@ describe('runContentWriter', () => {
     const result = await runContentWriter(ctx, { productId: 'p-1' })
 
     expect(result.title).toBe('Amazing Widget Pro')
-    expect(ctx.logAction).toHaveBeenCalledWith('content_writer.dataos_degraded', {
+    expect(ctx.logAction).toHaveBeenCalledWith('content_writer.dataos_degraded', expect.objectContaining({
       productId: 'p-1',
       op: 'recallMemory',
-    })
+    }))
   })
 
   it('degrades gracefully when DataOS write operations fail', async () => {
@@ -194,10 +194,10 @@ describe('runContentWriter', () => {
     const result = await runContentWriter(ctx, { productId: 'p-1' })
 
     expect(result.title).toBe('Amazing Widget Pro')
-    expect(ctx.logAction).toHaveBeenCalledWith('content_writer.dataos_write_failed', {
+    expect(ctx.logAction).toHaveBeenCalledWith('content_writer.dataos_write_failed', expect.objectContaining({
       productId: 'p-1',
       op: 'recordMemory',
-    })
+    }))
   })
 
   it('degrades gracefully when DataOS recordLakeEvent fails alone', async () => {
@@ -208,10 +208,10 @@ describe('runContentWriter', () => {
 
     expect(result.title).toBe('Amazing Widget Pro')
     expect(dataOS.recordMemory).toHaveBeenCalled()
-    expect(ctx.logAction).toHaveBeenCalledWith('content_writer.dataos_write_failed', {
+    expect(ctx.logAction).toHaveBeenCalledWith('content_writer.dataos_write_failed', expect.objectContaining({
       productId: 'p-1',
       op: 'recordLakeEvent',
-    })
+    }))
   })
 
   it('works without DataOS (memoryless mode)', async () => {

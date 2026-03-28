@@ -1,0 +1,116 @@
+{
+  "schema": "devos-full-seed/v1",
+  "version": "4.0.0",
+  "generatedAt": "2026-03-28T00:00:00.000Z",
+  "totalMonthlyBudgetUsd": 720,
+  "agents": [
+    {
+      "id": "cto-agent",
+      "name": "CTO Agent",
+      "model": "claude-opus-4-6",
+      "trigger": "on-ticket",
+      "monthlyBudgetUsd": 100,
+      "slaResolveHours": 72,
+      "config": { "role": "leadership", "canCreateCoordinationTickets": true }
+    },
+    {
+      "id": "pm-agent",
+      "name": "PM Agent",
+      "model": "claude-sonnet-4-6",
+      "trigger": "on-ticket",
+      "monthlyBudgetUsd": 60,
+      "slaResolveHours": 72,
+      "config": { "role": "product", "outputFormat": "prd-markdown" }
+    },
+    {
+      "id": "architect-agent",
+      "name": "Architect Agent",
+      "model": "claude-sonnet-4-6",
+      "trigger": "post-plan",
+      "monthlyBudgetUsd": 60,
+      "slaResolveHours": 72,
+      "config": { "role": "architecture", "generateTaskGraph": true }
+    },
+    {
+      "id": "backend-agent",
+      "name": "Backend Agent",
+      "model": "claude-code",
+      "trigger": "on-task",
+      "monthlyBudgetUsd": 120,
+      "slaResolveHours": 48,
+      "config": { "role": "development", "language": "typescript", "framework": "fastify" }
+    },
+    {
+      "id": "frontend-agent",
+      "name": "Frontend Agent",
+      "model": "claude-code",
+      "trigger": "on-task",
+      "monthlyBudgetUsd": 80,
+      "slaResolveHours": 48,
+      "config": { "role": "development", "language": "typescript", "framework": "nextjs" }
+    },
+    {
+      "id": "db-agent",
+      "name": "DB Agent",
+      "model": "claude-sonnet-4-6",
+      "trigger": "pre-deploy",
+      "monthlyBudgetUsd": 40,
+      "slaResolveHours": 24,
+      "config": { "role": "database", "autoMigration": true, "engine": "postgresql" }
+    },
+    {
+      "id": "harness-agent",
+      "name": "Harness Agent",
+      "model": "claude-sonnet-4-6",
+      "trigger": "api-change",
+      "monthlyBudgetUsd": 60,
+      "slaResolveHours": 48,
+      "config": { "role": "platform", "monitoredApis": ["shopify", "amazon", "tiktok", "shopee"] }
+    },
+    {
+      "id": "qa-agent",
+      "name": "QA Agent",
+      "model": "claude-sonnet-4-6",
+      "trigger": "post-dev",
+      "monthlyBudgetUsd": 60,
+      "slaResolveHours": 48,
+      "config": { "role": "quality", "minCoverage": 80, "testFramework": "vitest" }
+    },
+    {
+      "id": "security-agent",
+      "name": "Security Agent",
+      "model": "claude-sonnet-4-6",
+      "trigger": "pre-merge",
+      "monthlyBudgetUsd": 30,
+      "slaResolveHours": 24,
+      "config": { "role": "security", "scanTypes": ["dependency", "sast", "secrets"] }
+    },
+    {
+      "id": "devops-agent",
+      "name": "DevOps Agent",
+      "model": "claude-code",
+      "trigger": "post-approve",
+      "monthlyBudgetUsd": 40,
+      "slaResolveHours": 4,
+      "config": { "role": "operations", "deployTarget": "staging", "requiresHumanApprovalForProd": true }
+    },
+    {
+      "id": "sre-agent",
+      "name": "SRE Agent",
+      "model": "claude-sonnet-4-6",
+      "trigger": "alert",
+      "monthlyBudgetUsd": 40,
+      "slaResolveHours": 4,
+      "config": { "role": "operations", "alertSource": "alertmanager", "autoRollback": true }
+    },
+    {
+      "id": "codebase-intel",
+      "name": "Codebase Intel",
+      "model": "claude-sonnet-4-6",
+      "trigger": "always-on",
+      "monthlyBudgetUsd": 30,
+      "slaResolveHours": 0,
+      "config": { "role": "intelligence", "indexInterval": "15m", "queryCapability": true }
+    }
+  ]
+}

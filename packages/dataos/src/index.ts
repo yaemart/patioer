@@ -42,13 +42,9 @@ export function createDataOsServices(config: DataOsServicesConfig): DataOsServic
     featureStore,
     decisionMemory,
     async shutdown(): Promise<void> {
-      const errors: unknown[] = []
-      try { await eventLake.close() } catch (e) { errors.push(e) }
-      try { await redis.quit() } catch (e) { errors.push(e) }
-      try { await pool.end() } catch (e) { errors.push(e) }
-      if (errors.length) {
-        console.error('[dataos] partial shutdown errors:', errors)
-      }
+      await eventLake.close().catch((e) => console.error('[dataos] eventLake close error:', e))
+      await redis.quit().catch((e) => console.error('[dataos] redis quit error:', e))
+      await pool.end().catch((e) => console.error('[dataos] pool end error:', e))
     },
   }
 }

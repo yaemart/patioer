@@ -67,11 +67,15 @@ export async function _runFeatureAgentTick(
     // aggregateRecentEntityEvents already filters platform='' at the SQL level (Phase 3 fix),
     // but guard here defensively in case older events reach this code path.
     if (!row.platform) continue
+    const evts = Number(row.evts)
+    const convRate7d = Number.isFinite(evts) && evts >= 0
+      ? Math.min(1, evts / 100)
+      : 0
     await services.featureStore.upsert({
       tenantId: row.tenant_id,
       platform: row.platform,
       productId: row.product_id,
-      convRate7d: Math.min(1, Number(row.evts) / 100),
+      convRate7d,
     })
     featureAgentItemsProcessed.inc()
   }

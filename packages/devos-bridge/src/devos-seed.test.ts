@@ -19,6 +19,6 @@ describe('runDevOsSeed', () => {
     expect(createTicket).toHaveBeenCalledOnce()
     const arg = createTicket.mock.calls[0]![0]
     expect(arg.type).toBe('feature')
-    expect(arg.title).toContain('SRE')
+    expect(arg.title).toContain('12-Agent')
   })
 })

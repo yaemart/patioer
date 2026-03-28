@@ -3192,6 +3192,2038 @@ PDF **21 项**全部 ✅ → 进入 Phase 4
 
 ---
 
+#### Sprint 6 · 宪法 / 蓝图 / 头脑风暴 / 工程原则 对齐矩阵
+
+> 以下矩阵将 Sprint 6 每项验证任务与**系统宪法**（Constitution）、**蓝图**（Master Blueprint PDF）、**头脑风暴**、**Phase 1–5 路线图**、**AI Agent Native 原则**、**Harness 工程原则** 逐条对齐。
+> Sprint 6 不新增功能代码，聚焦**验证**——因此对齐目标是：**每项 AC 的验证方法是否完整覆盖了各文档的硬门槛**。
+
+##### 0. 对齐源文档索引
+
+| 缩写 | 文档路径 | 核心定位 |
+|------|----------|----------|
+| **CON** | `docs/system-constitution.md` v1.0 | 系统最高法则（十章） |
+| **BP** | `docs/brainstorms/…-devos-master-blueprint-pdf-brainstorm.md` | 蓝图 PDF 摘要（21 Agent / 9 阶段 / 门控 / 四 Phase） |
+| **ROAD** | `docs/brainstorms/…-phase1-5-roadmap-pdf-brainstorm.md` | 五阶段路线图 PDF 合并摘要（103 项验收） |
+| **DATA** | `docs/brainstorms/…-data-system-structure-brainstorm.md` | 三层架构数据流（ElectroOS → DataOS → DevOS） |
+| **BUILD** | `docs/brainstorms/…-build-roadmap-cursor-brainstorm.md` | 构建顺序与 Cursor 执行包 |
+| **CON-PDF** | `docs/brainstorms/…-system-constitution-pdf-brainstorm.md` | 宪法 PDF 头脑风暴摘要 |
+| **CON-GUARD** | `docs/brainstorms/…-constitution-guard-brainstorm.md` | Constitution Guard + 自愈合 |
+| **CHECKLIST** | `docs/brainstorms/…-engineering-checklist-brainstorm.md` | 工程师 PR/Agent/发布前必勾选清单 |
+| **HARNESS** | `docs/architecture/harness-and-market.md` | Harness 路径与 Market 上下文工程文档 |
+| **GOV** | `docs/governance-gates.md` | 审批门控执行路径 |
+| **ADR-03** | `docs/adr/0003-phase3-dataos-stack.md` | DataOS 栈选型 ADR |
+| **P3** | `docs/plans/phase3-plan.md` §0 | Phase 3 决策与约束 |
+| **AB** | `docs/plans/phase3-ab-metrics.md` | A/B 可观测指标定义 |
+
+---
+
+##### 1. 顶层原则对齐：Sprint 6 验证任务 ↔ 各文档硬门槛
+
+| Sprint 6 验证任务 | 宪法条款 | 蓝图 / 路线图 | 头脑风暴 | Harness / Agent Native / ADR | 具体验证约束 |
+|-------------------|---------|---------------|----------|------------------------------|-------------|
+| **任务 6.1 · DataOS 基础设施 AC (AC-P3-01~04)** | CON Ch3.1 强制技术栈（Fastify / PG / Redis）· CON Ch2.1 模块化（DataOS 独立服务） | BP §07 Phase 3 "DataOS 三层存储部署" · ROAD Phase 3 验收含基础设施 4 项 | DATA §存储分工："Event Lake = ClickHouse · Feature Store = PG + Redis · Decision Memory = pgvector" · BUILD "先 API + Agent，再 DataOS" | ADR-03 §2: DataOS 技术栈 ClickHouse 24+ / PG16 + pgvector / Redis 7+ / Fastify 3300 · P3 D14 独立 Compose 栈 · HARNESS: DataOS 与 Harness 边界分离 | /health 返回 200 · CH 两表存在 · pgvector 扩展可用 · Redis 延迟 < 5ms · 端口 3300/8123/5434/6380 各自独立 |
+| **任务 6.2 · Event Lake & Feature Store AC (AC-P3-05~09)** | CON Ch2.4 事件驱动解耦 · CON Ch5.3 不可变审计日志 · CON Ch8.1 必须监控指标 | BP §02 "Ingestion Agent" + "Feature Agent" 在 DataOS Agent 列表 · ROAD "Event Lake 持续写入、Feature Agent 15min 刷新" | DATA §数据流图："Agent 执行 → 事件 → Event Lake → 特征聚合 → Feature Store → 下次决策" · DATA §互联关系："PG agent_events 为审计真相源；CH 为分析湖" | ADR-03 §2.1: PG 审计 vs CH 湖异步最终一致 · ADR-03: Ingestion 经 BullMQ，失败不阻塞主请求 · HARNESS: DataOS 写入不影响 Harness 执行路径 | PS 调价 → CH price_events 有记录 · Ingestion 无丢失（PG vs CH 计数对比）· Feature Agent 15min 触发 · 缓存命中率 > 90% · 100 万行聚合 < 2s |
+| **任务 6.3 · Decision Memory AC (AC-P3-10~13)** | CON Ch5.3 操作写入审计 · CON Ch2.5 数据所有权（Decision Memory 归 DataOS） | BP §07 "Decision Memory 向量化 + 召回" · ROAD Phase 3 "Insight Agent 回写 outcome" | DATA §Agent 调度流："决策 → 记忆 → 特征反哺 → Agent 改进" · BUILD "数据结构与系统结构是胜负点" | ADR-03 §2: pgvector 1536 维 · P3 D17 DataOS 降级策略 · Agent Native: "决策输入 = features + decision memory + 上下文" | PS 调价后 decision_memory 有记录（含 context_vector）· Insight Agent 回写 outcome · 召回 ≥ 3 条 · outcome > 50 条 |
+| **任务 6.4 · Agent 升级效果 AC (AC-P3-14~17)** | CON Ch2.3 Harness 不可绕过 · CON Ch5.1 Pre-flight · CON Ch5.3 审计 · CON Ch3.3 Paperclip 唯一编排 | BP §02 "21 Agent 含 E-07 Content Writer / E-08 Market Intel" · BP §07 "PS 学习型升级" · ROAD Phase 3 "5+2=7 Agent" | DATA §Agent 调度流："读 Feature → 经 Harness → 写 Event" · BUILD "Agent = 调度与工具执行，不颠倒" · CON-PDF "Harness 不可绕过" | HARNESS: Agent 经 `ctx.getHarness()` · 两条凭证路径（DB-backed HarnessRegistry）· Agent Native: LLM 调用经 `ctx.llm()` 而非直调 SDK · GOV: CW/MI 无高风险写操作 | PS prompt 含 conv_rate_7d · PS prompt 含历史案例 · CW 正常生成文案 · MI 更新竞品特征 · 审计链路完整（agent_events + Event Lake） |
+| **任务 6.5 · 数据隔离 & 安全 AC (AC-P3-18~21)** | **CON Ch6.1 tenant_id + RLS（零容错）** · CON Ch9 安全 · CON Ch5.2 禁止跨租户 · CON Ch2.5 数据所有权 | BP §06 Constitution "多租户隔离" · ROAD "隔离测试全部通过" | CON-GUARD: "复杂性必须结构化约束，不能依赖 Agent 自觉" · DATA §安全："ClickHouse 应用层 WHERE tenant_id；PG UNIQUE + RLS；pgvector recall SQL 强制 tenant_id" | ADR-03 §2.3: CH 查询必须含 tenant_id 谓词 · P3 D18 DataOS 租户隔离 · P3 D17 降级策略（超时 5s + try/catch）· HARNESS: DataOS 失败不影响 Harness 执行（边界分离） | 三层隔离测试通过（Event Lake + Feature Store + Decision Memory）· DataOS 宕机时 7 Agent 降级 200 · pgvector 跨租户 recall 返回 0 条 · CH TTL 2 年生效 |
+| **任务 6.6 · `dataos-isolation.test.ts`** | CON Ch7.2 覆盖率 ≥ 80% · CON Ch5.3 代码提交含测试 · CON Ch6.1 RLS 强制 | ROAD "阶段门禁：验收清单全过才进下阶段" | CHECKLIST: "任一条不满足 → 不合入/不部署" · CON-GUARD: "L1 硬规则优先" | ADR-03 §2.3: 三层隔离验证 · Agent Native: 多租户零容错 | ≥ 12 个测试用例 · 覆盖三层 + 跨层一致性 · 仿 `e2e-tenant-isolation.integration.test.ts` 风格 |
+| **任务 6.7 · CH 写入压测** | CON Ch8.1 必须监控指标（性能可观测）· CON Ch3.1 ClickHouse 24+ | BP §07 "Event Lake 分析性能" · ROAD Phase 3 验收 "100 万行聚合 < 2s" | DATA §存储："ClickHouse 列式存储，时序查询，TTL 2 年" | ADR-03 §2: 批量 insert + BullMQ 缓冲 · P3 §7 风险缓解 "Week 1–2 压测基线" | 100 万事件写入 · 5 种聚合查询 · 全部 < 2s |
+| **任务 6.8 · pgvector 检索压测** | CON Ch8.1 可观测 | ROAD Phase 3 "向量召回性能" | DATA §Decision Memory "语义检索" | ADR-03: similarity threshold 0.85 · IVFFlat lists 调参 · P3 §7 "pgvector 延迟/精度" | 100 / 1K / 10K 行 recall 延迟 · IVFFlat 索引验证 · 租户隔离不影响性能 |
+| **任务 6.9 · 文档更新** | CON Ch2.2 API First（OpenAPI）· CON Ch10 宪法版本管理 | BP §08 "Phase 出口需文档完备" · ROAD "验收证据归档" | BUILD "YAGNI — 但必要文档不可省" · CHECKLIST "发布前清单" | ADR-03 状态 "Accepted" · HARNESS §运维文档 | 证据索引 21 项完整 · operations.md DataOS 章节 · OpenAPI 有效 · ADR-0003 审查通过 |
+| **任务 6.10 · 总验收 + Phase 4 就绪** | **CON 全章合规审查** · CON Ch7.2 覆盖率 ≥ 80% · CON Ch8.1 全部必监控指标就绪 | BP §05 "Governance Gates — 阶段门禁" · ROAD "103 项验收中 Phase 3 的 21 项全部通过" | CON-GUARD "部署否决权：任何违规可阻断" · CHECKLIST "任一条不满足 → 不合入/不部署" | ADR-03 全部决策已落地 · Agent Native: 可观测闭环完成 · HARNESS: 所有 Harness 方法有集成测试 | 21 项 AC 逐条复验 · typecheck 0 errors · test 0 failures · 全栈可启动 |
+
+---
+
+##### 2. 宪法逐章合规验证映射
+
+以下将 **Constitution 每章核心要求** 映射到 Sprint 6 具体验证动作。Sprint 6 不产出新代码，但**验证流程本身必须覆盖宪法全部相关条款**。
+
+| 宪法章节 | 条款 | Sprint 6 验证方式 | 验证日 |
+|----------|------|-------------------|--------|
+| **Ch1.1 使命** | 人类战略、AI 执行 | AC-P3-14~17 验证 7 Agent 自主运行 · 人工介入仅在审批流（GOV 门控）| Day 29 |
+| **Ch2.1 模块化** | 禁止跨模块直连 DB | AC-P3-01 DataOS 独立服务 · AC-P3-18 三层隔离 · `dataos-isolation.test.ts` 验证经 Port 不直连 | Day 25 + 30 + 31 |
+| **Ch2.2 API First** | 先定义接口再实现 · OpenAPI | CARD-D33-03 OpenAPI 验证 · DataOS 内部 API 7 路由与 `sprint6-api.openapi.yaml` 一致 | Day 33 |
+| **Ch2.3 Harness 不可绕过** | Agent 绝不直调平台 SDK | AC-P3-14~17 验证 PS/CW/MI 经 `ctx.getHarness()` 读产品 · 审计日志含 Harness 调用链 | Day 29 |
+| **Ch2.4 事件驱动** | 系统通过事件解耦 | AC-P3-05~06 验证 Event Lake 写入 + Ingestion 无丢失 · BullMQ 异步管道 | Day 26 |
+| **Ch2.5 数据所有权** | 各 Service 自有 schema，跨服务经 API/事件 | AC-P3-01 DataOS 独立 PG 5434 · Agent 经 DataOsPort 不直连 DataOS DB | Day 25 |
+| **Ch3.1 技术栈** | Fastify / PG / Redis / ClickHouse / BullMQ | AC-P3-01~04 验证全部基础设施组件版本与栈匹配 | Day 25 |
+| **Ch3.3 Paperclip 唯一编排** | 禁止 LangChain/CrewAI 作主编排 | AC-P3-16~17 验证 CW/MI 经 agent-registry + execute route 触发 · 无第三方编排依赖 | Day 29 |
+| **Ch4.3 错误处理** | Agent 错误需可分类 | AC-P3-19 降级验证 · 降级日志含 `type: 'dataos_degraded'` 结构化分类 | Day 30 |
+| **Ch5.1 Pre-flight** | goal_context / budget / approval | AC-P3-16~17 验证 CW/MI 执行含 pre-flight（budget 检查 + goal 解析）| Day 29 |
+| **Ch5.2 禁止行为** | 不直调 SDK · 不直连 DB · 价格 >15% 审批 | AC-P3-14~15 验证 PS 经 Harness + Feature + Memory · AC-P3-18 三层隔离验证不跨 DB | Day 29 + 30 |
+| **Ch5.3 必须行为** | 审计日志 / 超预算停 / 结构化错误 / RLS / 测试 | AC-P3-05~06 Event Lake 审计 · AC-P3-18~20 RLS/隔离 · 任务 6.6 测试覆盖 | Day 26 + 30 + 31 |
+| **Ch5.4 审批门控** | Schema 变更须人工 · 高风险写操作须审批 | Sprint 6 无 Schema 变更 · CW/MI 无高风险写操作（GOV 确认）· PS 审批流已验证 | Day 29（复验） |
+| **Ch6.1 租户隔离** | tenant_id + RLS 零容错 | **AC-P3-18 三层隔离 · AC-P3-20 pgvector 跨租户 100% · `dataos-isolation.test.ts`** | Day 30 + 31 |
+| **Ch7.2 覆盖率** | ≥ 80% · 代码提交含测试 | 任务 6.6 新增 `dataos-isolation.test.ts` · 全量 `pnpm test` 0 failures | Day 31 + 34 |
+| **Ch7.3 Harness SLA** | 48h 更新 · 向后兼容 · 每方法集成测试 | AC-P3-14~17 验证所有 Harness 调用正常 · Sprint 6 未变更 Harness 接口（向后兼容保持） | Day 29 |
+| **Ch8.1 可观测** | 必监控指标清单 | AC-P3-08 Feature Store 缓存 Prometheus 指标 · A/B metrics 6 项 · 所有指标可 `/metrics` 获取 | Day 27 + 29 |
+| **Ch8.2 告警** | P0: Harness 错误率 >5% · P1: 预算 >90% | AC-P3-19 降级验证（降级占比 >20% → Warning）· 现有告警规则不受 Sprint 6 影响 | Day 30 |
+| **Ch9 安全** | 加密 / Secrets / 不硬编码凭证 | AC-P3-01 DataOS API 经 `X-DataOS-Internal-Key` 鉴权 · 凭证经 DB 加密 `CRED_ENCRYPTION_KEY` | Day 25 |
+
+**宪法覆盖率：19/19 章相关条款全部有 Sprint 6 验证动作 = 100%**
+
+---
+
+##### 3. 蓝图（Master Blueprint PDF）对齐
+
+| 蓝图章节 | 要求 | Sprint 6 验证 | 验证日 |
+|----------|------|--------------|--------|
+| **§02 · 21 Agent** | Phase 3 结束后 ElectroOS 应有 7 可执行 Agent | AC-P3-14~17 分别验证 PS/CW/MI · CARD-D34-01 总验收时列出全部 7 Agent 运行状态 | Day 29 + 34 |
+| **§02 · DataOS Agent** | Ingestion / Feature / Insight 三个 DataOS Agent | AC-P3-06 Ingestion · AC-P3-07 Feature Agent · AC-P3-11 Insight Agent 分别验证 | Day 26 + 28 |
+| **§05 · Governance Gates** | 阶段门禁：验收清单全过才进下阶段 | CARD-D34-01 逐条复验 21 项 AC · 全部 ✅ 才标记 Phase 3 出口 | Day 34 |
+| **§06 · Constitution** | Harness 不可绕过 / 多租户隔离 / 审计 | AC-P3-14~17 Harness 链路 · AC-P3-18~20 隔离 · AC-P3-05~06 审计 | Day 26–31 |
+| **§07 · Phase 3 DataOS** | 三层存储部署 + Agent 深度接入 + 学习闭环 | AC-P3-01~04 基础设施 · AC-P3-10~13 Decision Memory 闭环 · AC-P3-14~15 PS 学习型 | Day 25–29 |
+| **§08 · Phase 出口** | 文档完备 + 压测 + 验收证据 | 任务 6.7~6.8 压测 · 任务 6.9 文档 · 任务 6.10 总验收 | Day 32–34 |
+
+**蓝图覆盖率：6/6 = 100%**
+
+---
+
+##### 4. 路线图（Phase 1–5 Roadmap PDF）对齐
+
+| 路线图要求 | Sprint 6 验证对应 | 验证日 |
+|-----------|-------------------|--------|
+| Phase 3 验收含 **21 项 AC** | CARD-D34-01 逐条 AC-P3-01~21 复验 | Day 34 |
+| "DataOS 故障时 ElectroOS 降级无记忆" | **AC-P3-19** 停止 DataOS → 7 Agent 全部 200 | Day 30 |
+| "100 万事件聚合 < 2s" | **AC-P3-09** + 任务 6.7 CH 压测 | Day 27 + 32 |
+| "Content Writer + Market Intel 上线（5+2=7）" | **AC-P3-16 + AC-P3-17** CW/MI 端到端执行 | Day 29 |
+| "Feature Agent 15min 刷新" | **AC-P3-07** updated_at 对比 | Day 26 |
+| "Decision Memory 向量召回 ≥3 条" | **AC-P3-12** recall API 验证 | Day 28 |
+| "覆盖率 ≥ 80%" | 任务 6.6 新增测试 + CARD-D34-01 全量 `pnpm test` | Day 31 + 34 |
+| "阶段门禁：验收清单全过才进下阶段" | CARD-D34-02 Phase 4 就绪检查清单 12 项 | Day 34 |
+
+**路线图覆盖率：8/8 相关验收 = 100%**
+
+---
+
+##### 5. 头脑风暴文档对齐
+
+| 头脑风暴原则 | 来源 | Sprint 6 验证映射 |
+|-------------|------|-------------------|
+| **"复杂性必须结构化约束，不能依赖 Agent 自觉"** | CON-GUARD / 宪法反模式 | AC-P3-18~20 隔离测试 = 结构化约束的验证（不依赖 Agent 不跨租户的"自觉"，而是用 `WHERE tenant_id` 强制）· `dataos-isolation.test.ts` 自动化保障 |
+| **"未记录的行为 = 未发生"** | 十大陷阱 #4 | AC-P3-05~06 Event Lake 无丢失验证 · 所有 Agent 执行写入 agent_events + ClickHouse 双链路 |
+| **"数据结构与系统结构是胜负点"** | BUILD 核心关系 | AC-P3-01~04 DataOS 三层存储完整性 · AC-P3-07~08 Feature Store 性能 · AC-P3-10~12 Decision Memory 召回精度 |
+| **"Agent = 调度与工具执行，不颠倒"** | BUILD Paperclip 定位 | AC-P3-14~17 验证 Agent 不硬编码业务规则（PS 读特征+记忆→构造 prompt→LLM 决策）|
+| **"读 Feature → 经 Harness → 写 Event"** | DATA §Agent 调度流 | AC-P3-14~15 PS 完整链路（getFeatures → recallMemory → getHarness → llm → recordMemory → recordLakeEvent）验证 |
+| **"DataOS 为 ElectroOS 提供记忆；不可用时不阻塞"** | DATA §互联关系 / ADR-03 | **AC-P3-19** DataOS 宕机降级验证 · 7 Agent 全部 200 · 降级日志可观测 |
+| **"事件 → 特征反哺 → Agent 改进"** | DATA §数据流图 | AC-P3-10~13 完整学习闭环验证（决策 → 记忆 → outcome → 下次召回改进决策）|
+| **"Event Lake 可后期再上 ClickHouse；YAGNI"** | DATA Key Decisions | AC-P3-02 + AC-P3-09 验证 ClickHouse 已上线且达性能标准 · Phase 3 已兑现 |
+| **"Paperclip 定位 = Agent 编排内核，不是业务 SaaS 本体"** | BUILD | AC-P3-16~17 验证 CW/MI 经 agent-registry + execute route 触发 · 业务在 agent-runtime |
+| **"L1 硬规则优先；部署否决权"** | CON-GUARD | CARD-D34-01 总验收 = Phase 3 门禁；任何 AC 未过 → 不进 Phase 4（等效否决权）|
+| **"任一条不满足 → 不合入/不部署"** | CHECKLIST | CARD-D34-02 Phase 4 就绪检查清单 12 项，逐项勾选 |
+| **"PG 审计为真相源；CH 为分析异步最终一致"** | DATA / ADR-03 §2.1 | AC-P3-05~06 验证 PG agent_events（审计）与 CH events（分析）双写一致性 |
+
+---
+
+##### 6. AI Agent Native 原则深度对齐（Sprint 6 验证版）
+
+> Sprint 5 对齐矩阵按 35 条原则 × 源码级审查。Sprint 6 不产出新代码，对齐方式转为：**每条原则是否有对应验证动作覆盖**。
+
+###### 6.1 元原则与 Agent 定位
+
+| # | 原则 | 来源 | Sprint 6 验证覆盖 | 验证日 |
+|---|------|------|-------------------|--------|
+| 1 | **"复杂性须结构化约束"** | 十大陷阱 Meta | `dataos-isolation.test.ts` 验证隔离约束不依赖 Agent 自觉 · CH `WHERE tenant_id` 强制谓词 · GOV 门控自动执行 | Day 31 |
+| 2 | **"数据+API 为核心；Agent=调度+工具"** | BUILD | AC-P3-14~17 验证 Agent 通过 Port/Harness/LLM 组合决策，不硬编码业务逻辑 | Day 29 |
+| 3 | **"Paperclip = Agent 编排内核"** | BUILD | AC-P3-16~17 CW/MI 经 registry + execute route 触发；无 LangChain/CrewAI | Day 29 |
+| 4 | **"构建：结构化平台+受约束 Agent+可演进数据系统"** | CHECKLIST | AC-P3-01~04（平台）+ AC-P3-18~20（约束）+ AC-P3-10~13（可演进数据）完整覆盖三层 | Day 25–31 |
+
+###### 6.2 Harness 抽象不可绕过
+
+| # | 原则 | 来源 | Sprint 6 验证覆盖 | 验证日 |
+|---|------|------|-------------------|--------|
+| 5 | **"Agent 代码绝不直调平台 SDK"** | CON Ch2.3 | AC-P3-14~17 验证 PS/CW/MI 全部经 `ctx.getHarness()` 读产品 · 审计日志无 SDK 直调痕迹 | Day 29 |
+| 6 | **"所有外部交互仅经 PlatformHarness"** | 十大陷阱#1 | AC-P3-16 CW 唯一外部调用 = `getProducts()` · AC-P3-17 MI = `getProducts()` per platform | Day 29 |
+| 7 | **"DataOS 不替代 Harness"** | P3 §0 | AC-P3-14~15 PS 产品信息从 Harness 获取，DataOS 仅提供 features/memories 辅助 | Day 29 |
+| 8 | **"新平台只增 Harness 实现，Agent 逻辑零改"** | 路线图 | AC-P3-17 MI 遍历 `getEnabledPlatforms()` — 验证多平台循环模式 | Day 29 |
+| 9 | **"Agent 不新增 Harness 接口方法"** | CON Ch5.4 | Sprint 6 未变更 TenantHarness 接口 · 无新方法 = 无门控风险 | Day 34 |
+
+###### 6.3 模块化、API First、数据所有权
+
+| # | 原则 | 来源 | Sprint 6 验证覆盖 | 验证日 |
+|---|------|------|-------------------|--------|
+| 10 | **"禁止跨模块直连 DB"** | CON Ch2.1 | AC-P3-18 三层隔离验证 Agent 经 DataOsPort（HTTP），不直连 DataOS PG/CH | Day 30 |
+| 11 | **"API First：先定义接口再实现"** | CON Ch2.2 | CARD-D33-03 OpenAPI 验证：7 路由与 yaml 定义一致 | Day 33 |
+| 12 | **"Port 描述与实际接口一致"** | CON Ch2.2 推广 | Sprint 5 Day 22 已修复；Sprint 6 总验收复验 `describeDataOsCapabilities()` | Day 34 |
+
+###### 6.4 事件驱动与 Event Lake
+
+| # | 原则 | 来源 | Sprint 6 验证覆盖 | 验证日 |
+|---|------|------|-------------------|--------|
+| 13 | **"未记录的行为 = 未发生"** | 十大陷阱#4 | AC-P3-05~06 Event Lake 无丢失 · PG vs CH 计数对比 | Day 26 |
+| 14 | **"失败/中间态/成功均须进入事件链路"** | 十大陷阱 | AC-P3-19 降级事件写入 agent_events `dataos_degraded` · AC-P3-05 price_events 含 `approved: false` 情况 | Day 26 + 30 |
+| 15 | **"事件全量进 Lake"** | DATA | AC-P3-06 Ingestion 无丢失验证 · BullMQ → CH 管道完整性 | Day 26 |
+| 16 | **"事件驱动解耦"** | CON Ch2.4 | AC-P3-05 PS `recordPriceEvent` 异步 · AC-P3-06 `enqueueDataOsLakeEvent` 不阻塞主路径 | Day 26 |
+
+###### 6.5 DataOS 三件套：Feature Store + Decision Memory + 学习闭环
+
+| # | 原则 | 来源 | Sprint 6 验证覆盖 | 验证日 |
+|---|------|------|-------------------|--------|
+| 17 | **"决策输入 = features + decision memory + 上下文"** | 十大陷阱#3 | AC-P3-14 PS prompt 含 `conv_rate_7d` · AC-P3-15 PS prompt 含历史案例 | Day 29 |
+| 18 | **"数据流：读 Feature/Memory → 经 Harness → 写 Event → 异步刷新特征"** | DATA | AC-P3-07 Feature Agent 15min 刷新 · AC-P3-14~15 PS 读特征/记忆 · AC-P3-05 写 Event | Day 26–29 |
+| 19 | **"writeOutcome 关闭学习闭环"** | P3 Plan | AC-P3-11 Insight Agent 回写 outcome · AC-P3-13 outcome > 50 条 | Day 28 |
+| 20 | **"Feature Store 特征→prompt→提升决策质量"** | BUILD | AC-P3-14 验证 PS prompt 含 Feature Store 特征字段 | Day 29 |
+| 21 | **"Decision Memory 历史→prompt→闭环学习"** | DATA | AC-P3-15 验证 PS prompt 含历史调价案例 | Day 29 |
+
+###### 6.6 降级、韧性与无记忆模式
+
+| # | 原则 | 来源 | Sprint 6 验证覆盖 | 验证日 |
+|---|------|------|-------------------|--------|
+| 22 | **"DataOS 调用超时 5s + try/catch；降级无记忆"** | ADR-03 D17 | **AC-P3-19** 停止 DataOS → 7 Agent 全部返回 200 | Day 30 |
+| 23 | **"DataOS 故障时不阻塞、不 500"** | 路线图 | AC-P3-19 每种 Agent 类型独立验证 · 降级 E2E 测试已在 Sprint 5 编写 | Day 30 |
+| 24 | **"降级事件也须进可观测链路"** | 十大陷阱#4 | AC-P3-19 验证日志含 `dataos_degraded` · A/B 指标 `dataos_mode='degraded'` | Day 30 |
+
+###### 6.7 编排层
+
+| # | 原则 | 来源 | Sprint 6 验证覆盖 | 验证日 |
+|---|------|------|-------------------|--------|
+| 25 | **"唯一编排框架 Paperclip"** | CON Ch3.3 | AC-P3-16~17 验证 CW/MI 注册到 agent-registry → execute route → Paperclip 调度 | Day 29 |
+
+###### 6.8 Pre-flight 与受监管 Agent
+
+| # | 原则 | 来源 | Sprint 6 验证覆盖 | 验证日 |
+|---|------|------|-------------------|--------|
+| 26 | **"执行前：读 goal_context → 检查 budget → 检查 approval"** | CON Ch5.1 | AC-P3-16~17 验证 CW/MI 含 pre-flight（budget 检查 → 超预算 return 空结果）| Day 29 |
+| 27 | **"超预算主动停止并上报"** | CON Ch5.3 | Sprint 5 已实现；Sprint 6 全量测试复验 budget 相关 test cases | Day 34 |
+| 28 | **"高风险路径须 approval 门控"** | CON Ch5.4 / GOV | CW/MI 无高风险写操作 · PS 审批流完整（GOV 确认）· Sprint 6 不变更门控 | Day 34 |
+
+###### 6.9 不可变审计日志
+
+| # | 原则 | 来源 | Sprint 6 验证覆盖 | 验证日 |
+|---|------|------|-------------------|--------|
+| 29 | **"所有操作写入不可变审计日志"** | CON Ch5.3 | AC-P3-05~06 Event Lake 全量写入 · agent_events PG 审计链路 | Day 26 |
+| 30 | **"失败时结构化错误报告"** | CON Ch5.3 / Ch4.3 | AC-P3-19 降级日志含 `{ type, platform, code }` 结构化字段 | Day 30 |
+
+###### 6.10 多租户隔离
+
+| # | 原则 | 来源 | Sprint 6 验证覆盖 | 验证日 |
+|---|------|------|-------------------|--------|
+| 31 | **"tenant_id + RLS + API 层隔离；零容错"** | CON Ch6.1 | **AC-P3-18** 三层隔离 · **AC-P3-20** pgvector 跨租户 100% · `dataos-isolation.test.ts` ≥ 12 用例 | Day 30 + 31 |
+
+###### 6.11 可观测闭环
+
+| # | 原则 | 来源 | Sprint 6 验证覆盖 | 验证日 |
+|---|------|------|-------------------|--------|
+| 32 | **"执行→度量→学习 可观测闭环"** | CON Ch8.1 | AC-P3-07~08 Feature 指标 · AC-P3-10~13 Memory 闭环 · A/B metrics 6 项 | Day 26–29 |
+| 33 | **"A/B 量化 DataOS 学习层价值"** | AB / P3 5.10 | Sprint 5 已定义 6 项指标；Sprint 6 验证 `/metrics` 可获取 · `dataos_mode` 标签存在 | Day 29 |
+
+###### 6.12 确定性护栏
+
+| # | 原则 | 来源 | Sprint 6 验证覆盖 | 验证日 |
+|---|------|------|-------------------|--------|
+| 34 | **"用确定性护栏约束非确定性 LLM"** | 十大陷阱#7 | AC-P3-14~17 验证 PS/CW/MI 均含 JSON 解析+类型守卫+fallback · Sprint 5 已有 34+ 相关测试 | Day 29 + 34 |
+
+###### 6.13 测试覆盖
+
+| # | 原则 | 来源 | Sprint 6 验证覆盖 | 验证日 |
+|---|------|------|-------------------|--------|
+| 35 | **"覆盖率 ≥ 80%；代码提交含测试"** | CON Ch7.2 | 任务 6.6 新增 `dataos-isolation.test.ts` ≥ 12 用例 · 全量 `pnpm test` 0 failures | Day 31 + 34 |
+
+**AI Agent Native 原则覆盖率：35/35 = 100%**
+
+---
+
+##### 7. Harness 工程原则深度对齐（Sprint 6 验证版）
+
+> Sprint 5 对齐按 30 条 × 源码审查。Sprint 6 对齐方式：**验证流程是否覆盖了 Harness 工程原则的全部关键约束**。
+
+###### 7.1 抽象边界
+
+| # | 原则 | Sprint 6 验证 | 验证日 |
+|---|------|--------------|--------|
+| 1 | **Agent 绝不直调平台 SDK** | AC-P3-14~17 端到端执行 · 审计日志仅含 Harness 调用，无 SDK 直调 | Day 29 |
+| 2 | **外部交互=只走 Harness** | AC-P3-16 CW `getProducts()` · AC-P3-17 MI `getProducts()` per platform | Day 29 |
+| 3 | **DataOS 读特征/写事件，不替代 Harness** | AC-P3-14~15 PS 产品信息从 Harness 获取；DataOS 仅辅助 | Day 29 |
+| 4 | **新平台只增 Harness 实现** | AC-P3-17 MI 遍历 `getEnabledPlatforms()` 循环 | Day 29 |
+
+###### 7.2 凭证路径
+
+| # | 原则 | Sprint 6 验证 | 验证日 |
+|---|------|--------------|--------|
+| 5 | **DB-backed HarnessRegistry（HTTP 执行路径）** | AC-P3-14~17 全部经 execute route → resolveFirstCredential → DB 路径 | Day 29 |
+| 6 | **凭证加密存储** | AC-P3-01 DataOS 经 `X-DataOS-Internal-Key` 鉴权 · ElectroOS 经 `CRED_ENCRYPTION_KEY` | Day 25 |
+
+###### 7.3 治理门控
+
+| # | 原则 | Sprint 6 验证 | 验证日 |
+|---|------|--------------|--------|
+| 7 | **新增 Harness 接口方法须 CTO + 人工** | Sprint 6 未变更 TenantHarness 接口 | Day 34 |
+| 8 | **Harness 接口向后兼容** | Sprint 6 未修改 Product/Order/Analytics 类型 | Day 34 |
+
+###### 7.4 弹性：超时、重试、降级
+
+| # | 原则 | Sprint 6 验证 | 验证日 |
+|---|------|--------------|--------|
+| 9 | **Per-request 超时 15s** | AC-P3-14~17 执行期间 Harness 调用继承 15s 超时 | Day 29 |
+| 10 | **DataOS 失败不影响 Harness 执行** | **AC-P3-19** DataOS 停止 → Agent 仍经 Harness 正常运行 | Day 30 |
+| 11 | **429/限流在 Harness 内部处理** | AC-P3-14~17 Agent 仅处理 HarnessError 统一类型 | Day 29 |
+
+###### 7.5 HarnessError 处理
+
+| # | 原则 | Sprint 6 验证 | 验证日 |
+|---|------|--------------|--------|
+| 12 | **Agent 错误分类含 `harness_error`** | AC-P3-19 降级日志验证结构化错误分类 | Day 30 |
+| 13 | **区分 HarnessError vs 通用 Error** | Sprint 5 已有 `instanceof HarnessError` 测试；Sprint 6 全量测试复验 | Day 34 |
+| 14 | **Harness 错误后继续处理后续项** | AC-P3-17 MI 单平台失败 → `continue` → 处理下一平台 | Day 29 |
+
+###### 7.6 可观测性
+
+| # | 原则 | Sprint 6 验证 | 验证日 |
+|---|------|--------------|--------|
+| 15 | **监控 `harness.api.error_rate`** | AC-P3-08 Prometheus 指标 · 现有告警规则不受 Sprint 6 影响 | Day 27 |
+| 16 | **Harness 错误率 >5% 触发 P0 告警** | 现有规则验证 · AC-P3-19 降级日志可被 `harness.api.error_rate` 管道捕获 | Day 30 |
+
+###### 7.7 测试覆盖
+
+| # | 原则 | Sprint 6 验证 | 验证日 |
+|---|------|--------------|--------|
+| 17 | **代码提交含测试** | 任务 6.6 `dataos-isolation.test.ts` 新增 ≥ 12 用例 | Day 31 |
+| 18 | **Harness 错误处理有测试** | Sprint 5 已有 HarnessError mock 测试；Sprint 6 全量 `pnpm test` 复验 | Day 34 |
+| 19 | **覆盖率 ≥ 80%** | CARD-D34-01 全量 `pnpm test` 0 failures | Day 34 |
+
+###### 7.8 多平台与 MarketContext
+
+| # | 原则 | Sprint 6 验证 | 验证日 |
+|---|------|--------------|--------|
+| 20 | **Agent 遍历 `getEnabledPlatforms()`** | AC-P3-17 MI 多平台遍历验证 | Day 29 |
+
+**Harness 工程原则覆盖率：20/20 = 100%**
+
+---
+
+##### 8. ADR-03（DataOS 栈选型）对齐
+
+| ADR-03 决策条款 | Sprint 6 验证动作 | 验证日 |
+|----------------|-------------------|--------|
+| **§2.1** PG 审计 vs CH 湖异步最终一致 | AC-P3-06 PG vs CH 计数对比 · BullMQ 管道无丢失 | Day 26 |
+| **§2.2** 技术栈（CH 24+ / PG16 pgvector / Redis / Fastify 3300） | AC-P3-01~04 四服务验证 + 版本记录 | Day 25 |
+| **§2.3** 安全隔离：CH 查询必须含 `tenant_id`；PG UNIQUE | AC-P3-18 三层隔离 · AC-P3-20 pgvector 不跨租户 · `dataos-isolation.test.ts` | Day 30 + 31 |
+| **§2.4** 降级：超时 + try/catch；失败回退 Phase 1–2 | **AC-P3-19** 7 Agent 降级验证 | Day 30 |
+| **§3** 备选不采纳确认（非仅扩 PG / 非同库 / 非 Kafka） | AC-P3-01 DataOS 独立 Compose 栈 + 独立 PG 5434 · CH 8123 · Redis 6380 | Day 25 |
+| **§4** DATAOS_ENABLED=0 时 ElectroOS 仍可运行 | AC-P3-19 等效验证（DataOS 停止 → ElectroOS 正常）| Day 30 |
+
+**ADR-03 覆盖率：6/6 = 100%**
+
+---
+
+##### 9. 门控安全对齐（GOV / CON Ch5.4）
+
+| 检查项 | Sprint 6 评估 | 风险 |
+|--------|--------------|------|
+| Sprint 6 是否涉及 Schema 变更？ | **否** — Sprint 6 不修改任何 DB schema | 无 |
+| Sprint 6 是否新增 Harness 接口方法？ | **否** — 仅验证现有方法 | 无 |
+| Sprint 6 是否涉及高风险平台写操作？ | **否** — 仅读取 + 验证 | 无 |
+| Sprint 6 新增代码（`dataos-isolation.test.ts`）是否需审批？ | **否** — 纯测试代码，不触发 CON Ch5.4 门控 | 无 |
+| 压测脚本（Day 32）是否影响生产？ | **否** — 仅本地 Docker 环境，不触达生产 | 无 |
+
+**Sprint 6 无需新增审批门控。**
+
+---
+
+##### 10. Phase 3 验收条款 ↔ Sprint 6 CARD 映射
+
+| AC 编号 | 验收描述 | Sprint 6 CARD | 验证日 | 对齐文档 |
+|---------|---------|---------------|--------|---------|
+| AC-P3-01 | DataOS API `/health` 200 | CARD-D25-02 | Day 25 | ADR-03 §2.2 · CON Ch3.1 |
+| AC-P3-02 | CH events/price_events 表 | CARD-D25-03 | Day 25 | ADR-03 §2.2 · DATA §存储 |
+| AC-P3-03 | pgvector + 两表 | CARD-D25-04 | Day 25 | ADR-03 §2.2 · P3 D13 |
+| AC-P3-04 | Redis < 5ms | CARD-D25-05 | Day 25 | ADR-03 §2.2 · DATA §缓存 |
+| AC-P3-05 | PS → CH price_events | CARD-D26-01 | Day 26 | CON Ch2.4 · ADR-03 §2.1 |
+| AC-P3-06 | Ingestion 无丢失 | CARD-D26-02 | Day 26 | CON Ch5.3 · 十大陷阱#4 |
+| AC-P3-07 | Feature Agent 15min | CARD-D26-03 | Day 26 | BP §02 · ROAD |
+| AC-P3-08 | 缓存命中率 > 90% | CARD-D27-01 | Day 27 | CON Ch8.1 · DATA §缓存 |
+| AC-P3-09 | CH 100 万聚合 < 2s | CARD-D27-02 + D32-01 | Day 27+32 | ROAD · P3 §7 |
+| AC-P3-10 | PS → decision_memory | CARD-D28-01 | Day 28 | CON Ch5.3 · DATA §记忆 |
+| AC-P3-11 | Insight 回写 outcome | CARD-D28-02 | Day 28 | BP §02 · P3 §2 |
+| AC-P3-12 | 召回 ≥ 3 条 | CARD-D28-03 | Day 28 | ROAD · ADR-03 |
+| AC-P3-13 | outcome > 50 条 | CARD-D28-04 | Day 28 | ROAD · P3 §2 |
+| AC-P3-14 | PS prompt 含 features | CARD-D29-01 | Day 29 | CON Ch2.3 · Agent Native #17 |
+| AC-P3-15 | PS prompt 含 memories | CARD-D29-02 | Day 29 | CON Ch2.3 · Agent Native #21 |
+| AC-P3-16 | CW 正常生成文案 | CARD-D29-03 | Day 29 | BP §02 · CON Ch5.1 |
+| AC-P3-17 | MI 更新竞品特征 | CARD-D29-04 | Day 29 | BP §02 · CON Ch2.3 |
+| AC-P3-18 | 三层隔离通过 | CARD-D30-01 | Day 30 | **CON Ch6.1** · ADR-03 §2.3 |
+| AC-P3-19 | DataOS 宕机降级 | CARD-D30-02 | Day 30 | **ADR-03 §2.4** · CON Ch4.3 |
+| AC-P3-20 | pgvector 不跨租户 | CARD-D31-01 | Day 31 | **CON Ch6.1** · P3 D18 |
+| AC-P3-21 | CH TTL 2 年 | CARD-D31-02 | Day 31 | DATA §存储 · P3 §5 |
+
+**21 项 AC 全部有对应 CARD · 全部有对齐文档引用 = 100%**
+
+---
+
+##### 11. 对齐总结
+
+| 维度 | 条款 / 原则数 | Sprint 6 验证覆盖数 | 覆盖率 |
+|------|-------------|-------------------|--------|
+| **宪法（Constitution）** | 19 章相关条款 | 19 | **100%** |
+| **蓝图（Blueprint PDF）** | 6 | 6 | **100%** |
+| **路线图（Roadmap PDF）** | 8 | 8 | **100%** |
+| **头脑风暴** | 12 | 12 | **100%** |
+| **AI Agent Native 原则** | 35 | 35 | **100%** |
+| **Harness 工程原则** | 20 | 20 | **100%** |
+| **ADR-03** | 6 | 6 | **100%** |
+| **门控安全（GOV）** | 5 | 5 | **100%** |
+| **Phase 3 AC 映射** | 21 | 21 | **100%** |
+| **总计** | **132** | **132** | **100%** |
+
+**Sprint 6 验证计划与宪法、蓝图、路线图、头脑风暴、AI Agent Native 原则、Harness 工程原则、ADR-03、治理门控完全对齐，无覆盖缺口。**
+
+---
+
+#### Sprint 6 · Day-by-Day 实施细节
+
+> **前提说明：** Sprint 5（Day 17–24）已全部完成并通过验收（100% 合规）。Sprint 6 从 **Day 25** 开始（Week 11），至 **Day 34** 结束（Week 12）。Sprint 6 聚焦于**全量验证 + 压测 + 证据归档**，不新增功能代码。
+>
+> | Day | 主题 | 对应任务 | 覆盖 AC |
+> |-----|------|---------|---------|
+> | 25 | 基线冻结 + DataOS 基础设施 AC | 6.1 | AC-P3-01~04 |
+> | 26 | Event Lake + Ingestion Agent 验证 | 6.2 (前半) | AC-P3-05~07 |
+> | 27 | Feature Store 缓存 + CH 聚合性能 | 6.2 (后半) | AC-P3-08~09 |
+> | 28 | Decision Memory 全量验证 | 6.3 | AC-P3-10~13 |
+> | 29 | Agent 升级效果验证 | 6.4 | AC-P3-14~17 |
+> | 30 | 数据隔离 & 安全 AC（三层隔离 + 降级） | 6.5 (前半) | AC-P3-18~19 |
+> | 31 | pgvector 隔离 + TTL + `dataos-isolation.test.ts` | 6.5 (后半) + 6.6 | AC-P3-20~21 |
+> | 32 | CH 写入压测 + pgvector 检索压测 | 6.7 + 6.8 | AC-P3-09 加强 |
+> | 33 | 验收证据归档 + 文档更新 | 6.9 | — |
+> | 34 | 21 项 AC 总验收 + Phase 4 就绪 | 6.10 | AC-P3-01~21 |
+
+---
+
+##### Day 25 — 基线冻结 + DataOS 基础设施 AC（AC-P3-01~04）
+
+---
+
+> **🃏 CARD-D25-01 · 基线冻结：版本 / 依赖 / 环境锁定**
+>
+> **类型：** 验证 + 文档
+> **耗时：** 45 min
+> **目标文件：** `docs/ops/sprint6-p3/sprint6-p3-baseline.md`（新建）
+>
+> **执行步骤：**
+>
+> ```bash
+> # 1. 记录 git SHA
+> git rev-parse HEAD
+>
+> # 2. 记录 Node / pnpm 版本
+> node -v && pnpm -v
+>
+> # 3. 记录 Docker 镜像版本
+> docker-compose -f docker-compose.dataos.yml config | grep image
+>
+> # 4. 记录 pnpm-lock.yaml SHA
+> shasum pnpm-lock.yaml
+>
+> # 5. 全量 typecheck + test 基线
+> pnpm typecheck 2>&1 | tail -5
+> pnpm test 2>&1 | tail -10
+> ```
+>
+> **产出文件模板：**
+> ```markdown
+> # Phase 3 Sprint 6 基线
+> - Git SHA: ________
+> - Node: ________  pnpm: ________
+> - ClickHouse image: ________
+> - DataOS PG image: ________
+> - Redis image: ________
+> - pnpm-lock.yaml SHA: ________
+> - Typecheck: ✅ 0 errors
+> - Test: ✅ _____ passed / 0 failed
+> - 冻结时间: ________
+> ```
+>
+> **验证：** 文件创建完毕，各字段填入实际值
+>
+> **产出：** Sprint 6 验证环境基线锁定
+
+---
+
+> **🃏 CARD-D25-02 · AC-P3-01：DataOS API 独立运行验证**
+>
+> **类型：** 验证
+> **耗时：** 30 min
+> **对应验收：** AC-P3-01 — DataOS API 独立运行（端口 3300），`/health` 返回 200
+>
+> **执行步骤：**
+>
+> ```bash
+> # 1. 启动 DataOS 全栈
+> docker-compose -f docker-compose.dataos.yml up -d
+>
+> # 2. 等待服务就绪
+> sleep 10
+>
+> # 3. 健康检查
+> curl -sf http://localhost:3300/health | jq .
+> # 期望：{ "ok": true, "service": "dataos-api" }
+>
+> # 4. 确认端口 3300
+> curl -sf http://localhost:3300/health -o /dev/null -w '%{http_code}\n'
+> # 期望：200
+>
+> # 5. 确认 /metrics 端点
+> curl -sf http://localhost:3300/metrics | head -5
+> # 期望：# HELP ... Prometheus 格式文本
+> ```
+>
+> **证据记录：** 截取 curl 输出 → `docs/ops/sprint6-p3/evidence/day25-ac01.md`
+>
+> **验证：** `/health` 返回 `{ "ok": true }` · HTTP 200
+>
+> **产出：** AC-P3-01 ✅
+
+---
+
+> **🃏 CARD-D25-03 · AC-P3-02：ClickHouse 表验证**
+>
+> **类型：** 验证
+> **耗时：** 30 min
+> **对应验收：** AC-P3-02 — ClickHouse 正常启动，`electroos_events.events` / `price_events` 表已创建
+>
+> **执行步骤：**
+>
+> ```bash
+> # 1. 确认 ClickHouse 容器运行
+> docker-compose -f docker-compose.dataos.yml ps | grep clickhouse
+> # 期望：状态 Up
+>
+> # 2. 验证 events 表存在
+> curl -s 'http://localhost:8123/?query=SHOW+TABLES+FROM+electroos_events'
+> # 期望输出含：events 和 price_events
+>
+> # 3. 验证表结构
+> curl -s 'http://localhost:8123/?query=DESCRIBE+TABLE+electroos_events.events'
+> curl -s 'http://localhost:8123/?query=DESCRIBE+TABLE+electroos_events.price_events'
+>
+> # 4. 验证 TTL（AC-P3-21 预验证）
+> curl -s 'http://localhost:8123/?query=SHOW+CREATE+TABLE+electroos_events.events' | grep TTL
+> ```
+>
+> **证据记录：** 截取输出 → `docs/ops/sprint6-p3/evidence/day25-ac02.md`
+>
+> **验证：** `SHOW TABLES` 返回 `events` + `price_events` · `DESCRIBE` 含 `tenant_id` 列
+>
+> **产出：** AC-P3-02 ✅
+
+---
+
+> **🃏 CARD-D25-04 · AC-P3-03：PostgreSQL pgvector 验证**
+>
+> **类型：** 验证
+> **耗时：** 30 min
+> **对应验收：** AC-P3-03 — PostgreSQL pgvector 扩展已启用，`product_features` + `decision_memory` 表已创建
+>
+> **执行步骤：**
+>
+> ```bash
+> # 1. 连接 DataOS PG（端口 5434）
+> PGPASSWORD=dataos_dev psql -h localhost -p 5434 -U dataos_user -d dataos_db -c "SELECT extname FROM pg_extension WHERE extname='vector';"
+> # 期望：vector
+>
+> # 2. 验证 product_features 表
+> PGPASSWORD=dataos_dev psql -h localhost -p 5434 -U dataos_user -d dataos_db -c "\d product_features"
+> # 期望：含 tenant_id, platform, product_id, updated_at 等列
+>
+> # 3. 验证 decision_memory 表
+> PGPASSWORD=dataos_dev psql -h localhost -p 5434 -U dataos_user -d dataos_db -c "\d decision_memory"
+> # 期望：含 tenant_id, agent_id, context_vector(vector(1536)) 等列
+>
+> # 4. 验证 pgvector 可用
+> PGPASSWORD=dataos_dev psql -h localhost -p 5434 -U dataos_user -d dataos_db -c "SELECT '[1,2,3]'::vector(3);"
+> # 期望：返回向量值
+>
+> # 5. 验证唯一约束
+> PGPASSWORD=dataos_dev psql -h localhost -p 5434 -U dataos_user -d dataos_db -c "\di" | grep product_features
+> # 期望：含 UNIQUE(tenant_id, platform, product_id) 索引
+> ```
+>
+> **证据记录：** 截取输出 → `docs/ops/sprint6-p3/evidence/day25-ac03.md`
+>
+> **验证：** pgvector 扩展存在 · 两表结构正确 · 向量操作可用
+>
+> **产出：** AC-P3-03 ✅
+
+---
+
+> **🃏 CARD-D25-05 · AC-P3-04：Redis 缓存延迟验证**
+>
+> **类型：** 验证
+> **耗时：** 30 min
+> **对应验收：** AC-P3-04 — Redis 连接正常，Feature Store 缓存读写延迟 < 5ms
+>
+> **执行步骤：**
+>
+> ```bash
+> # 1. 确认 Redis 容器运行
+> docker-compose -f docker-compose.dataos.yml ps | grep redis
+>
+> # 2. Redis PING
+> docker exec $(docker-compose -f docker-compose.dataos.yml ps -q dataos-redis) redis-cli PING
+> # 期望：PONG
+>
+> # 3. 写入 + 读取延迟测试
+> docker exec $(docker-compose -f docker-compose.dataos.yml ps -q dataos-redis) redis-cli --latency -i 1 -c 100
+> # 期望：avg < 5ms
+>
+> # 4. 通过 DataOS API 验证 Feature Store 缓存路径
+> # 先 upsert 一条 feature
+> curl -sf -X POST http://localhost:3300/internal/v1/features/upsert \
+>   -H 'Content-Type: application/json' \
+>   -H 'X-DataOS-Internal-Key: dev-dataos-internal-key' \
+>   -d '{"tenantId":"00000000-0000-0000-0000-000000000001","platform":"shopify","productId":"PERF-001","priceCurrent":19.99}' | jq .
+>
+> # 再读取（应命中缓存）
+> time curl -sf http://localhost:3300/internal/v1/features/shopify/PERF-001 \
+>   -H 'X-DataOS-Internal-Key: dev-dataos-internal-key' \
+>   -H 'X-Tenant-Id: 00000000-0000-0000-0000-000000000001' | jq .
+> # 期望：real < 0.01s（含网络开销）
+> ```
+>
+> **证据记录：** 截取 latency 输出 + curl 耗时 → `docs/ops/sprint6-p3/evidence/day25-ac04.md`
+>
+> **验证：** Redis PONG · 延迟 < 5ms · Feature Store 缓存读写正常
+>
+> **产出：** AC-P3-04 ✅
+
+---
+
+> **🃏 CARD-D25-06 · Day 25 回归**
+>
+> ```bash
+> pnpm typecheck
+> pnpm test
+> ```
+>
+> **期望：** 0 errors · 0 failures（与基线一致——Sprint 6 不引入功能变更）
+
+---
+
+**Day 25 卡片执行顺序汇总：**
+
+```
+09:00  CARD-D25-01  基线冻结                        (45min)
+09:45  CARD-D25-02  AC-P3-01 DataOS API 健康         (30min)
+10:15  CARD-D25-03  AC-P3-02 ClickHouse 表验证       (30min)
+10:45  CARD-D25-04  AC-P3-03 pgvector 验证           (30min)
+11:15  CARD-D25-05  AC-P3-04 Redis 延迟验证          (30min)
+11:45  CARD-D25-06  回归                              (15min)
+12:00  Day 25 完成 → AC-P3-01~04 ✅
+```
+
+---
+
+##### Day 26 — Event Lake + Ingestion Agent 验证（AC-P3-05~07）
+
+---
+
+> **🃏 CARD-D26-01 · AC-P3-05：Price Sentinel 调价后 ClickHouse `price_events` 有记录**
+>
+> **类型：** 端到端验证
+> **耗时：** 1.5h
+> **对应验收：** AC-P3-05 — Price Sentinel 调价后，ClickHouse `price_events` 表有对应记录
+>
+> **执行步骤：**
+>
+> ```bash
+> # 1. 确保 DataOS 全栈运行
+> docker-compose -f docker-compose.dataos.yml up -d
+>
+> # 2. 触发 Price Sentinel 执行（需有 agent 行和有效 credential）
+> # 通过 API execute 路由触发 price-sentinel agent
+> # POST /api/v1/agents/:id/execute
+> # 等待执行完成（含 recordPriceEvent 写入）
+>
+> # 3. 等待 BullMQ → Ingestion Worker 处理（约 5-10 秒）
+> sleep 15
+>
+> # 4. 查询 ClickHouse price_events
+> curl -s 'http://localhost:8123/?query=SELECT+count()+FROM+electroos_events.price_events'
+> # 期望：≥ 1
+>
+> # 5. 验证记录内容
+> curl -s 'http://localhost:8123/?query=SELECT+product_id,price_before,price_after,change_pct,approved+FROM+electroos_events.price_events+ORDER+BY+event_time+DESC+LIMIT+3+FORMAT+JSONEachRow'
+> # 期望：含 product_id / price_before / price_after / change_pct 字段
+> ```
+>
+> **证据记录：** 截取查询结果 → `docs/ops/sprint6-p3/evidence/day26-ac05.md`
+>
+> **验证：** `price_events` 行数 ≥ 1 · 字段完整
+>
+> **产出：** AC-P3-05 ✅
+
+---
+
+> **🃏 CARD-D26-02 · AC-P3-06：Ingestion Agent 无丢失验证**
+>
+> **类型：** 端到端验证
+> **耗时：** 1.5h
+> **对应验收：** AC-P3-06 — Ingestion Agent 持续运行，ElectroOS 所有 Agent 操作均写入 `events` 表，无丢失
+>
+> **执行步骤：**
+>
+> ```bash
+> # 1. 查询 ElectroOS PG agent_events 总数
+> PGPASSWORD=dev_password psql -h localhost -p 5432 -U dev_user -d electro_db \
+>   -c "SELECT count(*) FROM agent_events;"
+> # 记录为 N_pg
+>
+> # 2. 查询 ClickHouse events 总数
+> curl -s 'http://localhost:8123/?query=SELECT+count()+FROM+electroos_events.events'
+> # 记录为 N_ch
+>
+> # 3. 触发多个 Agent 执行（覆盖 7 种 Agent 类型）
+> # 执行至少 3 次不同 Agent → 等待 30 秒
+> sleep 30
+>
+> # 4. 重新查询两端计数
+> # N_pg_after 和 N_ch_after
+> # 验证增量一致：N_ch_after - N_ch == N_pg_after - N_pg（允许 BullMQ 延迟 ±几秒）
+>
+> # 5. 检查 BullMQ 队列深度
+> curl -sf http://localhost:3300/metrics | grep dataos_ingestion
+> # 期望：processed > 0 · failed = 0（或极低）
+> ```
+>
+> **证据记录：** PG vs CH 计数对比表 → `docs/ops/sprint6-p3/evidence/day26-ac06.md`
+>
+> **验证：** CH events 行数 ≥ PG agent_events 对应的事件数 · 无丢失
+>
+> **产出：** AC-P3-06 ✅
+
+---
+
+> **🃏 CARD-D26-03 · AC-P3-07：Feature Agent 每 15 分钟触发验证**
+>
+> **类型：** 定时任务验证
+> **耗时：** 1h（含等待 15 分钟调度周期）
+> **对应验收：** AC-P3-07 — Feature Agent 每 15 分钟触发，`product_features.updated_at` 持续更新
+>
+> **执行步骤：**
+>
+> ```bash
+> # 1. 记录当前 product_features 最新 updated_at
+> PGPASSWORD=dataos_dev psql -h localhost -p 5434 -U dataos_user -d dataos_db \
+>   -c "SELECT max(updated_at) AS latest FROM product_features;"
+> # 记录为 T1
+>
+> # 2. 等待 ≥ 15 分钟（Feature Agent 调度周期）
+> sleep 960
+>
+> # 3. 再次查询
+> PGPASSWORD=dataos_dev psql -h localhost -p 5434 -U dataos_user -d dataos_db \
+>   -c "SELECT max(updated_at) AS latest FROM product_features;"
+> # 记录为 T2
+>
+> # 4. 验证 T2 > T1
+>
+> # 5. 检查 Prometheus 指标
+> curl -sf http://localhost:3300/metrics | grep feature_agent
+> # 期望：feature_agent_runs_total > 0
+> ```
+>
+> **证据记录：** T1 / T2 对比 + metrics → `docs/ops/sprint6-p3/evidence/day26-ac07.md`
+>
+> **验证：** `updated_at` 在 15 分钟内发生更新 · Feature Agent runs > 0
+>
+> **产出：** AC-P3-07 ✅
+
+---
+
+> **🃏 CARD-D26-04 · Day 26 回归**
+>
+> ```bash
+> pnpm typecheck
+> pnpm test
+> ```
+>
+> **期望：** 0 errors · 0 failures
+
+---
+
+**Day 26 卡片执行顺序汇总：**
+
+```
+09:00  CARD-D26-01  AC-P3-05 price_events 验证       (1.5h)
+10:30  CARD-D26-02  AC-P3-06 Ingestion 无丢失验证     (1.5h)
+12:00  CARD-D26-03  AC-P3-07 Feature Agent 15min 触发 (1h，含等待)
+13:00  CARD-D26-04  回归                               (15min)
+13:15  Day 26 完成 → AC-P3-05~07 ✅
+```
+
+---
+
+##### Day 27 — Feature Store 缓存命中率 + CH 聚合性能（AC-P3-08~09）
+
+---
+
+> **🃏 CARD-D27-01 · AC-P3-08：Feature Store Redis 缓存命中率 > 90%**
+>
+> **类型：** 性能验证
+> **耗时：** 1.5h
+> **对应验收：** AC-P3-08 — Feature Store Redis 缓存命中率 > 90%（Prometheus 指标验证）
+>
+> **执行步骤：**
+>
+> ```bash
+> # 1. 重置指标（重启 DataOS API 或记录当前基线）
+> curl -sf http://localhost:3300/metrics | grep -E 'dataos_feature_cache_(hits|misses)_total'
+> # 记录 hits_before / misses_before
+>
+> # 2. 批量读取 Feature Store（模拟 Agent 执行场景）
+> # 同一产品读取 20 次 → 第 1 次 miss + 19 次 hit
+> for i in $(seq 1 20); do
+>   curl -sf http://localhost:3300/internal/v1/features/shopify/PERF-001 \
+>     -H 'X-DataOS-Internal-Key: dev-dataos-internal-key' \
+>     -H 'X-Tenant-Id: 00000000-0000-0000-0000-000000000001' > /dev/null
+> done
+>
+> # 3. 多产品混合读取（模拟真实场景）
+> for pid in P001 P002 P003 P004 P005; do
+>   for i in $(seq 1 10); do
+>     curl -sf http://localhost:3300/internal/v1/features/shopify/$pid \
+>       -H 'X-DataOS-Internal-Key: dev-dataos-internal-key' \
+>       -H 'X-Tenant-Id: 00000000-0000-0000-0000-000000000001' > /dev/null
+>   done
+> done
+>
+> # 4. 检查 Prometheus 指标
+> curl -sf http://localhost:3300/metrics | grep -E 'dataos_feature_cache_(hits|misses)_total'
+> # 计算命中率 = hits / (hits + misses)
+> # 期望：> 90%
+> ```
+>
+> **证据记录：** hits/misses 数值 + 命中率计算 → `docs/ops/sprint6-p3/evidence/day27-ac08.md`
+>
+> **验证：** 缓存命中率 > 90%
+>
+> **产出：** AC-P3-08 ✅
+
+---
+
+> **🃏 CARD-D27-02 · AC-P3-09：ClickHouse 聚合查询 < 2s（基线验证）**
+>
+> **类型：** 性能验证
+> **耗时：** 2h
+> **对应验收：** AC-P3-09 — ClickHouse 查询性能：100 万条事件聚合查询 < 2s
+>
+> **执行步骤：**
+>
+> ```bash
+> # 1. 检查当前 events 行数
+> curl -s 'http://localhost:8123/?query=SELECT+count()+FROM+electroos_events.events'
+>
+> # 2. 如行数不足 100 万，生成测试数据
+> # 编写批量插入脚本（或使用 clickhouse-client INSERT）
+> # 注意：测试数据需含不同 tenant_id / agent_id / event_type
+> node -e "
+> const rows = [];
+> for (let i = 0; i < 1000000; i++) {
+>   rows.push({
+>     event_id: crypto.randomUUID(),
+>     tenant_id: 'T-' + String(i % 10).padStart(3,'0'),
+>     agent_id: ['price-sentinel','product-scout','content-writer'][i%3],
+>     event_type: ['execute','price_changed','content_generated'][i%3],
+>     entity_id: 'P-' + String(i % 1000).padStart(5,'0'),
+>     payload: JSON.stringify({test: true}),
+>     event_time: new Date(Date.now() - i * 60000).toISOString()
+>   });
+> }
+> // 分批 INSERT ...
+> "
+>
+> # 3. 执行聚合查询并计时
+> time curl -s 'http://localhost:8123/' --data-binary "
+>   SELECT
+>     agent_id,
+>     event_type,
+>     count() AS cnt,
+>     uniqExact(tenant_id) AS tenants,
+>     min(event_time) AS first_event,
+>     max(event_time) AS last_event
+>   FROM electroos_events.events
+>   GROUP BY agent_id, event_type
+>   ORDER BY cnt DESC
+>   FORMAT JSONEachRow
+> "
+> # 期望：real < 2s
+>
+> # 4. 租户维度聚合
+> time curl -s 'http://localhost:8123/' --data-binary "
+>   SELECT
+>     tenant_id,
+>     count() AS total_events,
+>     uniqExact(agent_id) AS agents,
+>     max(event_time) AS last_activity
+>   FROM electroos_events.events
+>   GROUP BY tenant_id
+>   ORDER BY total_events DESC
+>   FORMAT JSONEachRow
+> "
+> # 期望：real < 2s
+> ```
+>
+> **证据记录：** 行数 + 查询耗时 → `docs/ops/sprint6-p3/evidence/day27-ac09.md`
+>
+> **验证：** 100 万行聚合查询 < 2s
+>
+> **产出：** AC-P3-09 ✅（Day 32 压测时进一步加强验证）
+
+---
+
+> **🃏 CARD-D27-03 · Day 27 回归**
+>
+> ```bash
+> pnpm typecheck
+> pnpm test
+> ```
+
+---
+
+**Day 27 卡片执行顺序汇总：**
+
+```
+09:00  CARD-D27-01  AC-P3-08 缓存命中率验证          (1.5h)
+10:30  CARD-D27-02  AC-P3-09 CH 聚合性能基线          (2h)
+12:30  CARD-D27-03  回归                               (15min)
+12:45  Day 27 完成 → AC-P3-08~09 ✅
+```
+
+---
+
+##### Day 28 — Decision Memory 全量验证（AC-P3-10~13）
+
+---
+
+> **🃏 CARD-D28-01 · AC-P3-10：Price Sentinel 调价后 `decision_memory` 有记录**
+>
+> **类型：** 端到端验证
+> **耗时：** 1h
+> **对应验收：** AC-P3-10 — Price Sentinel 每次调价后，`decision_memory` 表有对应记录（含 context_vector）
+>
+> **执行步骤：**
+>
+> ```bash
+> # 1. 触发 Price Sentinel 执行
+> # POST /api/v1/agents/:id/execute（price-sentinel 类型）
+>
+> # 2. 查询 decision_memory 表
+> PGPASSWORD=dataos_dev psql -h localhost -p 5434 -U dataos_user -d dataos_db \
+>   -c "SELECT id, tenant_id, agent_id, created_at,
+>        length(context_vector::text) AS vec_len
+>       FROM decision_memory
+>       WHERE agent_id = 'price-sentinel'
+>       ORDER BY created_at DESC LIMIT 5;"
+> # 期望：≥ 1 行 · vec_len > 0（context_vector 非空）
+>
+> # 3. 验证 context_vector 维度
+> PGPASSWORD=dataos_dev psql -h localhost -p 5434 -U dataos_user -d dataos_db \
+>   -c "SELECT vector_dims(context_vector) FROM decision_memory LIMIT 1;"
+> # 期望：1536（OpenAI text-embedding-3-small 维度）或确定性 fallback 维度
+> ```
+>
+> **证据记录：** 查询结果 → `docs/ops/sprint6-p3/evidence/day28-ac10.md`
+>
+> **验证：** `decision_memory` 含 price-sentinel 记录 · `context_vector` 非空
+>
+> **产出：** AC-P3-10 ✅
+
+---
+
+> **🃏 CARD-D28-02 · AC-P3-11：Insight Agent 回写 outcome 验证**
+>
+> **类型：** 端到端验证
+> **耗时：** 1h
+> **对应验收：** AC-P3-11 — Insight Agent 每周一运行，将 7 天前的决策回写 outcome
+>
+> **执行步骤：**
+>
+> ```bash
+> # 1. 检查 Insight Agent 运行记录
+> curl -sf http://localhost:3300/metrics | grep insight_agent
+> # 查看 insight_agent_runs_total
+>
+> # 2. 查询有 outcome 的 decision_memory
+> PGPASSWORD=dataos_dev psql -h localhost -p 5434 -U dataos_user -d dataos_db \
+>   -c "SELECT id, agent_id, outcome IS NOT NULL AS has_outcome,
+>        outcome_written_at
+>       FROM decision_memory
+>       WHERE outcome IS NOT NULL
+>       ORDER BY outcome_written_at DESC LIMIT 10;"
+> # 期望：有 outcome_written_at 非空的记录
+>
+> # 3. 如 Insight Agent 尚未自然触发（非周一），手动触发验证
+> # 通过 DataOS API 内部接口或直接调用 worker
+> curl -sf -X POST http://localhost:3300/internal/v1/memory/outcome \
+>   -H 'Content-Type: application/json' \
+>   -H 'X-DataOS-Internal-Key: dev-dataos-internal-key' \
+>   -d '{"decisionId":"<id-from-step-2>","outcome":{"applied":true,"revenueChange":0.05}}' | jq .
+>
+> # 4. 验证 outcome 写入成功
+> PGPASSWORD=dataos_dev psql -h localhost -p 5434 -U dataos_user -d dataos_db \
+>   -c "SELECT id, outcome, outcome_written_at FROM decision_memory WHERE outcome IS NOT NULL ORDER BY outcome_written_at DESC LIMIT 3;"
+> ```
+>
+> **证据记录：** Insight Agent 指标 + outcome 查询 → `docs/ops/sprint6-p3/evidence/day28-ac11.md`
+>
+> **验证：** Insight Agent 已运行（或手动触发） · outcome 已回写
+>
+> **产出：** AC-P3-11 ✅
+
+---
+
+> **🃏 CARD-D28-03 · AC-P3-12：Decision Memory 向量召回 ≥ 3 条**
+>
+> **类型：** 功能验证
+> **耗时：** 1h
+> **对应验收：** AC-P3-12 — Decision Memory 向量召回：相似情境下正确返回 ≥ 3 条历史案例
+>
+> **执行步骤：**
+>
+> ```bash
+> # 1. 确认 decision_memory 行数足够
+> PGPASSWORD=dataos_dev psql -h localhost -p 5434 -U dataos_user -d dataos_db \
+>   -c "SELECT count(*) FROM decision_memory;"
+> # 需 ≥ 3 条（同租户同 agent_id）
+>
+> # 2. 通过 DataOS API 测试 recall
+> curl -sf -X POST http://localhost:3300/internal/v1/memory/recall \
+>   -H 'Content-Type: application/json' \
+>   -H 'X-DataOS-Internal-Key: dev-dataos-internal-key' \
+>   -H 'X-Tenant-Id: 00000000-0000-0000-0000-000000000001' \
+>   -d '{"agentId":"price-sentinel","context":{"productId":"P001","currentPrice":29.99,"category":"electronics"}}' | jq .
+> # 期望：返回数组长度 ≥ 3
+>
+> # 3. 验证返回的 memories 含有意义的 context + action
+> # 确认每条记录含 similarity score
+>
+> # 4. 运行现有 unit test 确认
+> pnpm --filter @patioer/dataos test -- --reporter=verbose 2>&1 | grep -i "recall"
+> ```
+>
+> **证据记录：** recall 返回结果 → `docs/ops/sprint6-p3/evidence/day28-ac12.md`
+>
+> **验证：** 召回结果 ≥ 3 条 · 含 similarity score
+>
+> **产出：** AC-P3-12 ✅
+
+---
+
+> **🃏 CARD-D28-04 · AC-P3-13：outcome 数据量验证**
+>
+> **类型：** 数据量验证
+> **耗时：** 30 min
+> **对应验收：** AC-P3-13 — 有 outcome 数据的 Decision Memory 数量 > 50 条（运行 2 周以上）
+>
+> **执行步骤：**
+>
+> ```bash
+> # 1. 查询有 outcome 的记录数
+> PGPASSWORD=dataos_dev psql -h localhost -p 5434 -U dataos_user -d dataos_db \
+>   -c "SELECT count(*) AS with_outcome FROM decision_memory WHERE outcome IS NOT NULL;"
+> # 期望：> 50
+>
+> # 2. 如不足 50 条
+> # 方案 A：确认系统已运行 ≥ 2 周，Insight Agent 定期执行
+> # 方案 B：如 开发/测试环境，记录当前值并标注 "需真实运行 2 周后复验"
+>
+> # 3. 查看 outcome 时间分布
+> PGPASSWORD=dataos_dev psql -h localhost -p 5434 -U dataos_user -d dataos_db \
+>   -c "SELECT date_trunc('day', outcome_written_at) AS day, count(*)
+>       FROM decision_memory WHERE outcome IS NOT NULL
+>       GROUP BY day ORDER BY day;"
+> ```
+>
+> **证据记录：** 计数 + 分布 → `docs/ops/sprint6-p3/evidence/day28-ac13.md`
+>
+> **验证：** outcome 记录数 > 50（或标注待真实运行后复验）
+>
+> **产出：** AC-P3-13 ✅ / ⏳
+
+---
+
+> **🃏 CARD-D28-05 · Day 28 回归**
+>
+> ```bash
+> pnpm typecheck
+> pnpm test
+> ```
+
+---
+
+**Day 28 卡片执行顺序汇总：**
+
+```
+09:00  CARD-D28-01  AC-P3-10 调价→decision_memory      (1h)
+10:00  CARD-D28-02  AC-P3-11 Insight Agent outcome      (1h)
+11:00  CARD-D28-03  AC-P3-12 向量召回 ≥3 条            (1h)
+12:00  CARD-D28-04  AC-P3-13 outcome 数据量             (30min)
+12:30  CARD-D28-05  回归                                 (15min)
+12:45  Day 28 完成 → AC-P3-10~13 ✅
+```
+
+---
+
+##### Day 29 — Agent 升级效果验证（AC-P3-14~17）
+
+---
+
+> **🃏 CARD-D29-01 · AC-P3-14：Price Sentinel prompt 含 `conv_rate_7d` 特征**
+>
+> **类型：** 端到端验证
+> **耗时：** 1h
+> **对应验收：** AC-P3-14 — Price Sentinel 接入 Feature Store 后，prompt 中可见 `conv_rate_7d` 特征
+>
+> **执行步骤：**
+>
+> ```bash
+> # 1. 确保 Feature Store 有数据（Day 26 CARD-D26-03 已验证）
+> PGPASSWORD=dataos_dev psql -h localhost -p 5434 -U dataos_user -d dataos_db \
+>   -c "SELECT product_id, price_current, conv_rate_7d FROM product_features LIMIT 5;"
+>
+> # 2. 触发 Price Sentinel 执行
+> # POST /api/v1/agents/:id/execute
+>
+> # 3. 查询 agent_events 日志验证 features 注入
+> PGPASSWORD=dev_password psql -h localhost -p 5432 -U dev_user -d electro_db \
+>   -c "SELECT payload->>'action' AS action,
+>        payload->'payload'->>'features' IS NOT NULL AS has_features
+>       FROM agent_events
+>       WHERE agent_type = 'price-sentinel'
+>        AND payload->>'action' LIKE '%dataos_context%'
+>       ORDER BY created_at DESC LIMIT 3;"
+> # 期望：has_features = true
+>
+> # 4. 验证 features 含 conv_rate_7d
+> PGPASSWORD=dev_password psql -h localhost -p 5432 -U dev_user -d electro_db \
+>   -c "SELECT payload->'payload'->'features'->>'conv_rate_7d'
+>       FROM agent_events
+>       WHERE agent_type = 'price-sentinel'
+>        AND payload->>'action' LIKE '%dataos_context%'
+>       ORDER BY created_at DESC LIMIT 1;"
+> # 期望：非空数值
+>
+> # 5. 运行 Price Sentinel DataOS 相关测试
+> pnpm --filter @patioer/agent-runtime test -- --reporter=verbose 2>&1 | grep -i "features"
+> ```
+>
+> **证据记录：** agent_events 含 features 截图 → `docs/ops/sprint6-p3/evidence/day29-ac14.md`
+>
+> **验证：** prompt 日志含 `conv_rate_7d` 特征值
+>
+> **产出：** AC-P3-14 ✅
+
+---
+
+> **🃏 CARD-D29-02 · AC-P3-15：Price Sentinel prompt 含历史调价案例**
+>
+> **类型：** 端到端验证
+> **耗时：** 1h
+> **对应验收：** AC-P3-15 — Price Sentinel 接入 Decision Memory 后，prompt 中可见历史调价案例
+>
+> **执行步骤：**
+>
+> ```bash
+> # 1. 确保 decision_memory 有 price-sentinel 记录（Day 28 已验证）
+>
+> # 2. 触发 Price Sentinel 执行
+> # POST /api/v1/agents/:id/execute
+>
+> # 3. 查询 agent_events 日志验证 memories 注入
+> PGPASSWORD=dev_password psql -h localhost -p 5432 -U dev_user -d electro_db \
+>   -c "SELECT payload->'payload'->>'memories' IS NOT NULL AS has_memories
+>       FROM agent_events
+>       WHERE agent_type = 'price-sentinel'
+>        AND payload->>'action' LIKE '%dataos_context%'
+>       ORDER BY created_at DESC LIMIT 3;"
+> # 期望：has_memories = true
+>
+> # 4. 验证 memories 含历史案例（数组长度 > 0）
+> PGPASSWORD=dev_password psql -h localhost -p 5432 -U dev_user -d electro_db \
+>   -c "SELECT jsonb_array_length(payload->'payload'->'memories') AS memory_count
+>       FROM agent_events
+>       WHERE agent_type = 'price-sentinel'
+>        AND payload->>'action' LIKE '%dataos_context%'
+>       ORDER BY created_at DESC LIMIT 1;"
+> # 期望：> 0
+> ```
+>
+> **证据记录：** memories 注入证据 → `docs/ops/sprint6-p3/evidence/day29-ac15.md`
+>
+> **验证：** prompt 日志含历史调价案例
+>
+> **产出：** AC-P3-15 ✅
+
+---
+
+> **🃏 CARD-D29-03 · AC-P3-16：Content Writer Agent 正常生成商品文案**
+>
+> **类型：** 端到端验证
+> **耗时：** 1h
+> **对应验收：** AC-P3-16 — Content Writer Agent 上线，on-demand 触发正常生成商品文案
+>
+> **执行步骤：**
+>
+> ```bash
+> # 1. 确认 content-writer agent 已注册
+> pnpm --filter @patioer/agent-runtime test -- --reporter=verbose 2>&1 | grep "content-writer"
+>
+> # 2. 触发 Content Writer 执行
+> # POST /api/v1/agents/:id/execute（content-writer 类型 agent）
+> # goalContext: { productId: "P001", platform: "shopify", tone: "professional" }
+>
+> # 3. 验证响应
+> # 期望 response 含：
+> # - contentWriter.title（非空字符串）
+> # - contentWriter.description（非空字符串）
+> # - contentWriter.bulletPoints（非空数组）
+> # - contentWriter.seoKeywords（非空数组）
+>
+> # 4. 检查 agent_events 审计日志
+> PGPASSWORD=dev_password psql -h localhost -p 5432 -U dev_user -d electro_db \
+>   -c "SELECT payload->>'action' FROM agent_events
+>       WHERE agent_type = 'content-writer'
+>       ORDER BY created_at DESC LIMIT 5;"
+> # 期望含：content_writer.run.started / content_writer.run.completed
+>
+> # 5. 检查 Event Lake 记录
+> curl -s 'http://localhost:8123/?query=SELECT+count()+FROM+electroos_events.events+WHERE+agent_id=%27content-writer%27'
+> # 期望：> 0
+> ```
+>
+> **证据记录：** 执行响应 + 审计日志 → `docs/ops/sprint6-p3/evidence/day29-ac16.md`
+>
+> **验证：** Content Writer 返回完整文案结果 · 审计链路完整
+>
+> **产出：** AC-P3-16 ✅
+
+---
+
+> **🃏 CARD-D29-04 · AC-P3-17：Market Intel Agent 更新 Feature Store 竞品特征**
+>
+> **类型：** 端到端验证
+> **耗时：** 1h
+> **对应验收：** AC-P3-17 — Market Intel Agent 上线，每周一更新 Feature Store 竞品价格特征
+>
+> **执行步骤：**
+>
+> ```bash
+> # 1. 确认 market-intel agent 已注册
+> pnpm --filter @patioer/agent-runtime test -- --reporter=verbose 2>&1 | grep "market-intel"
+>
+> # 2. 触发 Market Intel 执行
+> # POST /api/v1/agents/:id/execute（market-intel 类型 agent）
+> # goalContext: { platforms: ["shopify"], maxProducts: 10 }
+>
+> # 3. 验证响应
+> # 期望 response 含：
+> # - marketIntel.runId（非空）
+> # - marketIntel.analyzedProducts（> 0）
+> # - marketIntel.insights（数组含 competitorMinPrice / pricePosition 等）
+>
+> # 4. 验证 Feature Store 竞品特征已更新
+> PGPASSWORD=dataos_dev psql -h localhost -p 5434 -U dataos_user -d dataos_db \
+>   -c "SELECT product_id, competitor_min_price, competitor_avg_price, price_position, updated_at
+>       FROM product_features
+>       WHERE competitor_min_price IS NOT NULL
+>       ORDER BY updated_at DESC LIMIT 5;"
+> # 期望：有竞品价格特征
+>
+> # 5. 检查 Event Lake
+> curl -s 'http://localhost:8123/?query=SELECT+count()+FROM+electroos_events.events+WHERE+agent_id=%27market-intel%27'
+> # 期望：> 0
+> ```
+>
+> **证据记录：** 执行响应 + Feature Store 竞品数据 → `docs/ops/sprint6-p3/evidence/day29-ac17.md`
+>
+> **验证：** Market Intel 返回分析结果 · Feature Store 有竞品特征
+>
+> **产出：** AC-P3-17 ✅
+
+---
+
+> **🃏 CARD-D29-05 · Day 29 回归**
+>
+> ```bash
+> pnpm typecheck
+> pnpm test
+> ```
+
+---
+
+**Day 29 卡片执行顺序汇总：**
+
+```
+09:00  CARD-D29-01  AC-P3-14 PS prompt 含 features     (1h)
+10:00  CARD-D29-02  AC-P3-15 PS prompt 含 memories      (1h)
+11:00  CARD-D29-03  AC-P3-16 Content Writer 验证        (1h)
+12:00  CARD-D29-04  AC-P3-17 Market Intel 验证          (1h)
+13:00  CARD-D29-05  回归                                 (15min)
+13:15  Day 29 完成 → AC-P3-14~17 ✅
+```
+
+---
+
+##### Day 30 — 数据隔离 & 安全 AC 前半（AC-P3-18~19）
+
+---
+
+> **🃏 CARD-D30-01 · AC-P3-18：三层隔离测试全部通过**
+>
+> **类型：** 安全验证
+> **耗时：** 3h
+> **对应验收：** AC-P3-18 — 租户隔离测试全部通过（Event Lake + Feature Store + Decision Memory 三层）
+>
+> **执行步骤：**
+>
+> ```bash
+> # === Event Lake 隔离 ===
+>
+> # 1. 租户 A 写入事件
+> curl -sf -X POST http://localhost:3300/internal/v1/lake/events \
+>   -H 'Content-Type: application/json' \
+>   -H 'X-DataOS-Internal-Key: dev-dataos-internal-key' \
+>   -d '{"tenantId":"TENANT-A","agentId":"price-sentinel","eventType":"isolation-test","payload":{"secret":"A-data"}}' | jq .
+>
+> # 2. 租户 B 查询 → 不含租户 A 事件
+> curl -s 'http://localhost:8123/' --data-binary "
+>   SELECT count() FROM electroos_events.events
+>   WHERE tenant_id = 'TENANT-B' AND payload LIKE '%A-data%'
+> "
+> # 期望：0
+>
+> # === Feature Store 隔离 ===
+>
+> # 3. 租户 A upsert feature
+> curl -sf -X POST http://localhost:3300/internal/v1/features/upsert \
+>   -H 'Content-Type: application/json' \
+>   -H 'X-DataOS-Internal-Key: dev-dataos-internal-key' \
+>   -d '{"tenantId":"TENANT-A","platform":"shopify","productId":"ISO-001","priceCurrent":99.99}' | jq .
+>
+> # 4. 租户 B 读取 → 返回 null
+> curl -sf http://localhost:3300/internal/v1/features/shopify/ISO-001 \
+>   -H 'X-DataOS-Internal-Key: dev-dataos-internal-key' \
+>   -H 'X-Tenant-Id: TENANT-B' | jq .
+> # 期望：null 或 404
+>
+> # === Decision Memory 隔离 ===
+>
+> # 5. 租户 A record memory
+> curl -sf -X POST http://localhost:3300/internal/v1/memory/record \
+>   -H 'Content-Type: application/json' \
+>   -H 'X-DataOS-Internal-Key: dev-dataos-internal-key' \
+>   -H 'X-Tenant-Id: TENANT-A' \
+>   -d '{"agentId":"price-sentinel","context":{"productId":"ISO-001","price":99.99},"action":{"newPrice":89.99}}' | jq .
+>
+> # 6. 租户 B recall → 返回 0 条
+> curl -sf -X POST http://localhost:3300/internal/v1/memory/recall \
+>   -H 'Content-Type: application/json' \
+>   -H 'X-DataOS-Internal-Key: dev-dataos-internal-key' \
+>   -H 'X-Tenant-Id: TENANT-B' \
+>   -d '{"agentId":"price-sentinel","context":{"productId":"ISO-001","price":99.99}}' | jq .
+> # 期望：空数组 []
+>
+> # 7. 运行现有隔离相关单元测试
+> pnpm --filter @patioer/dataos test -- --reporter=verbose 2>&1 | grep -i "isolation\|tenant"
+> ```
+>
+> **证据记录：** 三层隔离验证结果 → `docs/ops/sprint6-p3/evidence/day30-ac18.md`
+>
+> **验证：** Event Lake / Feature Store / Decision Memory 三层隔离全部通过
+>
+> **产出：** AC-P3-18 ✅
+
+---
+
+> **🃏 CARD-D30-02 · AC-P3-19：DataOS 宕机降级验证**
+>
+> **类型：** 韧性验证
+> **耗时：** 1.5h
+> **对应验收：** AC-P3-19 — DataOS 实例故障时（停止容器），ElectroOS Agent 仍可正常运行（降级为无记忆模式）
+>
+> **执行步骤：**
+>
+> ```bash
+> # 1. 确认正常状态下 Agent 执行成功
+> # POST /api/v1/agents/:id/execute（price-sentinel）→ 200
+>
+> # 2. 停止 DataOS 全栈
+> docker-compose -f docker-compose.dataos.yml stop
+>
+> # 3. 逐一验证 7 种 Agent 降级执行
+> # 3.1 Price Sentinel → 期望 200（降级模式，无 features/memories）
+> # 3.2 Product Scout → 期望 200
+> # 3.3 Support Relay → 期望 200
+> # 3.4 Ads Optimizer → 期望 200
+> # 3.5 Inventory Guard → 期望 200
+> # 3.6 Content Writer → 期望 200（文案无特征辅助但仍可生成）
+> # 3.7 Market Intel → 期望 200（竞品分析无特征但仍可分析）
+>
+> # 4. 检查日志含 "degraded" / "dataos_degraded" 字样
+> PGPASSWORD=dev_password psql -h localhost -p 5432 -U dev_user -d electro_db \
+>   -c "SELECT agent_type, payload->>'action'
+>       FROM agent_events
+>       WHERE payload->>'action' LIKE '%degraded%'
+>       ORDER BY created_at DESC LIMIT 10;"
+>
+> # 5. 恢复 DataOS
+> docker-compose -f docker-compose.dataos.yml up -d
+>
+> # 6. 运行降级单元测试
+> pnpm --filter @patioer/agent-runtime test -- --reporter=verbose 2>&1 | grep -i "degraded\|degradation\|memoryless"
+> ```
+>
+> **证据记录：** 7 种 Agent 降级执行结果 → `docs/ops/sprint6-p3/evidence/day30-ac19.md`
+>
+> **验证：** 全部 7 种 Agent 在 DataOS 宕机时返回 200 · 日志含降级标识
+>
+> **产出：** AC-P3-19 ✅
+
+---
+
+> **🃏 CARD-D30-03 · Day 30 回归**
+>
+> ```bash
+> # 确保 DataOS 已恢复
+> docker-compose -f docker-compose.dataos.yml up -d
+> sleep 10
+> curl -sf http://localhost:3300/health | jq .
+>
+> pnpm typecheck
+> pnpm test
+> ```
+
+---
+
+**Day 30 卡片执行顺序汇总：**
+
+```
+09:00  CARD-D30-01  AC-P3-18 三层隔离测试              (3h)
+12:00  CARD-D30-02  AC-P3-19 DataOS 宕机降级           (1.5h)
+13:30  CARD-D30-03  回归                                (15min)
+13:45  Day 30 完成 → AC-P3-18~19 ✅
+```
+
+---
+
+##### Day 31 — pgvector 隔离 + TTL + `dataos-isolation.test.ts`（AC-P3-20~21 + 任务 6.6）
+
+---
+
+> **🃏 CARD-D31-01 · AC-P3-20：pgvector 向量检索不跨租户验证**
+>
+> **类型：** 安全验证
+> **耗时：** 1.5h
+> **对应验收：** AC-P3-20 — pgvector 向量检索不跨租户验证：100% 通过
+>
+> **执行步骤：**
+>
+> ```bash
+> # 1. 租户 A 写入多条 decision_memory（确保有向量）
+> for i in $(seq 1 5); do
+>   curl -sf -X POST http://localhost:3300/internal/v1/memory/record \
+>     -H 'Content-Type: application/json' \
+>     -H 'X-DataOS-Internal-Key: dev-dataos-internal-key' \
+>     -H 'X-Tenant-Id: TENANT-ISO-A' \
+>     -d "{\"agentId\":\"price-sentinel\",\"context\":{\"productId\":\"P00$i\",\"price\":$(echo "$i * 10" | bc)},\"action\":{\"newPrice\":$(echo "$i * 9" | bc)}}" | jq .ok
+> done
+>
+> # 2. 租户 B 用相同情境 recall → 期望 0 条
+> curl -sf -X POST http://localhost:3300/internal/v1/memory/recall \
+>   -H 'Content-Type: application/json' \
+>   -H 'X-DataOS-Internal-Key: dev-dataos-internal-key' \
+>   -H 'X-Tenant-Id: TENANT-ISO-B' \
+>   -d '{"agentId":"price-sentinel","context":{"productId":"P001","price":10}}' | jq 'length'
+> # 期望：0
+>
+> # 3. 租户 A 用相同情境 recall → 期望 ≥ 1 条
+> curl -sf -X POST http://localhost:3300/internal/v1/memory/recall \
+>   -H 'Content-Type: application/json' \
+>   -H 'X-DataOS-Internal-Key: dev-dataos-internal-key' \
+>   -H 'X-Tenant-Id: TENANT-ISO-A' \
+>   -d '{"agentId":"price-sentinel","context":{"productId":"P001","price":10}}' | jq 'length'
+> # 期望：≥ 1
+>
+> # 4. 直接 SQL 验证：跨租户查询返回 0
+> PGPASSWORD=dataos_dev psql -h localhost -p 5434 -U dataos_user -d dataos_db \
+>   -c "SELECT count(*) FROM decision_memory
+>       WHERE tenant_id = 'TENANT-ISO-B'
+>        AND id IN (SELECT id FROM decision_memory WHERE tenant_id = 'TENANT-ISO-A');"
+> # 期望：0
+> ```
+>
+> **证据记录：** 跨租户 recall 结果 → `docs/ops/sprint6-p3/evidence/day31-ac20.md`
+>
+> **验证：** 跨租户 recall 返回 0 条 · 同租户 recall 返回 ≥ 1 条 · 100% 隔离
+>
+> **产出：** AC-P3-20 ✅
+
+---
+
+> **🃏 CARD-D31-02 · AC-P3-21：ClickHouse TTL 2 年生效验证**
+>
+> **类型：** 配置验证
+> **耗时：** 45 min
+> **对应验收：** AC-P3-21 — 数据保留策略验证：ClickHouse TTL 2 年生效
+>
+> **执行步骤：**
+>
+> ```bash
+> # 1. 检查 events 表 TTL 配置
+> curl -s 'http://localhost:8123/?query=SHOW+CREATE+TABLE+electroos_events.events' | grep -i TTL
+> # 期望：含 TTL event_time + INTERVAL 2 YEAR（或等效表达）
+>
+> # 2. 检查 price_events 表 TTL 配置
+> curl -s 'http://localhost:8123/?query=SHOW+CREATE+TABLE+electroos_events.price_events' | grep -i TTL
+> # 期望：含 TTL
+>
+> # 3. 验证 DDL 源码中的 TTL 定义
+> grep -i TTL scripts/clickhouse/dataos-events.sql
+> # 期望：TTL event_time + INTERVAL 2 YEAR
+>
+> # 4. 插入一条超过 2 年的测试记录（验证 TTL 机制可触发）
+> # 注意：ClickHouse TTL 清理是异步的（merge 时触发），此处仅验证配置存在
+> curl -s 'http://localhost:8123/' --data-binary "
+>   INSERT INTO electroos_events.events (event_id, tenant_id, agent_id, event_type, payload, event_time)
+>   VALUES ('ttl-test-001', 'TTL-TEST', 'test', 'ttl_verify', '{}', now() - INTERVAL 3 YEAR)
+> "
+>
+> # 5. 强制 merge 触发 TTL 清理（可选）
+> curl -s 'http://localhost:8123/?query=OPTIMIZE+TABLE+electroos_events.events+FINAL'
+> sleep 5
+>
+> # 6. 验证超期记录已被清理
+> curl -s 'http://localhost:8123/?query=SELECT+count()+FROM+electroos_events.events+WHERE+event_id=%27ttl-test-001%27'
+> # 期望：0（已被 TTL 清理）
+> ```
+>
+> **证据记录：** TTL 配置 + 清理验证 → `docs/ops/sprint6-p3/evidence/day31-ac21.md`
+>
+> **验证：** TTL 2 年已配置 · 超期记录可被清理
+>
+> **产出：** AC-P3-21 ✅
+
+---
+
+> **🃏 CARD-D31-03 · 任务 6.6：`dataos-isolation.test.ts` 集成测试编写**
+>
+> **类型：** 新建文件
+> **耗时：** 3h
+> **目标文件：** `packages/dataos/src/dataos-isolation.test.ts`（新建）
+>
+> **测试用例设计：**（仿 `apps/api/src/routes/e2e-tenant-isolation.integration.test.ts` 风格）
+>
+> ```typescript
+> describe('DataOS Three-Layer Tenant Isolation', () => {
+>   // === Event Lake 隔离 ===
+>   describe('Event Lake', () => {
+>     it('tenant A events are not visible to tenant B queries')
+>     it('tenant A events are visible to tenant A queries')
+>     it('inserting without tenant_id is rejected or assigned')
+>   })
+>
+>   // === Feature Store 隔离 ===
+>   describe('Feature Store', () => {
+>     it('tenant A features are not readable by tenant B')
+>     it('tenant A upsert does not overwrite tenant B features')
+>     it('getFeatures returns null for non-existent tenant')
+>   })
+>
+>   // === Decision Memory 隔离 ===
+>   describe('Decision Memory', () => {
+>     it('tenant A memories are not recallable by tenant B')
+>     it('tenant A recall returns only tenant A memories')
+>     it('record with tenant A, recall with tenant B returns empty')
+>     it('pgvector similarity search respects tenant boundary')
+>   })
+>
+>   // === 跨层一致性 ===
+>   describe('Cross-Layer Consistency', () => {
+>     it('all three layers enforce same tenant isolation')
+>     it('mixed tenant operations do not leak data')
+>   })
+> })
+> ```
+>
+> **约束：**
+> - 每个 `it` 块使用不同的随机 `tenant_id`（避免测试间干扰）
+> - Mock 外部依赖（ClickHouse client / PG / Redis），保持单元测试可重复
+> - 对于需要真实 DB 的场景，使用 `integration.test.ts` 命名约定
+>
+> **验证：**
+> ```bash
+> pnpm --filter @patioer/dataos test -- dataos-isolation --reporter=verbose
+> # 期望：≥ 12 passed · 0 failed
+> ```
+>
+> **产出：** `dataos-isolation.test.ts` 编写完毕并通过
+
+---
+
+> **🃏 CARD-D31-04 · Day 31 回归**
+>
+> ```bash
+> pnpm typecheck
+> pnpm test
+> ```
+>
+> **期望：** 新增测试全部通过 · 现有测试无破坏
+
+---
+
+**Day 31 卡片执行顺序汇总：**
+
+```
+09:00  CARD-D31-01  AC-P3-20 pgvector 跨租户验证       (1.5h)
+10:30  CARD-D31-02  AC-P3-21 ClickHouse TTL 验证       (45min)
+11:15  CARD-D31-03  dataos-isolation.test.ts 编写       (3h)
+14:15  CARD-D31-04  回归                                (15min)
+14:30  Day 31 完成 → AC-P3-20~21 ✅ + 任务 6.6 ✅
+```
+
+---
+
+##### Day 32 — ClickHouse 写入压测 + pgvector 检索压测（任务 6.7 + 6.8）
+
+---
+
+> **🃏 CARD-D32-01 · 任务 6.7：ClickHouse 100 万事件写入 + 聚合压测**
+>
+> **类型：** 性能压测
+> **耗时：** 2.5h
+> **目标文件：** `scripts/bench-clickhouse-write.ts`（新建）+ `docs/ops/sprint6-p3/evidence/day32-ch-bench.md`
+>
+> **执行步骤：**
+>
+> ```bash
+> # 1. 确认当前 events 行数
+> curl -s 'http://localhost:8123/?query=SELECT+count()+FROM+electroos_events.events'
+>
+> # 2. 编写/运行批量写入脚本
+> # 目标：100 万事件，分批 INSERT（每批 10,000 行）
+> # 模拟 10 个租户 × 7 种 Agent × 多种 event_type
+> # 记录：写入总耗时、每批耗时、QPS
+>
+> # 3. 验证行数达到 100 万
+> curl -s 'http://localhost:8123/?query=SELECT+count()+FROM+electroos_events.events'
+> # 期望：≥ 1,000,000
+>
+> # 4. 聚合查询压测（5 种查询模式）
+>
+> # 4.1 全量按 Agent 聚合
+> time curl -s 'http://localhost:8123/' --data-binary "
+>   SELECT agent_id, count() AS cnt, uniqExact(tenant_id) AS tenants
+>   FROM electroos_events.events GROUP BY agent_id ORDER BY cnt DESC
+>   FORMAT JSONEachRow
+> " > /dev/null
+> # 记录耗时
+>
+> # 4.2 单租户时间序列聚合
+> time curl -s 'http://localhost:8123/' --data-binary "
+>   SELECT toStartOfHour(event_time) AS hour, count()
+>   FROM electroos_events.events WHERE tenant_id = 'T-001'
+>   GROUP BY hour ORDER BY hour FORMAT JSONEachRow
+> " > /dev/null
+>
+> # 4.3 跨租户 event_type 分布
+> time curl -s 'http://localhost:8123/' --data-binary "
+>   SELECT event_type, count(), avg(length(payload))
+>   FROM electroos_events.events GROUP BY event_type
+>   FORMAT JSONEachRow
+> " > /dev/null
+>
+> # 4.4 最近 24h 高频事件
+> time curl -s 'http://localhost:8123/' --data-binary "
+>   SELECT agent_id, event_type, count() AS cnt
+>   FROM electroos_events.events
+>   WHERE event_time > now() - INTERVAL 24 HOUR
+>   GROUP BY agent_id, event_type ORDER BY cnt DESC LIMIT 20
+>   FORMAT JSONEachRow
+> " > /dev/null
+>
+> # 4.5 price_events 聚合
+> time curl -s 'http://localhost:8123/' --data-binary "
+>   SELECT count(), avg(change_pct), max(change_pct)
+>   FROM electroos_events.price_events
+>   FORMAT JSONEachRow
+> " > /dev/null
+>
+> # 5. 所有查询 < 2s 验证
+> ```
+>
+> **证据记录模板：**
+> ```markdown
+> | 查询 | 行数 | 耗时 | < 2s |
+> |------|------|------|------|
+> | 全量 Agent 聚合 | 1,000,000 | ___ms | ✅/❌ |
+> | 单租户时间序列 | ~100,000 | ___ms | ✅/❌ |
+> | event_type 分布 | 1,000,000 | ___ms | ✅/❌ |
+> | 最近 24h | ~N | ___ms | ✅/❌ |
+> | price_events 聚合 | N | ___ms | ✅/❌ |
+> ```
+>
+> **验证：** 100 万行写入成功 · 全部聚合查询 < 2s
+>
+> **产出：** CH 压测记录 · AC-P3-09 加强验证
+
+---
+
+> **🃏 CARD-D32-02 · 任务 6.8：pgvector 万级行检索压测**
+>
+> **类型：** 性能压测
+> **耗时：** 2h
+> **目标文件：** `scripts/bench-pgvector-recall.ts`（新建）+ `docs/ops/sprint6-p3/evidence/day32-pgvector-bench.md`
+>
+> **执行步骤：**
+>
+> ```bash
+> # 1. 查询当前 decision_memory 行数
+> PGPASSWORD=dataos_dev psql -h localhost -p 5434 -U dataos_user -d dataos_db \
+>   -c "SELECT count(*) FROM decision_memory;"
+>
+> # 2. 生成测试数据（如不足万级）
+> # 使用确定性 fallback embedding 插入 10,000 条记录
+> # 覆盖 10 个租户 × 多种 Agent × 不同情境
+>
+> # 3. 100 行 recall 延迟测试
+> # 记录 recall 平均/p50/p95/p99 延迟
+>
+> # 4. 1,000 行 recall 延迟测试
+> # 调整 LIMIT 或 similarity threshold
+>
+> # 5. 10,000 行 recall 延迟测试
+> PGPASSWORD=dataos_dev psql -h localhost -p 5434 -U dataos_user -d dataos_db \
+>   -c "EXPLAIN ANALYZE
+>       SELECT id, 1 - (context_vector <=> '[...]'::vector(1536)) AS similarity
+>       FROM decision_memory
+>       WHERE tenant_id = 'BENCH-T001' AND agent_id = 'price-sentinel'
+>       ORDER BY context_vector <=> '[...]'::vector(1536)
+>       LIMIT 5;"
+>
+> # 6. IVFFlat 索引验证（如已创建）
+> PGPASSWORD=dataos_dev psql -h localhost -p 5434 -U dataos_user -d dataos_db \
+>   -c "\di" | grep ivfflat
+>
+> # 7. 有/无索引对比（可选）
+> ```
+>
+> **证据记录模板：**
+> ```markdown
+> | 数据量 | 查询方式 | p50 延迟 | p95 延迟 | p99 延迟 |
+> |--------|---------|---------|---------|---------|
+> | 100 行 | 顺序扫描 | ___ms | ___ms | ___ms |
+> | 1,000 行 | 顺序扫描 | ___ms | ___ms | ___ms |
+> | 10,000 行 | 顺序扫描 | ___ms | ___ms | ___ms |
+> | 10,000 行 | IVFFlat | ___ms | ___ms | ___ms |
+> ```
+>
+> **验证：** 万级行 recall 延迟可接受（< 100ms）· 租户隔离不影响性能
+>
+> **产出：** pgvector 压测记录
+
+---
+
+> **🃏 CARD-D32-03 · Day 32 回归**
+>
+> ```bash
+> pnpm typecheck
+> pnpm test
+> ```
+
+---
+
+**Day 32 卡片执行顺序汇总：**
+
+```
+09:00  CARD-D32-01  CH 100 万写入 + 聚合压测           (2.5h)
+11:30  CARD-D32-02  pgvector 万级行检索压测             (2h)
+13:30  CARD-D32-03  回归                                (15min)
+13:45  Day 32 完成 → 任务 6.7 + 6.8 ✅
+```
+
+---
+
+##### Day 33 — 验收证据归档 + 文档更新（任务 6.9）
+
+---
+
+> **🃏 CARD-D33-01 · 证据目录整理 + AC 索引文件**
+>
+> **类型：** 文档
+> **耗时：** 1.5h
+> **目标文件：** `docs/ops/sprint6-p3/sprint6-p3-ac-evidence-index.md`（新建）
+>
+> **产出模板：**
+> ```markdown
+> # Phase 3 Sprint 6 验收证据索引
+>
+> | AC 编号 | 验收描述 | 证据文件 | 验证日期 | 状态 |
+> |---------|---------|---------|---------|------|
+> | AC-P3-01 | DataOS API /health 200 | day25-ac01.md | Day 25 | ✅ |
+> | AC-P3-02 | CH events/price_events 表 | day25-ac02.md | Day 25 | ✅ |
+> | ... | ... | ... | ... | ... |
+> | AC-P3-21 | CH TTL 2 年 | day31-ac21.md | Day 31 | ✅ |
+> ```
+>
+> **执行步骤：**
+> 1. 汇总 Day 25–32 所有 `evidence/` 文件
+> 2. 逐条对齐 AC-P3-01~21
+> 3. 标注缺失/待补项
+>
+> **验证：** 21 项 AC 全部有对应证据文件
+
+---
+
+> **🃏 CARD-D33-02 · DataOS 运维文档更新**
+>
+> **类型：** 文档更新
+> **耗时：** 1h
+> **目标文件：** `docs/operations.md`（追加 DataOS 章节）
+>
+> **需追加内容：**
+> - DataOS 启停命令（`docker-compose.dataos.yml`）
+> - 健康检查端点
+> - ClickHouse 常用查询
+> - Feature Store 缓存清理方法
+> - Decision Memory 监控查询
+> - 故障排查 Runbook（DataOS 不可用时 ElectroOS 降级行为）
+
+---
+
+> **🃏 CARD-D33-03 · OpenAPI 文档验证**
+>
+> **类型：** 文档验证
+> **耗时：** 45 min
+> **目标文件：** `docs/openapi/sprint6-api.openapi.yaml`
+>
+> **执行步骤：**
+>
+> ```bash
+> # 1. 验证 OpenAPI 文件存在且可解析
+> npx swagger-cli validate docs/openapi/sprint6-api.openapi.yaml
+> # 期望：valid
+>
+> # 2. 对照 internal-routes.ts 中的 7 个路由
+> # 确认 OpenAPI 中每个路由都有定义
+> grep 'path:' docs/openapi/sprint6-api.openapi.yaml | sort
+>
+> # 3. 验证 request/response schema 与实际一致
+> ```
+>
+> **验证：** OpenAPI 文件有效 · 覆盖全部 DataOS 内部 API 路由
+
+---
+
+> **🃏 CARD-D33-04 · ADR-0003 最终审查**
+>
+> **类型：** 文档审查
+> **耗时：** 30 min
+> **目标文件：** `docs/adr/0003-phase3-dataos-stack.md`
+>
+> **检查清单：**
+> - [ ] 决策状态标记为 "Accepted"
+> - [ ] 所有 D13–D18 决策在代码中已落地
+> - [ ] 无与实现不一致的描述
+
+---
+
+> **🃏 CARD-D33-05 · Day 33 回归**
+>
+> ```bash
+> pnpm typecheck
+> pnpm test
+> ```
+
+---
+
+**Day 33 卡片执行顺序汇总：**
+
+```
+09:00  CARD-D33-01  证据目录整理 + AC 索引              (1.5h)
+10:30  CARD-D33-02  运维文档更新                        (1h)
+11:30  CARD-D33-03  OpenAPI 验证                        (45min)
+12:15  CARD-D33-04  ADR-0003 审查                       (30min)
+12:45  CARD-D33-05  回归                                (15min)
+13:00  Day 33 完成 → 任务 6.9 ✅
+```
+
+---
+
+##### Day 34 — 21 项 AC 总验收 + Phase 4 就绪（任务 6.10）
+
+---
+
+> **🃏 CARD-D34-01 · Phase 3 全量 21 项 AC 总验收**
+>
+> **类型：** 总验收
+> **耗时：** 3h
+> **对应任务：** 6.10 — Sprint 6 最终检查点 → Phase 4 就绪
+>
+> **验证环境：**
+> ```bash
+> # 1. 全栈启动
+> docker-compose -f docker-compose.dataos.yml up -d
+> sleep 15
+>
+> # 2. 全量 typecheck
+> pnpm typecheck
+> # 期望：0 errors
+>
+> # 3. 全量 test
+> pnpm test
+> # 期望：0 failures · 全部 pass（含 dataos-isolation.test.ts）
+> ```
+>
+> **21 项逐条验收清单：**
+>
+> | # | AC 编号 | 验收描述 | 验证方法 | 首次验证日 | 复验 |
+> |---|---------|---------|---------|-----------|------|
+> | 1 | **AC-P3-01** | DataOS API `/health` 200 | `curl localhost:3300/health` | Day 25 | ✅ |
+> | 2 | **AC-P3-02** | CH events/price_events 表 | `SHOW TABLES FROM electroos_events` | Day 25 | ✅ |
+> | 3 | **AC-P3-03** | pgvector + product_features + decision_memory | `\d` + `SELECT vector` | Day 25 | ✅ |
+> | 4 | **AC-P3-04** | Redis < 5ms | `redis-cli --latency` | Day 25 | ✅ |
+> | 5 | **AC-P3-05** | PS 调价 → CH price_events | CH query | Day 26 | ✅ |
+> | 6 | **AC-P3-06** | Ingestion 无丢失 | PG vs CH 计数对比 | Day 26 | ✅ |
+> | 7 | **AC-P3-07** | Feature Agent 15min 刷新 | updated_at 对比 | Day 26 | ✅ |
+> | 8 | **AC-P3-08** | 缓存命中率 > 90% | Prometheus metrics | Day 27 | ✅ |
+> | 9 | **AC-P3-09** | CH 100 万行聚合 < 2s | 压测记录 | Day 27+32 | ✅ |
+> | 10 | **AC-P3-10** | PS 调价 → decision_memory | PG query | Day 28 | ✅ |
+> | 11 | **AC-P3-11** | Insight Agent 回写 outcome | PG query | Day 28 | ✅ |
+> | 12 | **AC-P3-12** | 向量召回 ≥ 3 条 | recall API | Day 28 | ✅ |
+> | 13 | **AC-P3-13** | outcome > 50 条 | count(*) | Day 28 | ✅/⏳ |
+> | 14 | **AC-P3-14** | PS prompt 含 conv_rate_7d | agent_events 日志 | Day 29 | ✅ |
+> | 15 | **AC-P3-15** | PS prompt 含历史案例 | agent_events 日志 | Day 29 | ✅ |
+> | 16 | **AC-P3-16** | Content Writer 正常生成 | execute API | Day 29 | ✅ |
+> | 17 | **AC-P3-17** | Market Intel 更新竞品特征 | Feature Store query | Day 29 | ✅ |
+> | 18 | **AC-P3-18** | 三层隔离测试通过 | 隔离测试 + test.ts | Day 30+31 | ✅ |
+> | 19 | **AC-P3-19** | DataOS 宕机降级 | 7 Agent 降级测试 | Day 30 | ✅ |
+> | 20 | **AC-P3-20** | pgvector 不跨租户 100% | recall 交叉验证 | Day 31 | ✅ |
+> | 21 | **AC-P3-21** | CH TTL 2 年 | DDL + OPTIMIZE | Day 31 | ✅ |
+>
+> **总验收命令序列：**
+>
+> ```bash
+> # === 基础设施（AC-P3-01~04）===
+> curl -sf http://localhost:3300/health | jq .ok
+> curl -s 'http://localhost:8123/?query=SHOW+TABLES+FROM+electroos_events'
+> PGPASSWORD=dataos_dev psql -h localhost -p 5434 -U dataos_user -d dataos_db -c "SELECT extname FROM pg_extension WHERE extname='vector';"
+> docker exec $(docker-compose -f docker-compose.dataos.yml ps -q dataos-redis) redis-cli PING
+>
+> # === Event Lake & Feature Store（AC-P3-05~09）===
+> curl -s 'http://localhost:8123/?query=SELECT+count()+FROM+electroos_events.price_events'
+> curl -s 'http://localhost:8123/?query=SELECT+count()+FROM+electroos_events.events'
+> curl -sf http://localhost:3300/metrics | grep feature_agent_runs
+> curl -sf http://localhost:3300/metrics | grep -E 'cache_(hits|misses)'
+>
+> # === Decision Memory（AC-P3-10~13）===
+> PGPASSWORD=dataos_dev psql -h localhost -p 5434 -U dataos_user -d dataos_db \
+>   -c "SELECT count(*) FROM decision_memory WHERE agent_id='price-sentinel';"
+> PGPASSWORD=dataos_dev psql -h localhost -p 5434 -U dataos_user -d dataos_db \
+>   -c "SELECT count(*) FROM decision_memory WHERE outcome IS NOT NULL;"
+>
+> # === Agent 升级（AC-P3-14~17）===
+> # 触发 PS/CW/MI execute 并验证响应
+>
+> # === 隔离 & 安全（AC-P3-18~21）===
+> pnpm --filter @patioer/dataos test -- dataos-isolation --reporter=verbose
+> # 降级已在 Day 30 验证
+>
+> # === 全量回归 ===
+> pnpm typecheck
+> pnpm test
+> ```
+
+---
+
+> **🃏 CARD-D34-02 · Phase 4 就绪检查 + Sprint 6 收尾**
+>
+> **类型：** 检查 + 文档
+> **耗时：** 1h
+>
+> **Phase 4 就绪检查清单：**
+>
+> | # | 检查项 | 状态 |
+> |---|--------|------|
+> | 1 | 21 项 AC 全部 ✅ | |
+> | 2 | `pnpm typecheck` 0 errors | |
+> | 3 | `pnpm test` 0 failures | |
+> | 4 | DataOS 全栈可启动（4 服务 Up） | |
+> | 5 | 证据索引文件完整（21 项有证据） | |
+> | 6 | 运维文档已更新 | |
+> | 7 | OpenAPI 有效 | |
+> | 8 | ADR-0003 状态 Accepted | |
+> | 9 | `dataos-isolation.test.ts` 全量通过 | |
+> | 10 | CH 压测记录归档 | |
+> | 11 | pgvector 压测记录归档 | |
+> | 12 | Sprint 6 日报完成 | |
+>
+> **收尾动作：**
+> 1. 更新 `docs/ops/sprint6-p3/daily-report.md` — Day 34 日报
+> 2. 编写 `docs/ops/sprint6-p3/retro.md` — Sprint 6 复盘
+> 3. 更新根目录 `README.md` — Phase 3 完成标记
+>
+> **产出：** Phase 3 全部交付完成 · Phase 4 就绪
+
+---
+
+**Day 34 卡片执行顺序汇总：**
+
+```
+09:00  CARD-D34-01  21 项 AC 总验收                     (3h)
+12:00  CARD-D34-02  Phase 4 就绪检查 + 收尾             (1h)
+13:00  Day 34 完成 → Sprint 6 完成 → Phase 3 出口 ✅
+```
+
+---
+
+#### Sprint 6 · 可复制任务卡总索引（Day 25–Day 34）
+
+| Day | CARD 编号 | 标题 | 对应 AC / 任务 | 耗时 |
+|-----|----------|------|---------------|------|
+| 25 | D25-01 | 基线冻结 | — | 45min |
+| 25 | D25-02 | DataOS API 健康 | AC-P3-01 | 30min |
+| 25 | D25-03 | ClickHouse 表验证 | AC-P3-02 | 30min |
+| 25 | D25-04 | pgvector 验证 | AC-P3-03 | 30min |
+| 25 | D25-05 | Redis 延迟验证 | AC-P3-04 | 30min |
+| 25 | D25-06 | Day 25 回归 | — | 15min |
+| 26 | D26-01 | price_events 验证 | AC-P3-05 | 1.5h |
+| 26 | D26-02 | Ingestion 无丢失 | AC-P3-06 | 1.5h |
+| 26 | D26-03 | Feature Agent 15min | AC-P3-07 | 1h |
+| 26 | D26-04 | Day 26 回归 | — | 15min |
+| 27 | D27-01 | 缓存命中率 > 90% | AC-P3-08 | 1.5h |
+| 27 | D27-02 | CH 聚合 < 2s 基线 | AC-P3-09 | 2h |
+| 27 | D27-03 | Day 27 回归 | — | 15min |
+| 28 | D28-01 | decision_memory 记录 | AC-P3-10 | 1h |
+| 28 | D28-02 | Insight outcome 回写 | AC-P3-11 | 1h |
+| 28 | D28-03 | 向量召回 ≥ 3 条 | AC-P3-12 | 1h |
+| 28 | D28-04 | outcome > 50 条 | AC-P3-13 | 30min |
+| 28 | D28-05 | Day 28 回归 | — | 15min |
+| 29 | D29-01 | PS prompt 含 features | AC-P3-14 | 1h |
+| 29 | D29-02 | PS prompt 含 memories | AC-P3-15 | 1h |
+| 29 | D29-03 | Content Writer 验证 | AC-P3-16 | 1h |
+| 29 | D29-04 | Market Intel 验证 | AC-P3-17 | 1h |
+| 29 | D29-05 | Day 29 回归 | — | 15min |
+| 30 | D30-01 | 三层隔离测试 | AC-P3-18 | 3h |
+| 30 | D30-02 | DataOS 宕机降级 | AC-P3-19 | 1.5h |
+| 30 | D30-03 | Day 30 回归 | — | 15min |
+| 31 | D31-01 | pgvector 跨租户验证 | AC-P3-20 | 1.5h |
+| 31 | D31-02 | CH TTL 2 年 | AC-P3-21 | 45min |
+| 31 | D31-03 | dataos-isolation.test.ts | 任务 6.6 | 3h |
+| 31 | D31-04 | Day 31 回归 | — | 15min |
+| 32 | D32-01 | CH 100 万写入压测 | 任务 6.7 | 2.5h |
+| 32 | D32-02 | pgvector 万级行压测 | 任务 6.8 | 2h |
+| 32 | D32-03 | Day 32 回归 | — | 15min |
+| 33 | D33-01 | 证据索引整理 | 任务 6.9 | 1.5h |
+| 33 | D33-02 | 运维文档更新 | 任务 6.9 | 1h |
+| 33 | D33-03 | OpenAPI 验证 | 任务 6.9 | 45min |
+| 33 | D33-04 | ADR-0003 审查 | 任务 6.9 | 30min |
+| 33 | D33-05 | Day 33 回归 | — | 15min |
+| 34 | D34-01 | 21 项 AC 总验收 | 任务 6.10 | 3h |
+| 34 | D34-02 | Phase 4 就绪 + 收尾 | 任务 6.10 | 1h |
+
+**总计：38 张 CARD · 10 天 · 覆盖 21 项 AC + 任务 6.1–6.10 全部**
+
+---
+
 ## 3. 关键接口定义
 
 ### 3.1 DataOsPort（packages/agent-runtime/src/types.ts 扩展）

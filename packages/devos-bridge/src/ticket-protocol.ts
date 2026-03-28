@@ -1,6 +1,6 @@
 /** DevOS Ticket 协议类型（与 `packages/db` 中 `devos_tickets` 行语义对齐，供 5.3 HTTP 客户端使用）。 */
 
-export type DevOsTicketType = 'bug' | 'feature' | 'harness_update' | 'performance'
+export type DevOsTicketType = 'bug' | 'feature' | 'harness_update' | 'performance' | 'coordination'
 
 export type DevOsTicketPriority = 'P0' | 'P1' | 'P2'
 
@@ -31,7 +31,7 @@ export interface DevOsTicket {
 /** DevOS 实例返回的 Ticket 状态（HTTP 客户端 `getTicketStatus`）。 */
 export type TicketStatus = 'open' | 'acknowledged' | 'in_progress' | 'resolved' | 'closed'
 
-const TICKET_TYPES = new Set<DevOsTicketType>(['bug', 'feature', 'harness_update', 'performance'])
+const TICKET_TYPES = new Set<DevOsTicketType>(['bug', 'feature', 'harness_update', 'performance', 'coordination'])
 const PRIORITIES = new Set<DevOsTicketPriority>(['P0', 'P1', 'P2'])
 const ACK = new Set<DevOsSlaAcknowledge>(['1h', '4h', '24h'])
 const RES = new Set<DevOsSlaResolve>(['4h', '24h', '48h', '72h'])
@@ -45,6 +45,30 @@ export function defaultSlaForPriority(priority: DevOsTicketPriority): DevOsTicke
       return { acknowledge: '4h', resolve: '24h' }
     case 'P2':
       return { acknowledge: '24h', resolve: '72h' }
+    default: {
+      const _exhaustive: never = priority
+      throw new Error(`Unknown priority: ${_exhaustive}`)
+    }
+  }
+}
+
+/** CEO Agent coordination ticket 等类型的默认优先级（ADR-0004 D20）。 */
+export function defaultPriorityForType(type: DevOsTicketType): DevOsTicketPriority {
+  switch (type) {
+    case 'bug':
+      return 'P1'
+    case 'feature':
+      return 'P2'
+    case 'harness_update':
+      return 'P1'
+    case 'performance':
+      return 'P2'
+    case 'coordination':
+      return 'P2'
+    default: {
+      const _exhaustive: never = type
+      throw new Error(`Unknown ticket type: ${_exhaustive}`)
+    }
   }
 }
 

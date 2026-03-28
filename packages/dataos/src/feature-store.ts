@@ -1,5 +1,5 @@
 import type { Pool } from 'pg'
-import { Redis } from 'ioredis'
+import type { Redis } from 'ioredis'
 import type { ProductFeaturesRow } from './types.js'
 
 const CACHE_TTL_SEC = 900
@@ -22,7 +22,7 @@ export class FeatureStoreService {
   ) {}
 
   private cacheKey(tenantId: string, platform: string, productId: string): string {
-    return `feature:${tenantId}:${platform}:${productId}`
+    return `dataos:feature:${tenantId}:${platform}:${productId}`
   }
 
   async get(
@@ -32,20 +32,25 @@ export class FeatureStoreService {
     metrics?: { cacheHit?: () => void; cacheMiss?: () => void },
   ): Promise<ProductFeaturesRow | null> {
     const key = this.cacheKey(tenantId, platform, productId)
-    const cached = await this.redis.get(key)
-    if (cached) {
-      metrics?.cacheHit?.()
-      return JSON.parse(cached) as ProductFeaturesRow
+    try {
+      const cached = await this.redis.get(key)
+      if (cached) {
+        const parsed = JSON.parse(cached) as ProductFeaturesRow
+        metrics?.cacheHit?.()
+        return parsed
+      }
+    } catch {
+      // Redis read or JSON parse failure — fall through to PostgreSQL
     }
     metrics?.cacheMiss?.()
     const { rows } = await this.pool.query<ProductFeaturesRow>(
       `SELECT * FROM product_features
-       WHERE tenant_id = $1 AND platform = $2 AND product_id = $3`,
+       WHERE tenant_id = $1 AND platform = $2 AND product_id = $3 AND deleted_at IS NULL`,
       [tenantId, platform, productId],
     )
     const row = rows[0]
     if (row) {
-      await this.redis.setex(key, CACHE_TTL_SEC, JSON.stringify(row))
+      this.redis.setex(key, CACHE_TTL_SEC, JSON.stringify(row)).catch(() => {})
     }
     return row ?? null
   }
@@ -60,7 +65,7 @@ export class FeatureStoreService {
     const params: unknown[] = [tenantId]
     const platformFilter = platform ? ` AND platform = $${params.push(platform)}` : ''
     const { rows } = await this.pool.query<ProductFeaturesRow>(
-      `SELECT * FROM product_features WHERE tenant_id = $1${platformFilter}
+      `SELECT * FROM product_features WHERE tenant_id = $1 AND deleted_at IS NULL${platformFilter}
        ORDER BY updated_at DESC LIMIT $${params.push(limit)} OFFSET $${params.push(offset)}`,
       params,
     )
@@ -69,7 +74,8 @@ export class FeatureStoreService {
 
   async delete(tenantId: string, platform: string, productId: string): Promise<boolean> {
     const { rowCount } = await this.pool.query(
-      `DELETE FROM product_features WHERE tenant_id = $1 AND platform = $2 AND product_id = $3`,
+      `UPDATE product_features SET deleted_at = NOW()
+       WHERE tenant_id = $1 AND platform = $2 AND product_id = $3 AND deleted_at IS NULL`,
       [tenantId, platform, productId],
     )
     await this.redis.del(this.cacheKey(tenantId, platform, productId))
@@ -97,8 +103,20 @@ export class FeatureStoreService {
         JSON.stringify(row),
       )
     }
-    await pipeline.exec()
+    const results = await pipeline.exec()
+    if (results) {
+      for (const [err] of results) {
+        if (err) {
+          console.warn('[feature-store] warmupCache pipeline partial error', err.message)
+          break
+        }
+      }
+    }
     return rows.length
+  }
+
+  private static safeNum(v: number | undefined): number | null {
+    return v !== undefined && Number.isFinite(v) ? v : null
   }
 
   async upsert(input: FeatureStoreUpsertInput): Promise<void> {
@@ -115,26 +133,27 @@ export class FeatureStoreService {
         competitor_min_price = COALESCE(EXCLUDED.competitor_min_price, product_features.competitor_min_price),
         competitor_avg_price = COALESCE(EXCLUDED.competitor_avg_price, product_features.competitor_avg_price),
         price_position = COALESCE(EXCLUDED.price_position, product_features.price_position),
-        updated_at = NOW()
+        updated_at = NOW(),
+        deleted_at = NULL
       RETURNING *`,
       [
         input.tenantId,
         input.platform,
         input.productId,
-        input.priceCurrent ?? null,
-        input.convRate7d ?? null,
-        input.competitorMinPrice ?? null,
-        input.competitorAvgPrice ?? null,
+        FeatureStoreService.safeNum(input.priceCurrent),
+        FeatureStoreService.safeNum(input.convRate7d),
+        FeatureStoreService.safeNum(input.competitorMinPrice),
+        FeatureStoreService.safeNum(input.competitorAvgPrice),
         input.pricePosition ?? null,
       ],
     )
     const row = rows[0]
     if (row) {
-      await this.redis.setex(
+      this.redis.setex(
         this.cacheKey(input.tenantId, input.platform, input.productId),
         CACHE_TTL_SEC,
         JSON.stringify(row),
-      )
+      ).catch(() => {})
     }
   }
 }

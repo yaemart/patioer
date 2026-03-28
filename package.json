@@ -19,6 +19,7 @@
     "ops:sprint6:drill:ac-p2-07-08-09": "pnpm exec tsx ./scripts/sprint6-drill-ac-p2-07-08-09.ts",
     "seed:agents": "pnpm exec tsx ./scripts/agents.seed.ts",
     "seed:devos": "pnpm exec tsx ./scripts/devos.seed.ts",
+    "seed:devos-full": "pnpm exec tsx ./scripts/devos-full.seed.ts",
     "test:scripts": "pnpm --filter @patioer/api exec vitest run src/lib/seed-default-agents.test.ts",
     "dataos:clickhouse:apply-ddl": "pnpm exec tsx ./scripts/clickhouse-apply-ddl.ts",
     "dataos:migrate": "pnpm exec tsx ./scripts/dataos-migrate.ts"

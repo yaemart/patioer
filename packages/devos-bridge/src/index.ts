@@ -10,7 +10,7 @@ export type {
   DevOsTicketType,
   TicketStatus,
 } from './ticket-protocol.js'
-export { defaultSlaForPriority, isDevOsTicket } from './ticket-protocol.js'
+export { defaultSlaForPriority, defaultPriorityForType, isDevOsTicket } from './ticket-protocol.js'
 export type { DevOsClient, DevOsClientOptions } from './devos-client.js'
 export { createDevOsClient, DevOsHttpError } from './devos-client.js'
 export {
@@ -19,10 +19,14 @@ export {
   postgresIdentityFromUrl,
 } from './electroos-devos-db-isolation.js'
 export type { PostgresIdentity } from './electroos-devos-db-isolation.js'
-export type { DevOsOrgNode } from './devos-org-chart.js'
-export { DEVOS_ENGINEERING_ORG, buildSreBootstrapTicket } from './devos-org-chart.js'
+export type { DevOsOrgNode, DevOsAgentId } from './devos-org-chart.js'
+export { DEVOS_ENGINEERING_ORG, DEVOS_AGENT_IDS, flattenAgents, buildSreBootstrapTicket } from './devos-org-chart.js'
 export type { DevOsSeedResult } from './devos-seed.js'
 export { runDevOsSeed } from './devos-seed.js'
+export type { DevOsAgentSeedEntry, DevOsAgentTrigger, DevOsFullSeedJson } from './devos-full-seed.js'
+export { DEVOS_FULL_SEED, DEVOS_MONTHLY_BUDGET_USD, buildDevOsFullSeed } from './devos-full-seed.js'
+export type { CodebaseEntry, CodebaseIndex, QueryResult } from './codebase-intel.js'
+export { buildCodebaseIndex, queryCodebase } from './codebase-intel.js'
 export { probeDevOsHttpBaseUrl } from './devos-probe.js'
 export type { ProbeDevOsOptions } from './devos-probe.js'
 export type { HarnessErrorReport } from './harness-update-ticket.js'

@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from 'fastify'
 import { and, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { schema } from '@patioer/db'
+import { UUID_LOOSE_RE } from '@patioer/shared'
 
 // Must stay in sync with DB agentTypeEnum in packages/db/src/schema/agents.ts.
 const AGENT_TYPES = [
@@ -89,7 +90,7 @@ const updateAgentBodySchema = z.object({
   systemPrompt: z.string().nullable().optional(),
 })
 
-const paramsSchema = z.object({ id: z.string().uuid() })
+const paramsSchema = z.object({ id: z.string().regex(UUID_LOOSE_RE).transform((v) => v.toLowerCase()) })
 
 const agentsRoute: FastifyPluginAsync = async (app) => {
   app.get('/api/v1/agents', {

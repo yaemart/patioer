@@ -24,22 +24,22 @@ export class DecisionMemoryService {
     options?: { limit?: number; minSimilarity?: number },
   ): Promise<DecisionMemoryRow[]> {
     const limit = options?.limit ?? 5
-    // Tuned via benchmark (CARD-D33-03): deterministic embeddings produce a wider
-    // similarity spread than OpenAI text-embedding-3-small.  Default lowered from
-    // 0.85 → 0.75 so recall surfaces ≥3 results in both modes. Callers can
-    // override via options.minSimilarity for stricter/looser matching.
-    const minSim = options?.minSimilarity ?? 0.75
-    const text = JSON.stringify(currentContext)
+    const minSim = options?.minSimilarity ?? (this.embedding ? 0.75 : 0.01)
+    const text = JSON.stringify(currentContext ?? null)
     const vector = await embedText(text, this.embedding)
+    if (vector.some((v) => !Number.isFinite(v))) {
+      return []
+    }
     const vecLiteral = `[${vector.join(',')}]`
     const { rows } = await this.pool.query<DecisionMemoryRow & { similarity: string }>(
       `SELECT id, tenant_id, agent_id, platform, entity_id, context, action, outcome,
-              decided_at, outcome_at,
+              decided_at, outcome_at, deleted_at,
               1 - (context_vector <=> $3::vector) AS similarity
        FROM decision_memory
        WHERE tenant_id = $1 AND agent_id = $2
          AND outcome IS NOT NULL
          AND context_vector IS NOT NULL
+         AND deleted_at IS NULL
          AND (1 - (context_vector <=> $3::vector)) >= $4
        ORDER BY context_vector <=> $3::vector
        LIMIT $5`,
@@ -52,8 +52,9 @@ export class DecisionMemoryService {
   }
 
   async record(input: DecisionMemoryRecordInput): Promise<string> {
-    const text = JSON.stringify(input.context)
-    const vector = await embedText(text, this.embedding)
+    const contextJson = JSON.stringify(input.context ?? null)
+    const actionJson = JSON.stringify(input.action ?? null)
+    const vector = await embedText(contextJson, this.embedding)
     const vecLiteral = `[${vector.join(',')}]`
     const { rows } = await this.pool.query<{ id: string }>(
       `INSERT INTO decision_memory (tenant_id, agent_id, platform, entity_id, context, action, context_vector)
@@ -64,25 +65,27 @@ export class DecisionMemoryService {
         input.agentId,
         input.platform ?? null,
         input.entityId ?? null,
-        JSON.stringify(input.context),
-        JSON.stringify(input.action),
+        contextJson,
+        actionJson,
         vecLiteral,
       ],
     )
     return rows[0]!.id
   }
 
-  async writeOutcome(decisionId: string, tenantId: string, outcome: unknown): Promise<void> {
-    await this.pool.query(
+  async writeOutcome(decisionId: string, tenantId: string, outcome: unknown): Promise<boolean> {
+    const { rowCount } = await this.pool.query(
       `UPDATE decision_memory SET outcome = $3::jsonb, outcome_at = NOW()
-       WHERE id = $1 AND tenant_id = $2`,
+       WHERE id = $1 AND tenant_id = $2 AND outcome IS NULL`,
       [decisionId, tenantId, JSON.stringify(outcome)],
     )
+    return (rowCount ?? 0) > 0
   }
 
   async delete(decisionId: string, tenantId: string): Promise<boolean> {
     const { rowCount } = await this.pool.query(
-      `DELETE FROM decision_memory WHERE id = $1 AND tenant_id = $2`,
+      `UPDATE decision_memory SET deleted_at = NOW()
+       WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
       [decisionId, tenantId],
     )
     return (rowCount ?? 0) > 0
@@ -97,9 +100,9 @@ export class DecisionMemoryService {
     const params: unknown[] = [tenantId]
     const agentFilter = agentId ? ` AND agent_id = $${params.push(agentId)}` : ''
     const { rows } = await this.pool.query<DecisionMemoryRow>(
-      `SELECT id, tenant_id, agent_id, platform, entity_id, context, action, outcome, decided_at, outcome_at
+      `SELECT id, tenant_id, agent_id, platform, entity_id, context, action, outcome, decided_at, outcome_at, deleted_at
        FROM decision_memory
-       WHERE tenant_id = $1${agentFilter}
+       WHERE tenant_id = $1 AND deleted_at IS NULL${agentFilter}
        ORDER BY decided_at DESC LIMIT $${params.push(limit)}`,
       params,
     )
@@ -131,6 +134,7 @@ export class DecisionMemoryService {
       `SELECT id, tenant_id, agent_id, platform, entity_id, context, action, decided_at
        FROM decision_memory
        WHERE outcome IS NULL
+         AND deleted_at IS NULL
          AND decided_at < NOW() - make_interval(days => $1)${tenantFilter}
        ORDER BY decided_at ASC
        LIMIT $${params.push(limit)}`,

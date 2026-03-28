@@ -50,12 +50,6 @@ export const featureAgentBudgetUtilization = new Gauge({
   registers: [registry],
 })
 
-/** Set externally by queue-depth poller (Phase 4). Registered now per Sprint 2 checkpoint #10. */
-export const ingestionQueueDepth = new Gauge({
-  name: 'dataos_ingestion_queue_depth',
-  help: 'BullMQ ingestion queue current depth (waiting + active jobs)',
-  registers: [registry],
-})
 
 export const insightAgentTicks = new Counter({
   name: 'dataos_insight_agent_ticks_total',
@@ -81,6 +75,18 @@ export const insightAgentPendingDecisions = new Gauge({
   registers: [registry],
 })
 
+/**
+ * DataOS 内部 API 操作错误计数（Constitution Ch8.1 harness.api.error_rate 等价指标）。
+ * label `op`：lake_event / lake_price_event / features_get / features_list /
+ *            features_upsert / features_delete / memory_recall / memory_record /
+ *            memory_outcome / memory_list / memory_delete / insight_trigger / unknown
+ */
+export const dataosPortErrors = new Counter({
+  name: 'dataos_port_errors_total',
+  help: 'DataOS port-level API errors by operation (Constitution Ch8.1)',
+  labelNames: ['op'] as const,
+  registers: [registry],
+})
 
 export async function renderMetrics(): Promise<string> {
   return registry.metrics()

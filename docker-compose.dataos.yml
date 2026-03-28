@@ -1,5 +1,11 @@
 # DataOS：ClickHouse（Event Lake）+ PostgreSQL/pgvector + Redis（Feature 缓存）+ DataOS API（3300）。
 # 与 ElectroOS（docker-compose.yml 5432/6379/3100）及 DevOS（docker-compose.devos.yml 5433/3200）端口隔离。
+#
+# 宿主机端口映射:
+#   ClickHouse  8123 (HTTP) / 9000 (native)
+#   PostgreSQL  5434  (ElectroOS=5432, DevOS=5433)
+#   Redis       6380  (ElectroOS=6379) ← 注意不是 6379！BullMQ 客户端需用此端口
+#   DataOS API  3300
 
 services:
   dataos-clickhouse:
@@ -14,6 +20,7 @@ services:
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-dataos}
     volumes:
       - dataos_clickhouse_data:/var/lib/clickhouse
+      - ./docker/clickhouse-init:/docker-entrypoint-initdb.d:ro
 
   dataos-postgres:
     image: pgvector/pgvector:pg16
@@ -37,7 +44,7 @@ services:
     image: redis:7-alpine
     container_name: patioer-dataos-redis
     ports:
-      - '6380:6379'
+      - '6380:6379'   # host=6380 to avoid clash with ElectroOS Redis on 6379
     volumes:
       - dataos_redis_data:/data
 
@@ -49,6 +56,7 @@ services:
       sh -c "corepack enable && pnpm install && pnpm --filter @patioer/dataos-api dev"
     volumes:
       - ./:/workspace
+      - /workspace/node_modules
     environment:
       NODE_ENV: development
       PORT: '3300'

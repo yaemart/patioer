@@ -42,6 +42,7 @@ export interface ProductFeaturesRow {
   competitor_avg_price: string | null
   price_position: string | null
   updated_at: string
+  deleted_at: string | null
 }
 
 export interface DecisionMemoryRow {
@@ -55,5 +56,6 @@ export interface DecisionMemoryRow {
   outcome: unknown | null
   decided_at: string
   outcome_at: string | null
+  deleted_at: string | null
   similarity?: number
 }

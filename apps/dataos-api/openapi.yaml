@@ -1,0 +1,629 @@
+openapi: "3.0.3"
+info:
+  title: DataOS Internal API
+  version: "1.0.0"
+  description: |
+    DataOS 内部服务 API。所有端点均需 X-DataOS-Internal-Key 鉴权头，
+    以及 X-Tenant-Id（合法 UUID）用于租户隔离（Constitution Ch6.1）。
+    本文件由 Sprint 6 Task 6.9 手动维护（P2-01 偏差修复）。
+
+servers:
+  - url: http://localhost:3300
+    description: 本地开发环境 (docker-compose.dataos.yml)
+
+security:
+  - InternalKey: []
+
+components:
+  securitySchemes:
+    InternalKey:
+      type: apiKey
+      in: header
+      name: X-DataOS-Internal-Key
+
+  parameters:
+    TenantIdHeader:
+      name: X-Tenant-Id
+      in: header
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: 租户 UUID（Constitution Ch6.1 强制隔离）
+
+  schemas:
+    OkResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+      required: [ok]
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+
+    LakeEventInput:
+      type: object
+      required: [tenantId, agentId, eventType, payload]
+      properties:
+        tenantId:
+          type: string
+          format: uuid
+        platform:
+          type: string
+        agentId:
+          type: string
+          minLength: 1
+        eventType:
+          type: string
+          minLength: 1
+        entityId:
+          type: string
+        payload:
+          type: object
+        metadata:
+          type: object
+
+    PriceEventInput:
+      type: object
+      required: [tenantId, productId, priceBefore, priceAfter, changePct, approved]
+      properties:
+        tenantId:
+          type: string
+          format: uuid
+        platform:
+          type: string
+        productId:
+          type: string
+          minLength: 1
+        priceBefore:
+          type: number
+        priceAfter:
+          type: number
+        changePct:
+          type: number
+        approved:
+          type: boolean
+        convRate7d:
+          type: number
+        revenue7d:
+          type: number
+
+    FeatureUpsertInput:
+      type: object
+      required: [tenantId, platform, productId]
+      properties:
+        tenantId:
+          type: string
+          format: uuid
+        platform:
+          type: string
+        productId:
+          type: string
+        priceCurrent:
+          type: number
+        convRate7d:
+          type: number
+        competitorMinPrice:
+          type: number
+        competitorAvgPrice:
+          type: number
+        pricePosition:
+          type: string
+
+    ProductFeaturesRow:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        platform:
+          type: string
+        product_id:
+          type: string
+        price_current:
+          type: string
+          nullable: true
+        conv_rate_7d:
+          type: string
+          nullable: true
+        competitor_min_price:
+          type: string
+          nullable: true
+        competitor_avg_price:
+          type: string
+          nullable: true
+        price_position:
+          type: string
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    RecallInput:
+      type: object
+      required: [agentId, context]
+      properties:
+        agentId:
+          type: string
+        context:
+          type: object
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 5
+        minSimilarity:
+          type: number
+          minimum: 0
+          maximum: 1
+          default: 0.01
+          description: |
+            余弦相似度阈值。使用 OpenAI text-embedding-3-small 时建议 ≥ 0.70；
+            使用确定性嵌入（无 OPENAI_API_KEY）时建议 ≤ 0.05。
+
+    RecordInput:
+      type: object
+      required: [agentId, context, action]
+      properties:
+        agentId:
+          type: string
+        platform:
+          type: string
+        entityId:
+          type: string
+        context:
+          type: object
+        action:
+          type: object
+
+    OutcomeInput:
+      type: object
+      required: [tenantId, decisionId, outcome]
+      properties:
+        tenantId:
+          type: string
+          format: uuid
+        decisionId:
+          type: string
+          format: uuid
+        outcome:
+          type: object
+
+    DecisionMemoryRow:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        agent_id:
+          type: string
+        platform:
+          type: string
+          nullable: true
+        entity_id:
+          type: string
+          nullable: true
+        context:
+          type: object
+        action:
+          type: object
+        outcome:
+          type: object
+          nullable: true
+        decided_at:
+          type: string
+          format: date-time
+        outcome_at:
+          type: string
+          format: date-time
+          nullable: true
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+        similarity:
+          type: number
+          description: recall 结果专有字段，余弦相似度 (0-1)
+
+paths:
+  /health:
+    get:
+      summary: 健康检查
+      security: []
+      responses:
+        "200":
+          description: 服务正常
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  service: { type: string }
+
+  /metrics:
+    get:
+      summary: Prometheus 指标（Constitution Ch8.1）
+      security: []
+      responses:
+        "200":
+          description: Prometheus text/plain 格式指标
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /internal/v1/capabilities:
+    get:
+      summary: 运行时 API 能力描述
+      responses:
+        "200":
+          description: 所有可用端点的结构化描述
+
+  /internal/v1/lake/events:
+    post:
+      summary: 插入通用事件到 Event Lake（ClickHouse）
+      parameters:
+        - $ref: "#/components/parameters/TenantIdHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LakeEventInput"
+      responses:
+        "200":
+          description: 插入成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "400":
+          description: 请求体无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: API Key 无效
+        "403":
+          description: tenantId 与 Header 不匹配
+
+    get:
+      summary: 查询 Event Lake 事件
+      parameters:
+        - $ref: "#/components/parameters/TenantIdHeader"
+        - name: agentId
+          in: query
+          schema: { type: string }
+        - name: eventType
+          in: query
+          schema: { type: string }
+        - name: entityId
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50 }
+        - name: sinceMs
+          in: query
+          description: 查询最近 N 毫秒内的事件
+          schema: { type: integer }
+      responses:
+        "200":
+          description: 事件列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items:
+                      type: object
+
+  /internal/v1/lake/price-events:
+    post:
+      summary: 记录价格变动事件
+      parameters:
+        - $ref: "#/components/parameters/TenantIdHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PriceEventInput"
+      responses:
+        "200":
+          description: 记录成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "400":
+          description: 请求体无效
+        "401":
+          description: API Key 无效
+
+    get:
+      summary: 查询价格事件
+      parameters:
+        - $ref: "#/components/parameters/TenantIdHeader"
+        - name: productId
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50 }
+        - name: sinceMs
+          in: query
+          schema: { type: integer }
+      responses:
+        "200":
+          description: 价格事件列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items:
+                      type: object
+
+  /internal/v1/features:
+    get:
+      summary: 列出产品特征快照
+      parameters:
+        - $ref: "#/components/parameters/TenantIdHeader"
+        - name: platform
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50, maximum: 500 }
+        - name: offset
+          in: query
+          schema: { type: integer, default: 0 }
+      responses:
+        "200":
+          description: 特征列表（仅返回未软删除的行）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  features:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ProductFeaturesRow"
+
+  /internal/v1/features/upsert:
+    post:
+      summary: 创建或更新产品特征行（upsert）
+      description: |
+        若记录曾被软删除，本操作会自动恢复（deleted_at = NULL）。
+      parameters:
+        - $ref: "#/components/parameters/TenantIdHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FeatureUpsertInput"
+      responses:
+        "200":
+          description: 操作成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "400":
+          description: 请求体无效
+        "403":
+          description: tenantId 不匹配
+
+  /internal/v1/features/{platform}/{productId}:
+    get:
+      summary: 获取单个产品特征快照
+      parameters:
+        - $ref: "#/components/parameters/TenantIdHeader"
+        - name: platform
+          in: path
+          required: true
+          schema: { type: string }
+        - name: productId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 特征快照或 null
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/ProductFeaturesRow"
+                  - type: "null"
+
+    delete:
+      summary: 软删除产品特征行（Constitution §5.2）
+      description: |
+        设置 deleted_at = NOW()，不进行物理删除。同步使 Redis 缓存失效。
+      parameters:
+        - $ref: "#/components/parameters/TenantIdHeader"
+        - name: platform
+          in: path
+          required: true
+          schema: { type: string }
+        - name: productId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 操作完成（deleted=true 表示找到并软删除，false 表示未找到）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  deleted: { type: boolean }
+
+  /internal/v1/memory/recall:
+    post:
+      summary: 向量语义召回历史决策（pgvector）
+      parameters:
+        - $ref: "#/components/parameters/TenantIdHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecallInput"
+      responses:
+        "200":
+          description: 相似度最高的历史决策列表（已过滤软删除行）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  memories:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/DecisionMemoryRow"
+
+  /internal/v1/memory/record:
+    post:
+      summary: 记录新决策（含 context_vector 嵌入）
+      parameters:
+        - $ref: "#/components/parameters/TenantIdHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecordInput"
+      responses:
+        "200":
+          description: 新记录 ID
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+
+  /internal/v1/memory/outcome:
+    post:
+      summary: 为历史决策写入观测结果（关闭反馈循环）
+      parameters:
+        - $ref: "#/components/parameters/TenantIdHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OutcomeInput"
+      responses:
+        "200":
+          description: 写入成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "403":
+          description: tenantId 不匹配
+
+  /internal/v1/memory/decisions:
+    get:
+      summary: 列出租户最近的决策记录
+      parameters:
+        - $ref: "#/components/parameters/TenantIdHeader"
+        - name: agentId
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20, maximum: 200 }
+      responses:
+        "200":
+          description: 决策列表（已过滤软删除行）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  decisions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/DecisionMemoryRow"
+
+  /internal/v1/memory/decisions/{decisionId}:
+    delete:
+      summary: 软删除决策记录（Constitution §5.2）
+      parameters:
+        - $ref: "#/components/parameters/TenantIdHeader"
+        - name: decisionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 操作完成
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  deleted: { type: boolean }
+        "400":
+          description: decisionId 格式无效
+
+  /internal/v1/insight/trigger:
+    post:
+      summary: 手动触发 Insight Agent tick（运维/测试用）
+      description: |
+        扫描超过 outcomeLookbackDays 天仍无 outcome 的决策，尝试通过 EventLake 补写结果。
+        X-Tenant-Id 可选；若不提供则处理所有租户。
+      parameters:
+        - name: X-Tenant-Id
+          in: header
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Tick 执行结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  processed: { type: integer }
+                  written: { type: integer }
+                  failed: { type: integer }

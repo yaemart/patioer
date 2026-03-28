@@ -14,7 +14,7 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 
-/** RFC-compliant UUIDs — `:id` uses `z.string().uuid()`. */
+/** RFC-compliant UUIDs — `:id` uses `z.string().regex(UUID_LOOSE_RE)`. */
 const APPROVAL_ID = '6ba7b810-9dad-11d1-80b4-00c04fd430c8'
 const OTHER_APPROVAL_ID = '7ba7b810-9dad-11d1-80b4-00c04fd430c8'
 

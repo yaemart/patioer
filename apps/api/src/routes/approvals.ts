@@ -2,15 +2,18 @@ import type { FastifyPluginAsync } from 'fastify'
 import { and, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { schema } from '@patioer/db'
+import { UUID_LOOSE_RE } from '@patioer/shared'
 import { enqueueJob } from '../lib/queue-factory.js'
 import { optionalPlatformZod } from '../lib/platform-schema.js'
 import { parseElectroosPlatformFromPayload } from '../lib/resolve-credential.js'
 
-const paramsSchema = z.object({ id: z.string().uuid() })
+const zUuid = z.string().regex(UUID_LOOSE_RE).transform((v) => v.toLowerCase())
+
+const paramsSchema = z.object({ id: zUuid })
 
 const listQuerySchema = z.object({
   status: z.enum(['pending', 'approved', 'rejected']).optional(),
-  agentId: z.string().uuid().optional(),
+  agentId: zUuid.optional(),
 })
 
 const resolveBodySchema = z.object({

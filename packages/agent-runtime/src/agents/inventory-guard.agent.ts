@@ -1,6 +1,7 @@
 import { isInventoryCapable } from '@patioer/harness'
 import type { HarnessInventoryLevel } from '@patioer/harness'
 import type { AgentContext } from '../context.js'
+import { errorMessage } from '../error-message.js'
 import type {
   InventoryGuardPersistRow,
   InventoryGuardRunInput,
@@ -125,7 +126,7 @@ export async function runInventoryGuard(
       await ctx.logAction('inventory_guard.platform.fetch_failed', {
         runId,
         platform,
-        error: err instanceof Error ? err.message : String(err),
+        error: errorMessage(err),
       })
       continue
     }

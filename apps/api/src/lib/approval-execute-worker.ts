@@ -8,16 +8,19 @@ import type { AdsCapableHarness, TenantHarness } from '@patioer/harness'
 import { HarnessError } from '@patioer/harness'
 import { withTenantDb, schema, type AppDb } from '@patioer/db'
 import { z } from 'zod'
+import { UUID_LOOSE_RE } from '@patioer/shared'
 import { registry } from './harness-registry.js'
 import { getOrCreateHarnessFromCredential } from './harness-from-credential.js'
 import { optionalPlatformZod, platformZod } from './platform-schema.js'
 import { parseElectroosPlatformFromPayload, resolveFirstCredentialForTenant } from './resolve-credential.js'
 import type { SupportedPlatform } from './harness-factory.js'
 
+const zUuid = z.string().regex(UUID_LOOSE_RE).transform((v) => v.toLowerCase())
+
 const approvalExecutePayloadSchema = z.object({
-  tenantId: z.string().uuid(),
-  agentId: z.string().uuid(),
-  approvalId: z.string().uuid(),
+  tenantId: zUuid,
+  agentId: zUuid,
+  approvalId: zUuid,
   action: z.string().min(1),
   payload: z.unknown(),
   platform: optionalPlatformZod,

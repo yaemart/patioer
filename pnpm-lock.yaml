@@ -126,6 +126,9 @@ importers:
       '@patioer/dataos-client':
         specifier: workspace:*
         version: link:../../packages/dataos-client
+      '@patioer/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       bullmq:
         specifier: ^5.71.0
         version: 5.71.0

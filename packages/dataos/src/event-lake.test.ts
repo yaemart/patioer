@@ -90,9 +90,8 @@ describe('EventLakeService', () => {
     expect(arg.values[0].approved).toBe(0)
   })
 
-  it('close can be called multiple times', async () => {
+  it('close delegates to clickhouse client', async () => {
     const svc = new EventLakeService({ url: 'http://localhost:8123' })
-    await svc.close()
     await svc.close()
     expect(close).toHaveBeenCalledTimes(1)
   })

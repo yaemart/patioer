@@ -1,6 +1,7 @@
 import { Worker } from 'bullmq'
 import { z } from 'zod'
 import { DATAOS_LAKE_QUEUE_NAME } from '@patioer/dataos-client'
+import { UUID_LOOSE_RE } from '@patioer/shared'
 import type { DataOsServices } from '@patioer/dataos'
 import { ingestionJobsProcessed, ingestionJobsFailed } from '../metrics.js'
 import type { RedisConnection } from '../redis-url.js'
@@ -8,7 +9,7 @@ import type { RedisConnection } from '../redis-url.js'
 const INGESTION_MAX_ATTEMPTS = 3
 
 const lakeIngestJobSchema = z.object({
-  tenantId: z.string().uuid(),
+  tenantId: z.string().regex(UUID_LOOSE_RE).transform((v) => v.toLowerCase()),
   platform: z.string().optional(),
   agentId: z.string().min(1),
   eventType: z.string().min(1),

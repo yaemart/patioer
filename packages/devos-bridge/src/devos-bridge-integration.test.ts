@@ -78,7 +78,7 @@ describe('devos-bridge integration', () => {
     const ticket = buildSreBootstrapTicket()
     expect(isDevOsTicket(ticket)).toBe(true)
     expect(ticket.type).toBe('feature')
-    expect(ticket.context.agentId).toBe('sre-agent')
+    expect(ticket.context.agentId).toBe('cto-agent')
   })
 
   it('all alertToDevOsTicket outputs pass isDevOsTicket', () => {

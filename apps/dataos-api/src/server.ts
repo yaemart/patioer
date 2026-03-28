@@ -7,7 +7,8 @@ import { parseRedisConnection } from './redis-url.js'
 import { startIngestionWorker } from './workers/ingestion.js'
 import { startFeatureAgentInterval } from './workers/feature-agent.js'
 import { startInsightAgentInterval } from './workers/insight-agent.js'
-import { renderMetrics } from './metrics.js'
+import { renderMetrics, dataosPortErrors } from './metrics.js'
+import { registerRateLimit } from './rate-limit.js'
 
 const port = Number.parseInt(process.env.PORT ?? '3300', 10)
 const databaseUrl = process.env.DATABASE_URL
@@ -78,7 +79,37 @@ const insightTimer = startInsightAgentInterval(services, insightEveryMs, {
   outcomeLookbackDays: Number.parseInt(process.env.DATAOS_INSIGHT_LOOKBACK_DAYS ?? '7', 10),
 })
 
-const app = Fastify({ logger: true })
+const app = Fastify({ logger: true, bodyLimit: 1_048_576 })
+
+registerRateLimit(app)
+
+// 全局错误钩子：统计未被路由层消化的服务异常（Constitution Ch8.1 error_rate 等价）
+const OP_ROUTES: [string, string][] = [
+  ['/lake/price-events', 'lake_price_event'],
+  ['/lake/events', 'lake_event'],
+  ['/features/upsert', 'features_upsert'],
+  ['/features', 'features'],
+  ['/memory/recall', 'memory_recall'],
+  ['/memory/record', 'memory_record'],
+  ['/memory/outcome', 'memory_outcome'],
+  ['/memory/decisions', 'memory_decisions'],
+  ['/insight', 'insight_trigger'],
+]
+
+app.setErrorHandler((error, request, reply) => {
+  const url = request.url ?? ''
+  const method = request.method
+  let op = 'unknown'
+  for (const [pattern, base] of OP_ROUTES) {
+    if (url.includes(pattern)) {
+      op = method === 'DELETE' ? `${base}_delete` : base
+      break
+    }
+  }
+  dataosPortErrors.inc({ op })
+  request.log.error({ err: error, op }, '[dataos-api] unhandled error')
+  void reply.code(500).send({ error: 'internal server error' })
+})
 
 app.get('/health', async () => ({ ok: true, service: 'dataos-api' }))
 
@@ -100,8 +131,16 @@ async function shutdown(): Promise<void> {
   try { await app.close() } catch (e) { console.error('[dataos-api] app close error', e) }
 }
 
+const SHUTDOWN_TIMEOUT_MS = 15_000
+
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {
   process.on(sig, () => {
+    const forceExit = setTimeout(() => {
+      console.error('[dataos-api] graceful shutdown timed out, forcing exit')
+      process.exit(1)
+    }, SHUTDOWN_TIMEOUT_MS)
+    forceExit.unref()
+
     void shutdown()
       .then(() => process.exit(0))
       .catch(() => process.exit(1))

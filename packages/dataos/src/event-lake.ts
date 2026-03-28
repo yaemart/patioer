@@ -10,7 +10,6 @@ export interface EventLakeConfig {
 
 export class EventLakeService {
   private readonly client: ClickHouseClient
-  private closed = false
 
   constructor(cfg: EventLakeConfig) {
     const database = cfg.database ?? 'electroos_events'
@@ -127,9 +126,11 @@ export class EventLakeService {
     const days = opts?.intervalDays ?? 1
     const limit = Math.min(opts?.limit ?? 500, 2000)
     const params: Record<string, unknown> = { days, limit }
-    const tenantFilter = opts?.tenantId
-      ? (params.tenantId = opts.tenantId, ' AND tenant_id = {tenantId:UUID}')
-      : ''
+    let tenantFilter = ''
+    if (opts?.tenantId) {
+      params.tenantId = opts.tenantId
+      tenantFilter = ' AND tenant_id = {tenantId:UUID}'
+    }
     const res = await this.client.query({
       query: `SELECT tenant_id, platform, entity_id AS product_id, count() AS evts
               FROM events
@@ -145,8 +146,6 @@ export class EventLakeService {
   }
 
   async close(): Promise<void> {
-    if (this.closed) return
-    this.closed = true
     await this.client.close()
   }
 }

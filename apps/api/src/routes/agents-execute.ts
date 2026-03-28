@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify'
 import { z } from 'zod'
+import { UUID_LOOSE_RE } from '@patioer/shared'
 import { and, desc, eq } from 'drizzle-orm'
 import { schema } from '@patioer/db'
 import { HarnessError } from '@patioer/harness'
@@ -28,7 +29,7 @@ const enqueueDataOsLakeEvent = createLakeQueueEnqueuer({
   redisUrl: process.env.BULLMQ_CONNECTION_URL ?? process.env.REDIS_URL ?? 'redis://127.0.0.1:6379',
 })
 
-const paramsSchema = z.object({ id: z.string().uuid() })
+const paramsSchema = z.object({ id: z.string().regex(UUID_LOOSE_RE).transform((v) => v.toLowerCase()) })
 
 export type { BudgetStatus }
 

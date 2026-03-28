@@ -1,6 +1,7 @@
 /** Same queue name as `@patioer/dataos` / DataOS API worker (BullMQ). */
 export const DATAOS_LAKE_QUEUE_NAME = 'dataos-lake-ingest'
 
+
 export interface DataOsLakeEventPayload {
   tenantId: string
   platform?: string
@@ -63,6 +64,7 @@ export class DataOsClient {
   ): Promise<T | null> {
     const ctrl = new AbortController()
     const t = setTimeout(() => ctrl.abort(), this.timeoutMs)
+    const method = init.method ?? 'GET'
     try {
       const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
         ...init,
@@ -74,9 +76,16 @@ export class DataOsClient {
           ...(init.headers as Record<string, string>),
         },
       })
-      if (!res.ok) return null
+      if (!res.ok) {
+        console.warn(`[dataos-client] ${method} ${path} → HTTP ${res.status}`)
+        return null
+      }
       return (await res.json()) as T
-    } catch {
+    } catch (err) {
+      const reason = ctrl.signal.aborted
+        ? `timeout after ${this.timeoutMs}ms`
+        : err instanceof Error ? err.message : String(err)
+      console.warn(`[dataos-client] ${method} ${path} → ${reason}`)
       return null
     } finally {
       clearTimeout(t)

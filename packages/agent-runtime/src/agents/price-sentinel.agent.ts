@@ -1,5 +1,6 @@
 import { HarnessError } from '@patioer/harness'
 import type { AgentContext } from '../context.js'
+import { errorMessage } from '../error-message.js'
 import type { PriceDecision, PriceSentinelRunInput } from '../types.js'
 
 const DEFAULT_APPROVAL_THRESHOLD_PERCENT = 15
@@ -43,15 +44,41 @@ function buildDecision(
   }
 }
 
+/**
+ * Derive a per-product approval threshold from Feature Store conv_rate_7d.
+ * High-converting products are more sensitive to price changes → lower threshold.
+ * Returns the base threshold when conv_rate_7d is unavailable.
+ *
+ * Adaptive rules (Phase 3 AN-FIX-02 / AC-P3-14):
+ *  conv_rate_7d ≥ 0.05 (5%) → base − 5pp  (protect top performers)
+ *  conv_rate_7d ≤ 0.01 (1%) → base + 5pp  (relax for low performers)
+ *  otherwise                → base
+ */
+function adaptiveThreshold(base: number, convRate7d: number | null): number {
+  if (convRate7d === null || !Number.isFinite(convRate7d)) return base
+  if (convRate7d >= 0.05) return Math.max(5, base - 5)
+  if (convRate7d <= 0.01) return Math.min(30, base + 5)
+  return base
+}
+
+async function safeDataOsWrite(ctx: AgentContext, productId: string, fn: () => Promise<void>): Promise<void> {
+  if (!ctx.dataOS) return
+  try {
+    await fn()
+  } catch (err) {
+    await ctx.logAction('price_sentinel.dataos_write_failed', { productId, error: errorMessage(err) })
+  }
+}
+
 export async function runPriceSentinel(
   ctx: AgentContext,
   input: PriceSentinelRunInput,
 ): Promise<{ decisions: PriceDecision[] }> {
   const raw = input.approvalThresholdPercent ?? DEFAULT_APPROVAL_THRESHOLD_PERCENT
-  const threshold = Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_APPROVAL_THRESHOLD_PERCENT
+  const baseThreshold = Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_APPROVAL_THRESHOLD_PERCENT
   await ctx.logAction('price_sentinel.run.started', {
     proposalCount: input.proposals.length,
-    threshold,
+    baseThreshold,
   })
 
   if (await ctx.budget.isExceeded()) {
@@ -66,6 +93,27 @@ export async function runPriceSentinel(
 
   for (const proposal of input.proposals) {
     assertValidProposal(proposal)
+
+    // AN-FIX-02: read Feature Store to adaptively tune approval threshold per product.
+    // High-converting products get a tighter threshold; low performers get looser.
+    let threshold = baseThreshold
+    if (ctx.dataOS) {
+      try {
+        const features = await ctx.dataOS.getFeatures(platform, proposal.productId)
+        const convRate = Number(features?.conv_rate_7d)
+        threshold = adaptiveThreshold(baseThreshold, Number.isFinite(convRate) ? convRate : null)
+        if (threshold !== baseThreshold) {
+          await ctx.logAction('price_sentinel.threshold_adapted', {
+            productId: proposal.productId,
+            baseThreshold,
+            adaptedThreshold: threshold,
+            conv_rate_7d: convRate,
+          })
+        }
+      } catch {
+        await ctx.logAction('price_sentinel.dataos_degraded', { productId: proposal.productId, op: 'getFeatures' })
+      }
+    }
 
     const decision = buildDecision(
       proposal.productId,
@@ -83,26 +131,23 @@ export async function runPriceSentinel(
         reason: `price delta ${decision.deltaPercent.toFixed(2)}% exceeds ${threshold}% threshold`,
       })
       await ctx.logAction('price_sentinel.approval_requested', { decision })
-      if (ctx.dataOS) {
-        try {
-          await ctx.dataOS.recordLakeEvent({
-            agentId: ctx.agentId,
-            eventType: 'price_change_pending',
-            entityId: proposal.productId,
-            payload: decision,
-            metadata: { agentType: 'price-sentinel', reason: 'approval_required' },
-          })
-          await ctx.dataOS.recordPriceEvent({
-            productId: proposal.productId,
-            priceBefore: decision.currentPrice,
-            priceAfter: decision.proposedPrice,
-            changePct: decision.deltaPercent,
-            approved: false,
-          })
-        } catch {
-          await ctx.logAction('price_sentinel.dataos_write_failed', { productId: proposal.productId })
-        }
-      }
+      await safeDataOsWrite(ctx, proposal.productId, async () => {
+        await ctx.dataOS!.recordLakeEvent({
+          agentId: ctx.agentId,
+          eventType: 'price_change_pending',
+          entityId: proposal.productId,
+          payload: decision,
+          metadata: { agentType: 'price-sentinel', reason: 'approval_required' },
+        })
+        await ctx.dataOS!.recordPriceEvent({
+          platform,
+          productId: proposal.productId,
+          priceBefore: decision.currentPrice,
+          priceAfter: decision.proposedPrice,
+          changePct: decision.deltaPercent,
+          approved: false,
+        })
+      })
       continue
     }
 
@@ -110,7 +155,7 @@ export async function runPriceSentinel(
     // auth-expired, 5xx) is caught, logged as a structured harness_error event, and the
     // proposal is skipped so subsequent proposals can still be processed.
     try {
-      await ctx.getHarness().updatePrice(decision.productId, decision.proposedPrice)
+      await ctx.getHarness(platform).updatePrice(decision.productId, decision.proposedPrice)
     } catch (err) {
       const code = err instanceof HarnessError ? err.code : 'unknown'
       await ctx.logAction('price_sentinel.harness_error', {
@@ -118,51 +163,46 @@ export async function runPriceSentinel(
         platform,
         code,
         productId: proposal.productId,
-        message: err instanceof Error ? err.message : String(err),
+        message: errorMessage(err),
       })
       continue
     }
     await ctx.logAction('price_sentinel.price_updated', { decision })
 
-    if (ctx.dataOS) {
-      try {
-        const decisionId = await ctx.dataOS.recordMemory({
-          agentId: 'price-sentinel',
-          entityId: proposal.productId,
-          context: { product: proposal },
-          action: {
-            newPrice: decision.proposedPrice,
-            reason: decision.reason,
-          },
+    await safeDataOsWrite(ctx, proposal.productId, async () => {
+      const decisionId = await ctx.dataOS!.recordMemory({
+        agentId: 'price-sentinel',
+        entityId: proposal.productId,
+        context: { product: proposal },
+        action: {
+          newPrice: decision.proposedPrice,
+          reason: decision.reason,
+        },
+      })
+      // recall() only returns memories where outcome IS NOT NULL, so write immediately.
+      if (decisionId) {
+        await ctx.dataOS!.writeOutcome(decisionId, {
+          applied: true,
+          actualPrice: decision.proposedPrice,
+          appliedAt: new Date().toISOString(),
         })
-        // Close the learning loop: write outcome immediately since the price was already applied.
-        // recall() only returns memories where outcome IS NOT NULL, so without this call
-        // no historical context would ever surface in future runs.
-        if (decisionId) {
-          await ctx.dataOS.writeOutcome(decisionId, {
-            applied: true,
-            actualPrice: decision.proposedPrice,
-            appliedAt: new Date().toISOString(),
-          })
-        }
-        await ctx.dataOS.recordLakeEvent({
-          agentId: ctx.agentId,
-          eventType: 'price_changed',
-          entityId: proposal.productId,
-          payload: decision,
-          metadata: { agentType: 'price-sentinel' },
-        })
-        await ctx.dataOS.recordPriceEvent({
-          productId: proposal.productId,
-          priceBefore: decision.currentPrice,
-          priceAfter: decision.proposedPrice,
-          changePct: decision.deltaPercent,
-          approved: true,
-        })
-      } catch {
-        await ctx.logAction('price_sentinel.dataos_write_failed', { productId: proposal.productId })
       }
-    }
+      await ctx.dataOS!.recordLakeEvent({
+        agentId: ctx.agentId,
+        eventType: 'price_changed',
+        entityId: proposal.productId,
+        payload: decision,
+        metadata: { agentType: 'price-sentinel' },
+      })
+      await ctx.dataOS!.recordPriceEvent({
+        platform,
+        productId: proposal.productId,
+        priceBefore: decision.currentPrice,
+        priceAfter: decision.proposedPrice,
+        changePct: decision.deltaPercent,
+        approved: true,
+      })
+    })
   }
 
   await ctx.logAction('price_sentinel.run.completed', {

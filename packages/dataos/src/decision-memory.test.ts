@@ -46,6 +46,23 @@ describe('DecisionMemoryService', () => {
     expect(params[3]).toBe(0.9)
   })
 
+  it('recall defaults minSimilarity to 0.01 for deterministic embeddings', async () => {
+    query.mockResolvedValue({ rows: [] })
+    const svc = new DecisionMemoryService(pool)
+    await svc.recall(TENANT_A, AGENT, { price: 10 })
+    const params: unknown[] = query.mock.calls[0][1]
+    expect(params[3]).toBe(0.01)
+  })
+
+  it('recall defaults minSimilarity to 0.75 when real embedding port is provided', async () => {
+    query.mockResolvedValue({ rows: [] })
+    const fakeEmbedding = { embed: vi.fn().mockResolvedValue(new Array(1536).fill(0.01)) }
+    const svc = new DecisionMemoryService(pool, fakeEmbedding)
+    await svc.recall(TENANT_A, AGENT, { price: 10 })
+    const params: unknown[] = query.mock.calls[0][1]
+    expect(params[3]).toBe(0.75)
+  })
+
   it('record inserts decision with context_vector', async () => {
     query.mockResolvedValue({ rows: [{ id: DECISION_ID }] })
     const svc = new DecisionMemoryService(pool)
@@ -107,15 +124,16 @@ describe('DecisionMemoryService', () => {
     expect(params[1]).toBe(200)
   })
 
-  it('delete removes a decision record and returns true when found', async () => {
+  it('delete soft-deletes a decision record and returns true when found', async () => {
     query.mockResolvedValue({ rowCount: 1 })
     const svc = new DecisionMemoryService(pool)
     const deleted = await svc.delete(DECISION_ID, TENANT_A)
     expect(deleted).toBe(true)
     const sql: string = query.mock.calls[0][0]
     const params: unknown[] = query.mock.calls[0][1]
-    expect(sql).toContain('DELETE FROM decision_memory')
+    expect(sql).toContain('UPDATE decision_memory SET deleted_at = NOW()')
     expect(sql).toContain('tenant_id = $2')
+    expect(sql).not.toContain('DELETE FROM')
     expect(params[0]).toBe(DECISION_ID)
     expect(params[1]).toBe(TENANT_A)
   })

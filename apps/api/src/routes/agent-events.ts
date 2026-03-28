@@ -2,9 +2,10 @@ import type { FastifyPluginAsync } from 'fastify'
 import { and, desc, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { schema } from '@patioer/db'
+import { UUID_LOOSE_RE } from '@patioer/shared'
 
 const listQuerySchema = z.object({
-  agentId: z.string().uuid().optional(),
+  agentId: z.string().regex(UUID_LOOSE_RE).transform((v) => v.toLowerCase()).optional(),
   action: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),

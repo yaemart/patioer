@@ -1,30 +1,42 @@
+import { timingSafeEqual } from 'node:crypto'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { z } from 'zod'
 import type { DataOsServices } from '@patioer/dataos'
+import { UUID_LOOSE_RE } from '@patioer/shared'
 import { featureCacheHits, featureCacheMisses, lakeEventsInserted } from './metrics.js'
 import { _runInsightAgentTick } from './workers/insight-agent.js'
 
+const zUuid = z.string().regex(UUID_LOOSE_RE).transform((v) => v.toLowerCase())
+
+const MAX_PAYLOAD_BYTES = 65_536
+
+const zBoundedPayload = z.unknown().refine(
+  (v) => {
+    const s = JSON.stringify(v ?? null)
+    return s !== undefined && s.length <= MAX_PAYLOAD_BYTES
+  },
+  { message: `payload must be <= ${MAX_PAYLOAD_BYTES} bytes` },
+)
+
 const lakeEventSchema = z.object({
-  tenantId: z.string().uuid(),
+  tenantId: zUuid,
   platform: z.string().optional(),
   agentId: z.string().min(1),
   eventType: z.string().min(1),
   entityId: z.string().optional(),
-  payload: z.unknown(),
+  payload: zBoundedPayload,
   metadata: z.unknown().optional(),
 })
 
 const priceEventSchema = z.object({
-  tenantId: z.string().uuid(),
-  platform: z.string().optional(),
+  tenantId: zUuid,
+  platform: z.string().min(1),
   productId: z.string().min(1),
-  priceBefore: z.number(),
-  priceAfter: z.number(),
-  changePct: z.number(),
+  priceBefore: z.number().finite().nonnegative(),
+  priceAfter: z.number().finite().nonnegative(),
+  changePct: z.number().finite(),
   approved: z.boolean(),
 })
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 function safeInt(value: string | undefined): number | undefined {
   if (!value) return undefined
@@ -34,7 +46,11 @@ function safeInt(value: string | undefined): number | undefined {
 
 function requireKey(request: FastifyRequest, reply: FastifyReply, expectedKey: string): boolean {
   const k = request.headers['x-dataos-internal-key']
-  if ((typeof k === 'string' ? k : '') !== expectedKey) {
+  const supplied = typeof k === 'string' ? k : ''
+  const valid =
+    supplied.length === expectedKey.length &&
+    timingSafeEqual(Buffer.from(supplied), Buffer.from(expectedKey))
+  if (!valid) {
     void reply.code(401).send({ error: 'unauthorized' })
     return false
   }
@@ -45,11 +61,11 @@ function requireKey(request: FastifyRequest, reply: FastifyReply, expectedKey: s
 function authGuard(request: FastifyRequest, reply: FastifyReply, expectedKey: string): string | null {
   if (!requireKey(request, reply, expectedKey)) return null
   const t = request.headers['x-tenant-id']
-  if (typeof t !== 'string' || !UUID_RE.test(t)) {
+  if (typeof t !== 'string' || !UUID_LOOSE_RE.test(t)) {
     void reply.code(400).send({ error: 'X-Tenant-Id must be a valid UUID' })
     return null
   }
-  return t
+  return t.toLowerCase()
 }
 
 const CAPABILITIES_RESPONSE = {
@@ -194,13 +210,13 @@ export function registerInternalRoutes(
   })
 
   const upsertSchema = z.object({
-    tenantId: z.string().uuid(),
-    platform: z.string(),
-    productId: z.string(),
-    priceCurrent: z.number().optional(),
-    convRate7d: z.number().optional(),
-    competitorMinPrice: z.number().optional(),
-    competitorAvgPrice: z.number().optional(),
+    tenantId: zUuid,
+    platform: z.string().min(1),
+    productId: z.string().min(1),
+    priceCurrent: z.number().finite().nonnegative().optional(),
+    convRate7d: z.number().finite().nonnegative().optional(),
+    competitorMinPrice: z.number().finite().nonnegative().optional(),
+    competitorAvgPrice: z.number().finite().nonnegative().optional(),
     pricePosition: z.string().optional(),
   })
 
@@ -257,8 +273,8 @@ export function registerInternalRoutes(
   })
 
   const outcomeSchema = z.object({
-    tenantId: z.string().uuid(),
-    decisionId: z.string().uuid(),
+    tenantId: zUuid,
+    decisionId: zUuid,
     outcome: z.unknown(),
   })
 
@@ -280,7 +296,7 @@ export function registerInternalRoutes(
     const tenantId = authGuard(request, reply, internalKey)
     if (!tenantId) return
     const { decisionId } = request.params as { decisionId: string }
-    if (!UUID_RE.test(decisionId)) {
+    if (!UUID_LOOSE_RE.test(decisionId)) {
       return reply.code(400).send({ error: 'decisionId must be a valid UUID' })
     }
     const deleted = await services.decisionMemory.delete(decisionId, tenantId)
@@ -288,11 +304,8 @@ export function registerInternalRoutes(
   })
 
   app.post('/internal/v1/insight/trigger', async (request, reply) => {
-    if (!requireKey(request, reply, internalKey)) return
-    const tenantHeader = request.headers['x-tenant-id']
-    const tenantId = typeof tenantHeader === 'string' && UUID_RE.test(tenantHeader)
-      ? tenantHeader
-      : undefined
+    const tenantId = authGuard(request, reply, internalKey)
+    if (!tenantId) return
     const result = await _runInsightAgentTick(services, {
       outcomeLookbackDays: 7,
       maxDecisionsPerTick: 100,

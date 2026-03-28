@@ -130,7 +130,7 @@ describe('POST /internal/v1/lake/price-events', () => {
     const res = await app.inject({
       method: 'POST', url: '/internal/v1/lake/price-events',
       headers: { ...headers(), 'content-type': 'application/json' },
-      payload: { tenantId: TENANT, productId: 'P001', priceBefore: 10, priceAfter: 12, changePct: 20, approved: true },
+      payload: { tenantId: TENANT, platform: 'amazon', productId: 'P001', priceBefore: 10, priceAfter: 12, changePct: 20, approved: true },
     })
     expect(res.statusCode).toBe(200)
     expect(res.json()).toEqual({ ok: true })
@@ -140,7 +140,7 @@ describe('POST /internal/v1/lake/price-events', () => {
     const res = await app.inject({
       method: 'POST', url: '/internal/v1/lake/price-events',
       headers: { ...headers(), 'content-type': 'application/json' },
-      payload: { tenantId: '660e8400-e29b-41d4-a716-446655440099', productId: 'P001', priceBefore: 10, priceAfter: 12, changePct: 20, approved: true },
+      payload: { tenantId: '660e8400-e29b-41d4-a716-446655440099', platform: 'amazon', productId: 'P001', priceBefore: 10, priceAfter: 12, changePct: 20, approved: true },
     })
     expect(res.statusCode).toBe(403)
   })
@@ -495,40 +495,32 @@ describe('POST /internal/v1/insight/trigger', () => {
     expect(res.statusCode).toBe(401)
   })
 
-  it('returns tick result on success (no tenant scope)', async () => {
+  it('returns 400 when X-Tenant-Id is missing (tenant isolation enforced)', async () => {
     const res = await app.inject({
       method: 'POST', url: '/internal/v1/insight/trigger',
       headers: { 'x-dataos-internal-key': KEY },
     })
-    expect(res.statusCode).toBe(200)
-    expect(res.json()).toEqual({ ok: true, processed: 3, written: 2, failed: 1 })
-    expect(_runInsightAgentTick).toHaveBeenCalledWith(
-      expect.anything(),
-      { outcomeLookbackDays: 7, maxDecisionsPerTick: 100, tenantId: undefined },
-    )
+    expect(res.statusCode).toBe(400)
   })
 
-  it('passes tenantId from X-Tenant-Id header when valid UUID (Constitution Ch2.5)', async () => {
+  it('returns tick result on success with valid tenantId', async () => {
     const res = await app.inject({
       method: 'POST', url: '/internal/v1/insight/trigger',
       headers: { 'x-dataos-internal-key': KEY, 'x-tenant-id': TENANT },
     })
     expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ ok: true, processed: 3, written: 2, failed: 1 })
     expect(_runInsightAgentTick).toHaveBeenCalledWith(
       expect.anything(),
       { outcomeLookbackDays: 7, maxDecisionsPerTick: 100, tenantId: TENANT },
     )
   })
 
-  it('ignores invalid X-Tenant-Id header (falls back to all tenants)', async () => {
+  it('returns 400 for invalid X-Tenant-Id header', async () => {
     const res = await app.inject({
       method: 'POST', url: '/internal/v1/insight/trigger',
       headers: { 'x-dataos-internal-key': KEY, 'x-tenant-id': 'not-a-uuid' },
     })
-    expect(res.statusCode).toBe(200)
-    expect(_runInsightAgentTick).toHaveBeenCalledWith(
-      expect.anything(),
-      { outcomeLookbackDays: 7, maxDecisionsPerTick: 100, tenantId: undefined },
-    )
+    expect(res.statusCode).toBe(400)
   })
 })

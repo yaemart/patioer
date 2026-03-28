@@ -1,6 +1,8 @@
-import { randomUUID } from 'node:crypto'
 import { HarnessError } from '@patioer/harness'
 import type { AgentContext } from '../context.js'
+import { errorMessage } from '../error-message.js'
+import { extractFirstJsonObject } from '../extract-json.js'
+import { randomRunId } from '../run-id.js'
 import type {
   MarketIntelCompetitorInsight,
   MarketIntelRunInput,
@@ -26,14 +28,15 @@ function buildAnalysisPrompt(
     lines.push(JSON.stringify(features, null, 2))
   }
 
-  lines.push(`\nBased on market data and your knowledge, estimate competitor pricing.`)
-  lines.push(`Respond with valid JSON in this exact shape:`)
-  lines.push(`{`)
-  lines.push(`  "competitorMinPrice": <number>,`)
-  lines.push(`  "competitorAvgPrice": <number>,`)
-  lines.push(`  "pricePosition": "below" | "at" | "above",`)
-  lines.push(`  "recommendation": "<optional string>"`)
-  lines.push(`}`)
+  lines.push(`
+Based on market data and your knowledge, estimate competitor pricing.
+Respond with valid JSON in this exact shape:
+{
+  "competitorMinPrice": <number>,
+  "competitorAvgPrice": <number>,
+  "pricePosition": "below" | "at" | "above",
+  "recommendation": "<optional string>"
+}`)
 
   return lines.join('\n')
 }
@@ -44,13 +47,14 @@ function parseLlmInsight(
   platform: string,
 ): MarketIntelCompetitorInsight | null {
   try {
-    const jsonMatch = text.match(/\{[\s\S]*\}/)
+    const jsonMatch = extractFirstJsonObject(text)
     if (!jsonMatch) return null
-    const parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>
+    const parsed = JSON.parse(jsonMatch) as Record<string, unknown>
 
     const competitorMinPrice = Number(parsed.competitorMinPrice)
     const competitorAvgPrice = Number(parsed.competitorAvgPrice)
-    if (!Number.isFinite(competitorMinPrice) || !Number.isFinite(competitorAvgPrice)) return null
+    if (!Number.isFinite(competitorMinPrice) || competitorMinPrice < 0) return null
+    if (!Number.isFinite(competitorAvgPrice) || competitorAvgPrice < 0) return null
 
     const pos = parsed.pricePosition
     const pricePosition =
@@ -73,7 +77,7 @@ export async function runMarketIntel(
   ctx: AgentContext,
   input: MarketIntelRunInput,
 ): Promise<MarketIntelResult> {
-  const runId = randomUUID()
+  const runId = randomRunId()
   const platforms = input.platforms ?? ctx.getEnabledPlatforms()
   const maxProducts = input.maxProducts ?? DEFAULT_MAX_PRODUCTS
 
@@ -97,7 +101,7 @@ export async function runMarketIntel(
       await ctx.logAction('market_intel.platform_skipped', {
         platform,
         code,
-        reason: err instanceof Error ? err.message : String(err),
+        reason: errorMessage(err),
       })
       continue
     }
@@ -107,11 +111,12 @@ export async function runMarketIntel(
       if (ctx.dataOS) {
         try {
           features = await ctx.dataOS.getFeatures(platform, product.id)
-        } catch {
+        } catch (err) {
           await ctx.logAction('market_intel.dataos_degraded', {
             productId: product.id,
             platform,
             op: 'getFeatures',
+            error: errorMessage(err),
           })
         }
       }
@@ -119,17 +124,17 @@ export async function runMarketIntel(
       let insight: MarketIntelCompetitorInsight | null
       try {
         const prompt = buildAnalysisPrompt(product, platform, features)
+        const dataOsContext = ctx.describeDataOsCapabilities()
         const llmResponse = await ctx.llm({
           prompt,
-          systemPrompt:
-            'You are a market intelligence analyst for e-commerce. Analyze competitor pricing based on the product information. Always respond with valid JSON.',
+          systemPrompt: `You are a market intelligence analyst for e-commerce. Analyze competitor pricing based on the product information. Always respond with valid JSON.\n\nData context: ${dataOsContext}`,
         })
         insight = parseLlmInsight(llmResponse.text, product.id, platform)
       } catch (err) {
         await ctx.logAction('market_intel.llm_failed', {
           productId: product.id,
           platform,
-          message: err instanceof Error ? err.message : String(err),
+          message: errorMessage(err),
         })
         continue
       }
@@ -155,11 +160,12 @@ export async function runMarketIntel(
             pricePosition: insight.pricePosition,
           })
           featuresUpdated++
-        } catch {
+        } catch (err) {
           await ctx.logAction('market_intel.dataos_write_failed', {
             productId: product.id,
             platform,
             op: 'upsertFeature',
+            error: errorMessage(err),
           })
         }
       }
@@ -174,8 +180,8 @@ export async function runMarketIntel(
         payload: { runId, analyzedProducts, featuresUpdated, insightCount: insights.length },
         metadata: { agentType: 'market-intel', platforms },
       })
-    } catch {
-      await ctx.logAction('market_intel.dataos_write_failed', { runId, op: 'recordLakeEvent' })
+    } catch (err) {
+      await ctx.logAction('market_intel.dataos_write_failed', { runId, op: 'recordLakeEvent', error: errorMessage(err) })
     }
   }
 
