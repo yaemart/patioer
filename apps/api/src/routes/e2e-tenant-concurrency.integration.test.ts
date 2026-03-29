@@ -5,14 +5,20 @@ import tenantPlugin from '../plugins/tenant.js'
 import agentsRoute from './agents.js'
 import productsRoute from './products.js'
 import ordersRoute from './orders.js'
+import { generateJwt } from './auth.js'
 import {
   closePool,
   seedTenantData,
+  setupTwoTenants,
   teardownTwoTenants,
   type SeedResult,
   type TenantFixture,
 } from '@patioer/db/testing'
-import { setupTwoTenants } from '@patioer/db/testing'
+
+function authHeaders(tenantId: string) {
+  const token = generateJwt({ userId: tenantId, tenantId, email: 'e2e@test', role: 'owner', plan: 'starter' })
+  return { authorization: `Bearer ${token}`, 'x-tenant-id': tenantId }
+}
 
 const isIntegration = !!process.env.DATABASE_URL
 const TENANT_COUNT = 10
@@ -84,21 +90,22 @@ describe.skipIf(!isIntegration)('E2E 10-tenant concurrency isolation', () => {
     for (let round = 1; round <= ROUNDS; round += 1) {
       await Promise.all(
         cases.map(async ({ tenantId, seed }) => {
+          const hdrs = authHeaders(tenantId)
           const [agentsRes, productsRes, ordersRes] = await Promise.all([
             app.inject({
               method: 'GET',
               url: '/api/v1/agents',
-              headers: { 'x-tenant-id': tenantId },
+              headers: hdrs,
             }),
             app.inject({
               method: 'GET',
               url: '/api/v1/products',
-              headers: { 'x-tenant-id': tenantId },
+              headers: hdrs,
             }),
             app.inject({
               method: 'GET',
               url: '/api/v1/orders',
-              headers: { 'x-tenant-id': tenantId },
+              headers: hdrs,
             }),
           ])
 
@@ -127,7 +134,7 @@ describe.skipIf(!isIntegration)('E2E 10-tenant concurrency isolation', () => {
     const res = await app.inject({
       method: 'GET',
       url: `/api/v1/agents/${tenantB.seed.agentId}`,
-      headers: { 'x-tenant-id': tenantA.tenantId },
+      headers: authHeaders(tenantA.tenantId),
     })
     expect(res.statusCode).toBe(404)
   })

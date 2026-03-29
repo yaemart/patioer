@@ -7,6 +7,7 @@ import productsRoute from './products.js'
 import ordersRoute from './orders.js'
 import approvalsRoute from './approvals.js'
 import adsInventoryRoute from './ads-inventory.js'
+import { generateJwt } from './auth.js'
 import {
   closePool,
   seedTenantData,
@@ -15,6 +16,11 @@ import {
   type SeedResult,
   type TenantFixture,
 } from '@patioer/db/testing'
+
+function authHeaders(tenantId: string) {
+  const token = generateJwt({ userId: tenantId, tenantId, email: 'e2e@test', role: 'owner', plan: 'starter' })
+  return { authorization: `Bearer ${token}`, 'x-tenant-id': tenantId }
+}
 
 const isIntegration = !!process.env.DATABASE_URL
 
@@ -63,7 +69,7 @@ describe.skipIf(!isIntegration)('E2E multi-tenant isolation via HTTP', () => {
       const res = await app.inject({
         method: 'GET',
         url: '/api/v1/agents',
-        headers: { 'x-tenant-id': fix.tenantAId },
+        headers: authHeaders(fix.tenantAId),
       })
       expect(res.statusCode).toBe(200)
       const { agents } = res.json()
@@ -75,7 +81,7 @@ describe.skipIf(!isIntegration)('E2E multi-tenant isolation via HTTP', () => {
       const res = await app.inject({
         method: 'GET',
         url: '/api/v1/agents',
-        headers: { 'x-tenant-id': fix.tenantBId },
+        headers: authHeaders(fix.tenantBId),
       })
       expect(res.statusCode).toBe(200)
       const { agents } = res.json()
@@ -87,7 +93,7 @@ describe.skipIf(!isIntegration)('E2E multi-tenant isolation via HTTP', () => {
       const res = await app.inject({
         method: 'GET',
         url: `/api/v1/agents/${seedB.agentId}`,
-        headers: { 'x-tenant-id': fix.tenantAId },
+        headers: authHeaders(fix.tenantAId),
       })
       expect(res.statusCode).toBe(404)
     })
@@ -100,7 +106,7 @@ describe.skipIf(!isIntegration)('E2E multi-tenant isolation via HTTP', () => {
       const res = await app.inject({
         method: 'GET',
         url: '/api/v1/products',
-        headers: { 'x-tenant-id': fix.tenantAId },
+        headers: authHeaders(fix.tenantAId),
       })
       expect(res.statusCode).toBe(200)
       const { products } = res.json()
@@ -113,7 +119,7 @@ describe.skipIf(!isIntegration)('E2E multi-tenant isolation via HTTP', () => {
       const res = await app.inject({
         method: 'GET',
         url: '/api/v1/products',
-        headers: { 'x-tenant-id': fix.tenantBId },
+        headers: authHeaders(fix.tenantBId),
       })
       expect(res.statusCode).toBe(200)
       const { products } = res.json()
@@ -130,7 +136,7 @@ describe.skipIf(!isIntegration)('E2E multi-tenant isolation via HTTP', () => {
       const res = await app.inject({
         method: 'GET',
         url: '/api/v1/orders',
-        headers: { 'x-tenant-id': fix.tenantAId },
+        headers: authHeaders(fix.tenantAId),
       })
       expect(res.statusCode).toBe(200)
       const { orders } = res.json()
@@ -146,7 +152,7 @@ describe.skipIf(!isIntegration)('E2E multi-tenant isolation via HTTP', () => {
       const res = await app.inject({
         method: 'GET',
         url: '/api/v1/approvals',
-        headers: { 'x-tenant-id': fix.tenantAId },
+        headers: authHeaders(fix.tenantAId),
       })
       expect(res.statusCode).toBe(200)
       const { approvals } = res.json()
@@ -158,7 +164,7 @@ describe.skipIf(!isIntegration)('E2E multi-tenant isolation via HTTP', () => {
       const res = await app.inject({
         method: 'PATCH',
         url: `/api/v1/approvals/${seedA.approvalId}/resolve`,
-        headers: { 'x-tenant-id': fix.tenantBId },
+        headers: authHeaders(fix.tenantBId),
         payload: { status: 'approved', resolvedBy: 'attacker' },
       })
       expect(res.statusCode).toBe(404)
@@ -172,7 +178,7 @@ describe.skipIf(!isIntegration)('E2E multi-tenant isolation via HTTP', () => {
       const res = await app.inject({
         method: 'GET',
         url: '/api/v1/ads/campaigns',
-        headers: { 'x-tenant-id': fix.tenantAId },
+        headers: authHeaders(fix.tenantAId),
       })
       expect(res.statusCode).toBe(200)
       const { campaigns } = res.json()
@@ -185,7 +191,7 @@ describe.skipIf(!isIntegration)('E2E multi-tenant isolation via HTTP', () => {
       const res = await app.inject({
         method: 'GET',
         url: '/api/v1/ads/campaigns',
-        headers: { 'x-tenant-id': fix.tenantBId },
+        headers: authHeaders(fix.tenantBId),
       })
       expect(res.statusCode).toBe(200)
       const { campaigns } = res.json()
@@ -202,7 +208,7 @@ describe.skipIf(!isIntegration)('E2E multi-tenant isolation via HTTP', () => {
       const res = await app.inject({
         method: 'GET',
         url: '/api/v1/inventory',
-        headers: { 'x-tenant-id': fix.tenantAId },
+        headers: authHeaders(fix.tenantAId),
       })
       expect(res.statusCode).toBe(200)
       const { items } = res.json()
@@ -215,7 +221,7 @@ describe.skipIf(!isIntegration)('E2E multi-tenant isolation via HTTP', () => {
       const res = await app.inject({
         method: 'GET',
         url: '/api/v1/inventory',
-        headers: { 'x-tenant-id': fix.tenantBId },
+        headers: authHeaders(fix.tenantBId),
       })
       expect(res.statusCode).toBe(200)
       const { items } = res.json()
