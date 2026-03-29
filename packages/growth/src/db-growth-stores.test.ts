@@ -1,13 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const {
-  state,
-  schemaMock,
-  dbMock,
-  mockWithTenantDb,
-} = vi.hoisted(() => {
+const { state, schemaMock, dbMock, mockWithTenantDb } = vi.hoisted(() => {
   const schemaMock = {
-    tenants: { __table: 'tenants', id: 'id' },
     referralCodes: {
       __table: 'referralCodes',
       id: 'id',
@@ -35,71 +29,53 @@ const {
   }
 
   const state = {
-    tenants: [
-      { id: 'tenant-a' },
-      { id: 'tenant-b' },
-      { id: 'tenant-c' },
-    ],
-    referralCodes: new Map<string, Array<Record<string, unknown>>>(),
-    referralRewards: new Map<string, Array<Record<string, unknown>>>(),
-    npsResponses: new Map<string, Array<Record<string, unknown>>>(),
+    referralCodes: [] as Array<Record<string, unknown>>,
+    referralRewards: [] as Array<Record<string, unknown>>,
+    npsResponses: [] as Array<Record<string, unknown>>,
   }
 
-  function getTenantRows(
-    table: { __table: string },
-    tenantId: string,
-  ): Array<Record<string, unknown>> {
-    if (table.__table === 'referralCodes') {
-      const rows = state.referralCodes.get(tenantId)
-      if (rows) return rows
-      const created: Array<Record<string, unknown>> = []
-      state.referralCodes.set(tenantId, created)
-      return created
+  function rowsFor(table: { __table: string }): Array<Record<string, unknown>> {
+    switch (table.__table) {
+      case 'referralCodes':
+        return state.referralCodes
+      case 'referralRewards':
+        return state.referralRewards
+      case 'npsResponses':
+        return state.npsResponses
+      default:
+        return []
     }
+  }
 
-    if (table.__table === 'referralRewards') {
-      const rows = state.referralRewards.get(tenantId)
-      if (rows) return rows
-      const created: Array<Record<string, unknown>> = []
-      state.referralRewards.set(tenantId, created)
-      return created
+  function makeSelectResult(
+    rows: Array<Record<string, unknown>>,
+    fields?: Record<string, unknown>,
+  ) {
+    if (fields && 'id' in fields) {
+      return rows.map((row) => ({ id: row.id }))
     }
-
-    const rows = state.npsResponses.get(tenantId)
-    if (rows) return rows
-    const created: Array<Record<string, unknown>> = []
-    state.npsResponses.set(tenantId, created)
-    return created
+    return rows
   }
 
   function makeTenantDb(tenantId: string) {
-    function selectRows(
-      table: { __table: string },
-      fields?: Record<string, unknown>,
-      predicate?: (row: Record<string, unknown>) => boolean,
-      count?: number,
-    ) {
-      const rows = getTenantRows(table, tenantId)
-        .filter((row) => (predicate ? predicate(row) : true))
-      const limited = typeof count === 'number' ? rows.slice(0, count) : rows
-      if (fields && 'id' in fields) {
-        return limited.map((row) => ({ id: row.id }))
-      }
-      return limited
-    }
-
     return {
       select: vi.fn((fields?: Record<string, unknown>) => ({
         from: vi.fn((table: { __table: string }) => ({
           where: vi.fn((predicate?: (row: Record<string, unknown>) => boolean) => {
-            const rows = selectRows(table, fields, predicate)
+            const rows = rowsFor(table).filter((row) => {
+              const belongsToTenant =
+                row.tenantId === tenantId ||
+                row.referrerTenantId === tenantId
+              return belongsToTenant && (predicate ? predicate(row) : true)
+            })
+            const result = makeSelectResult(rows, fields)
             return {
-              limit: vi.fn(async (count: number) => selectRows(table, fields, predicate, count)),
-              then<TResult1 = typeof rows, TResult2 = never>(
-                onfulfilled?: ((value: typeof rows) => TResult1 | PromiseLike<TResult1>) | null,
+              limit: vi.fn(async (count: number) => result.slice(0, count)),
+              then<TResult1 = typeof result, TResult2 = never>(
+                onfulfilled?: ((value: typeof result) => TResult1 | PromiseLike<TResult1>) | null,
                 onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
               ) {
-                return Promise.resolve(rows).then(onfulfilled, onrejected)
+                return Promise.resolve(result).then(onfulfilled, onrejected)
               },
             }
           }),
@@ -107,25 +83,37 @@ const {
       })),
       insert: vi.fn((table: { __table: string }) => ({
         values: vi.fn(async (value: Record<string, unknown>) => {
-          getTenantRows(table, tenantId).push({ ...value })
+          rowsFor(table).push({ ...value })
         }),
-      })),
-      update: vi.fn((table: { __table: string }) => ({
-        set: vi.fn((value: Record<string, unknown>) => ({
-          where: vi.fn(async (predicate: (row: Record<string, unknown>) => boolean) => {
-            const rows = getTenantRows(table, tenantId)
-            for (const row of rows) {
-              if (predicate(row)) Object.assign(row, value)
-            }
-          }),
-        })),
       })),
     }
   }
 
   const dbMock = {
-    select: vi.fn((_fields: Record<string, unknown>) => ({
-      from: vi.fn(async () => state.tenants.map((tenant) => ({ id: tenant.id }))),
+    select: vi.fn((fields?: Record<string, unknown>) => ({
+      from: vi.fn((table: { __table: string }) => ({
+        where: vi.fn((predicate?: (row: Record<string, unknown>) => boolean) => {
+          const rows = rowsFor(table).filter((row) => (predicate ? predicate(row) : true))
+          const result = makeSelectResult(rows, fields)
+          return {
+            limit: vi.fn(async (count: number) => result.slice(0, count)),
+          }
+        }),
+      })),
+    })),
+    insert: vi.fn((table: { __table: string }) => ({
+      values: vi.fn(async (value: Record<string, unknown>) => {
+        rowsFor(table).push({ ...value })
+      }),
+    })),
+    update: vi.fn((table: { __table: string }) => ({
+      set: vi.fn((value: Record<string, unknown>) => ({
+        where: vi.fn(async (predicate: (row: Record<string, unknown>) => boolean) => {
+          for (const row of rowsFor(table)) {
+            if (predicate(row)) Object.assign(row, value)
+          }
+        }),
+      })),
     })),
   }
 
@@ -134,12 +122,7 @@ const {
       cb(makeTenantDb(tenantId)),
   )
 
-  return {
-    state,
-    schemaMock,
-    dbMock,
-    mockWithTenantDb,
-  }
+  return { state, schemaMock, dbMock, mockWithTenantDb }
 })
 
 vi.mock('@patioer/db', () => ({
@@ -162,9 +145,9 @@ import {
 
 describe('db growth stores', () => {
   beforeEach(() => {
-    state.referralCodes.clear()
-    state.referralRewards.clear()
-    state.npsResponses.clear()
+    state.referralCodes.length = 0
+    state.referralRewards.length = 0
+    state.npsResponses.length = 0
     vi.clearAllMocks()
   })
 
@@ -185,7 +168,7 @@ describe('db growth stores', () => {
     })
   })
 
-  it('finds referral code across tenant partitions', async () => {
+  it('finds referral code by single global lookup', async () => {
     const store = createDbReferralStore()
 
     await store.create({

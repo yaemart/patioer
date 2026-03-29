@@ -49,51 +49,42 @@ function makeMachineAuthHeaders(tenantId: string) {
   }
 }
 
-function makeMockStores() {
-  const codes = new Map<string, { id: string; tenantId: string; code: string }>()
-  const rewards: Array<Record<string, unknown>> = []
-  const npsResponses: Array<Record<string, unknown>> = []
+function makeMockDeps() {
   const events: Array<Record<string, unknown>> = []
 
   return {
-    referralCodeStore: {
-      findByCode: vi.fn(async (code: string) => codes.get(code) ?? null),
-      findByTenantId: vi.fn(async (tenantId: string) => {
-        for (const c of codes.values()) {
-          if (c.tenantId === tenantId) return c
-        }
-        return null
-      }),
-      create: vi.fn(async (entry: { id: string; tenantId: string; code: string; createdAt: Date }) => {
-        codes.set(entry.code, { id: entry.id, tenantId: entry.tenantId, code: entry.code })
-      }),
+    referralService: {
+      getOrCreateCode: vi.fn(async () => ({ code: 'ELEC-AB12', created: true })),
+      applyReferral: vi.fn(async () => ({
+        referrerTenantId: TENANT_REFERRER,
+        rewardId: 'reward-1',
+      })),
     },
-    rewardStore: {
-      create: vi.fn(async (entry: Record<string, unknown>) => { rewards.push(entry) }),
-    },
-    npsStore: {
-      hasReceivedNps: vi.fn().mockResolvedValue(false),
-      recordResponse: vi.fn(async (resp: Record<string, unknown>) => { npsResponses.push(resp) }),
+    npsService: {
+      recordNpsResponse: vi.fn(async () => ({
+        id: 'nps-1',
+        tenantId: TENANT_A,
+        score: 9,
+        feedback: 'Great product!',
+        createdAt: new Date('2026-03-29T00:00:00.000Z'),
+      })),
     },
     eventRecorder: {
       record: vi.fn(async (event: Record<string, unknown>) => { events.push(event) }),
     },
-    rewards,
-    npsResponses,
     events,
   }
 }
 
 describe('growth routes', () => {
   let app: ReturnType<typeof buildServer>
-  let mocks: ReturnType<typeof makeMockStores>
+  let mocks: ReturnType<typeof makeMockDeps>
 
   beforeEach(async () => {
-    mocks = makeMockStores()
+    mocks = makeMockDeps()
     setGrowthDeps({
-      referralCodeStore: mocks.referralCodeStore,
-      rewardStore: mocks.rewardStore,
-      npsStore: mocks.npsStore,
+      referralService: mocks.referralService,
+      npsService: mocks.npsService,
       eventRecorder: mocks.eventRecorder,
     })
     app = buildServer()
@@ -119,10 +110,9 @@ describe('growth routes', () => {
     })
 
     it('returns existing code for tenant', async () => {
-      mocks.referralCodeStore.findByTenantId.mockResolvedValueOnce({
-        id: 'existing-code-id',
-        tenantId: TENANT_A,
+      mocks.referralService.getOrCreateCode.mockResolvedValueOnce({
         code: 'ELEC-AB12',
+        created: false,
       })
 
       const res = await app.inject({
@@ -132,6 +122,7 @@ describe('growth routes', () => {
       })
       expect(res.statusCode).toBe(200)
       expect(res.json().code).toBe('ELEC-AB12')
+      expect(mocks.eventRecorder.record).not.toHaveBeenCalled()
     })
 
     it('accepts machine JWT authentication', async () => {
@@ -155,10 +146,6 @@ describe('growth routes', () => {
 
   describe('POST /api/v1/growth/apply-referral', () => {
     it('applies valid referral code', async () => {
-      mocks.referralCodeStore.findByCode.mockResolvedValueOnce({
-        id: 'r-1', tenantId: TENANT_REFERRER, code: 'ELEC-AB12',
-      })
-
       const res = await app.inject({
         method: 'POST',
         url: '/api/v1/growth/apply-referral',
@@ -167,7 +154,7 @@ describe('growth routes', () => {
       })
       expect(res.statusCode).toBe(200)
       expect(res.json().applied).toBe(true)
-      expect(mocks.rewardStore.create).toHaveBeenCalled()
+      expect(mocks.referralService.applyReferral).toHaveBeenCalledWith(TENANT_B, 'ELEC-AB12')
       expect(mocks.eventRecorder.record).toHaveBeenCalledWith(
         expect.objectContaining({
           tenantId: TENANT_B,
@@ -178,6 +165,10 @@ describe('growth routes', () => {
     })
 
     it('rejects invalid code', async () => {
+      mocks.referralService.applyReferral.mockRejectedValueOnce(
+        new Error('Invalid referral code: INVALID'),
+      )
+
       const res = await app.inject({
         method: 'POST',
         url: '/api/v1/growth/apply-referral',
@@ -188,9 +179,9 @@ describe('growth routes', () => {
     })
 
     it('rejects self-referral', async () => {
-      mocks.referralCodeStore.findByCode.mockResolvedValueOnce({
-        id: 'r-1', tenantId: TENANT_A, code: 'ELEC-AB12',
-      })
+      mocks.referralService.applyReferral.mockRejectedValueOnce(
+        new Error('Cannot use your own referral code'),
+      )
 
       const res = await app.inject({
         method: 'POST',
@@ -212,7 +203,11 @@ describe('growth routes', () => {
       })
       expect(res.statusCode).toBe(200)
       expect(res.json().recorded).toBe(true)
-      expect(mocks.npsStore.recordResponse).toHaveBeenCalled()
+      expect(mocks.npsService.recordNpsResponse).toHaveBeenCalledWith(
+        TENANT_A,
+        9,
+        'Great product!',
+      )
       expect(mocks.eventRecorder.record).toHaveBeenCalledWith(
         expect.objectContaining({
           tenantId: TENANT_A,
@@ -223,6 +218,10 @@ describe('growth routes', () => {
     })
 
     it('rejects invalid score', async () => {
+      mocks.npsService.recordNpsResponse.mockRejectedValueOnce(
+        new Error('NPS score must be an integer between 0 and 10'),
+      )
+
       const res = await app.inject({
         method: 'POST',
         url: '/api/v1/growth/nps',

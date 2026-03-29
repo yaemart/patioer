@@ -40,51 +40,30 @@ function toNpsResponse(
   }
 }
 
-async function listTenantIds(): Promise<string[]> {
-  const rows = await db
-    .select({ id: schema.tenants.id })
-    .from(schema.tenants)
-  return rows.map((row) => row.id)
+async function findReferralCodeByCode(code: string): Promise<ReferralCode | null> {
+  const [row] = await db
+    .select()
+    .from(schema.referralCodes)
+    .where(eq(schema.referralCodes.code, code))
+    .limit(1)
+  return row ? toReferralCode(row) : null
 }
 
-async function findReferralCodeAcrossTenants(code: string): Promise<ReferralCode | null> {
-  const tenantIds = await listTenantIds()
-  for (const tenantId of tenantIds) {
-    const row = await withTenantDb(tenantId, async (tenantDb) => {
-      const [match] = await tenantDb
-        .select()
-        .from(schema.referralCodes)
-        .where(eq(schema.referralCodes.code, code))
-        .limit(1)
-      return match ?? null
-    })
-    if (row) return toReferralCode(row)
-  }
-  return null
-}
-
-async function findRewardAcrossTenants(
-  whereFactory: (tenantId: string) => ReturnType<typeof and>,
+async function findReward(
+  predicate: ReturnType<typeof and>,
 ): Promise<ReferralReward | null> {
-  const tenantIds = await listTenantIds()
-  for (const tenantId of tenantIds) {
-    const row = await withTenantDb(tenantId, async (tenantDb) => {
-      const [match] = await tenantDb
-        .select()
-        .from(schema.referralRewards)
-        .where(whereFactory(tenantId))
-        .limit(1)
-      return match ?? null
-    })
-    if (row) return toReferralReward(row)
-  }
-  return null
+  const [row] = await db
+    .select()
+    .from(schema.referralRewards)
+    .where(predicate)
+    .limit(1)
+  return row ? toReferralReward(row) : null
 }
 
 export function createDbReferralStore(): ReferralStore {
   return {
     async findByCode(code) {
-      return findReferralCodeAcrossTenants(code)
+      return findReferralCodeByCode(code)
     },
 
     async findByTenantId(tenantId) {
@@ -109,15 +88,12 @@ export function createDbReferralStore(): ReferralStore {
 export function createDbRewardStore(): RewardStore {
   return {
     async create(reward) {
-      await withTenantDb(reward.referrerTenantId, async (tenantDb) => {
-        await tenantDb.insert(schema.referralRewards).values(reward)
-      })
+      await db.insert(schema.referralRewards).values(reward)
     },
 
     async findPendingForNewTenant(newTenantId) {
-      return findRewardAcrossTenants((tenantId) =>
+      return findReward(
         and(
-          eq(schema.referralRewards.referrerTenantId, tenantId),
           eq(schema.referralRewards.newTenantId, newTenantId),
           eq(schema.referralRewards.status, 'pending'),
         ),
@@ -125,20 +101,15 @@ export function createDbRewardStore(): RewardStore {
     },
 
     async updateStatus(rewardId, status) {
-      const existing = await findRewardAcrossTenants((tenantId) =>
-        and(
-          eq(schema.referralRewards.referrerTenantId, tenantId),
-          eq(schema.referralRewards.id, rewardId),
-        ),
+      const existing = await findReward(
+        and(eq(schema.referralRewards.id, rewardId)),
       )
       if (!existing) return
 
-      await withTenantDb(existing.referrerTenantId, async (tenantDb) => {
-        await tenantDb
-          .update(schema.referralRewards)
-          .set({ status })
-          .where(eq(schema.referralRewards.id, rewardId))
-      })
+      await db
+        .update(schema.referralRewards)
+        .set({ status })
+        .where(eq(schema.referralRewards.id, rewardId))
     },
   }
 }

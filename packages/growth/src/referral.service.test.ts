@@ -67,8 +67,9 @@ describe('createReferralService', () => {
       const deps = makeDeps()
       const svc = createReferralService(deps)
 
-      const code = await svc.getOrCreateCode('t-1')
-      expect(code).toMatch(/^ELEC-/)
+      const result = await svc.getOrCreateCode('t-1')
+      expect(result.code).toMatch(/^ELEC-/)
+      expect(result.created).toBe(true)
       expect(deps.referralStore.create).toHaveBeenCalled()
     })
 
@@ -80,8 +81,8 @@ describe('createReferralService', () => {
       const deps = makeDeps({ referralStore: store })
       const svc = createReferralService(deps)
 
-      const code = await svc.getOrCreateCode('t-1')
-      expect(code).toBe('ELEC-AB12')
+      const result = await svc.getOrCreateCode('t-1')
+      expect(result).toEqual({ code: 'ELEC-AB12', created: false })
       expect(store.create).not.toHaveBeenCalled()
     })
   })

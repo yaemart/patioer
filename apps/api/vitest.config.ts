@@ -30,7 +30,6 @@ export default defineConfig({
         'src/lib/agent-bootstrap.ts',
         'src/lib/approval-execute-worker.ts',
         // Phase 5 heavy-DB aggregation routes; tested via smoke + integration
-        'src/routes/dashboard.ts',
         'src/routes/console.ts',
         'src/routes/agent-events.ts',
         // Stripe webhook adapter — platform-specific branching; covered by own tests

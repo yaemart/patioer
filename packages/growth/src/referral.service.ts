@@ -18,6 +18,11 @@ export interface ReferralServiceDeps {
   generateId: () => string
 }
 
+export interface ReferralCodeResult {
+  code: string
+  created: boolean
+}
+
 const CODE_PREFIX = 'ELEC'
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 const CODE_SUFFIX_LEN = 4
@@ -33,9 +38,11 @@ export function generateReferralCode(randomFn: () => number = Math.random): stri
 export function createReferralService(deps: ReferralServiceDeps) {
   const { referralStore, rewardStore, generateId } = deps
 
-  async function getOrCreateCode(tenantId: string): Promise<string> {
+  async function getOrCreateCode(tenantId: string): Promise<ReferralCodeResult> {
     const existing = await referralStore.findByTenantId(tenantId)
-    if (existing) return existing.code
+    if (existing) {
+      return { code: existing.code, created: false }
+    }
 
     let code: string
     let attempts = 0
@@ -57,7 +64,7 @@ export function createReferralService(deps: ReferralServiceDeps) {
       createdAt: new Date(),
     })
 
-    return code
+    return { code, created: true }
   }
 
   async function applyReferral(
