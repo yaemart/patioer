@@ -63,8 +63,8 @@ export interface PaginatedResult<T> {
 // ─── Phase 2: Multi-platform HarnessRegistry types ────────────────────────────
 // Day 1: interface design → Day 6 (Sprint 3): full implementation in harness.registry.ts
 
-/** All platforms supported by the HarnessRegistry in Phase 2. */
-export type Platform = 'shopify' | 'amazon' | 'tiktok' | 'shopee'
+/** All platforms supported by the HarnessRegistry. */
+export type Platform = 'shopify' | 'amazon' | 'tiktok' | 'shopee' | 'walmart' | 'b2b'
 
 /**
  * Factory function signature used to instantiate a TenantHarness on demand.

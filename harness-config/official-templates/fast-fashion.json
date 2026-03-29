@@ -1,0 +1,24 @@
+{
+  "name": "Fast Fashion",
+  "description": "High-frequency new product launch template for fashion sellers. Emphasizes product scouting, content generation, and inventory management across all platforms.",
+  "category": "fashion",
+  "targetMarkets": ["US", "UK", "DE", "FR"],
+  "targetCategories": ["fashion", "accessories", "shoes"],
+  "platforms": ["shopify", "amazon", "tiktok", "shopee"],
+  "isOfficial": true,
+  "config": {
+    "agents": [
+      { "type": "product-scout", "name": "Product Scout", "status": "active", "goalContext": { "maxProducts": 500, "newProductScanFrequency": "daily" } },
+      { "type": "content-writer", "name": "Content Writer", "status": "active", "goalContext": { "autoGenerateListings": true, "languages": ["en", "de", "fr"] } },
+      { "type": "inventory-guard", "name": "Inventory Guard", "status": "active", "goalContext": { "safetyThreshold": 20, "fastReplenish": true } },
+      { "type": "price-sentinel", "name": "Price Sentinel", "status": "active", "goalContext": { "approvalThresholdPercent": 20 } },
+      { "type": "ads-optimizer", "name": "Ads Optimizer", "status": "active", "goalContext": { "targetRoas": 2.0 } }
+    ],
+    "governance": {
+      "monthlyBudgetUsd": 280,
+      "priceApprovalThresholdPercent": 20,
+      "adBudgetApprovalUsd": 500
+    },
+    "dataosTier": "partial"
+  }
+}

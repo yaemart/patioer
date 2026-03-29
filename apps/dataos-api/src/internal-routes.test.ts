@@ -345,7 +345,8 @@ describe('GET /internal/v1/capabilities', () => {
     })
     expect(res.statusCode).toBe(200)
     const body = JSON.parse(res.payload)
-    expect(body.version).toBe('1.0.0')
+    expect(body.version).toBe('1.1.0')
+    expect(body.entities.codebase).toBeDefined()
     expect(body.entities.events).toBeDefined()
     expect(body.entities.features).toBeDefined()
     expect(body.entities.decisions).toBeDefined()
@@ -522,5 +523,63 @@ describe('POST /internal/v1/insight/trigger', () => {
       headers: { 'x-dataos-internal-key': KEY, 'x-tenant-id': 'not-a-uuid' },
     })
     expect(res.statusCode).toBe(400)
+  })
+})
+
+describe('Codebase Intel — Agent-Native Parity (Gap-01 fix)', () => {
+  it('GET /internal/v1/codebase/query returns matches for a known query', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/internal/v1/codebase/query?q=Price+Sentinel',
+      headers: { 'x-dataos-internal-key': KEY },
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expect(body.query).toBe('Price Sentinel')
+    expect(Array.isArray(body.matches)).toBe(true)
+    expect(typeof body.indexedAt).toBe('string')
+    expect(typeof body.totalEntries).toBe('number')
+    expect(body.totalEntries).toBeGreaterThan(0)
+    expect(body.matches.length).toBeGreaterThan(0)
+    expect(body.matches[0].entry.name).toBe('price-sentinel.agent.ts')
+  })
+
+  it('GET /internal/v1/codebase/query returns 400 when q is empty', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/internal/v1/codebase/query',
+      headers: { 'x-dataos-internal-key': KEY },
+    })
+    expect(res.statusCode).toBe(400)
+  })
+
+  it('GET /internal/v1/codebase/query returns 401 without auth', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/internal/v1/codebase/query?q=price+sentinel',
+    })
+    expect(res.statusCode).toBe(401)
+  })
+
+  it('POST /internal/v1/codebase/reindex rebuilds the index', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/internal/v1/codebase/reindex',
+      headers: { 'x-dataos-internal-key': KEY },
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expect(body.ok).toBe(true)
+    expect(typeof body.entriesCount).toBe('number')
+    expect(body.entriesCount).toBeGreaterThan(0)
+    expect(typeof body.scannedAt).toBe('string')
+  })
+
+  it('POST /internal/v1/codebase/reindex returns 401 without auth', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/internal/v1/codebase/reindex',
+    })
+    expect(res.statusCode).toBe(401)
   })
 })

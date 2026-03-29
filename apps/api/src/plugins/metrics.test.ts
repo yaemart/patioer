@@ -135,4 +135,45 @@ describe('tenantRequestCounter', () => {
     expect(shopify?.value).toBe(3)
     expect(amazon?.value).toBe(1)
   })
+
+  it('accepts walmart and b2b platform labels', async () => {
+    tenantRequestCounter.labels('tenant-C', 'walmart').inc(2)
+    tenantRequestCounter.labels('tenant-C', 'b2b').inc(1)
+
+    const metrics = await metricsRegistry.getMetricsAsJSON()
+    const counter = metrics.find((m) => m.name === 'tenant_request_total')
+    const walmart = counter?.values.find(
+      (v) => v.labels['tenant_id'] === 'tenant-C' && v.labels['platform'] === 'walmart',
+    )
+    const b2b = counter?.values.find(
+      (v) => v.labels['tenant_id'] === 'tenant-C' && v.labels['platform'] === 'b2b',
+    )
+    expect(walmart?.value).toBe(2)
+    expect(b2b?.value).toBe(1)
+  })
+})
+
+describe('harness errors with new platforms', () => {
+  it('walmart harness errors are tracked', async () => {
+    harnessErrorTotal.labels('walmart', 'getProduct', 'TokenExpired').inc()
+
+    const metrics = await metricsRegistry.getMetricsAsJSON()
+    const counter = metrics.find((m) => m.name === 'harness_error_total')
+    const val = counter?.values.find(
+      (v) => v.labels['platform'] === 'walmart' && v.labels['error_type'] === 'TokenExpired',
+    )
+    expect(val?.value).toBe(1)
+  })
+
+  it('walmart webhook errors are tracked', async () => {
+    webhookHandlerErrorsTotal.labels('walmart', 'walmart:ITEM_UPDATE').inc()
+
+    const metrics = await metricsRegistry.getMetricsAsJSON()
+    const err = metrics.find((m) => m.name === 'webhook_handler_errors_total')
+    expect(
+      err?.values.find(
+        (v) => v.labels['platform'] === 'walmart' && v.labels['topic'] === 'walmart:ITEM_UPDATE',
+      )?.value,
+    ).toBe(1)
+  })
 })

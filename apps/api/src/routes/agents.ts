@@ -13,6 +13,9 @@ const AGENT_TYPES = [
   'inventory-guard',
   'content-writer',
   'market-intel',
+  'finance-agent',
+  'ceo-agent',
+  'customer-success',
 ] as const
 
 export type AgentType = (typeof AGENT_TYPES)[number]
@@ -97,7 +100,7 @@ const agentsRoute: FastifyPluginAsync = async (app) => {
     schema: {
       tags: ['Agents'],
       summary: 'List all agents for tenant',
-      security: [{ tenantId: [] }],
+      security: [{ bearerAuth: [] }],
     },
   }, async (request, reply) => {
     if (!request.withDb || !request.tenantId) {
@@ -113,7 +116,7 @@ const agentsRoute: FastifyPluginAsync = async (app) => {
     schema: {
       tags: ['Agents'],
       summary: 'Create a new agent',
-      security: [{ tenantId: [] }],
+      security: [{ bearerAuth: [] }],
     },
   }, async (request, reply) => {
     if (!request.withDb || !request.tenantId) {
@@ -150,7 +153,7 @@ const agentsRoute: FastifyPluginAsync = async (app) => {
     schema: {
       tags: ['Agents'],
       summary: 'Get agent by ID',
-      security: [{ tenantId: [] }],
+      security: [{ bearerAuth: [] }],
     },
   }, async (request, reply) => {
     if (!request.withDb || !request.tenantId) {
@@ -181,7 +184,7 @@ const agentsRoute: FastifyPluginAsync = async (app) => {
     schema: {
       tags: ['Agents'],
       summary: 'Update agent',
-      security: [{ tenantId: [] }],
+      security: [{ bearerAuth: [] }],
     },
   }, async (request, reply) => {
     if (!request.withDb || !request.tenantId) {
@@ -248,7 +251,7 @@ const agentsRoute: FastifyPluginAsync = async (app) => {
     schema: {
       tags: ['Agents'],
       summary: 'Delete agent',
-      security: [{ tenantId: [] }],
+      security: [{ bearerAuth: [] }],
     },
   }, async (request, reply) => {
     if (!request.withDb || !request.tenantId) {

@@ -71,6 +71,40 @@ export const webhookDispatchNoHandlerTotal = new Counter({
   registers: [metricsRegistry],
 })
 
+export const authOperationTotal = new Counter({
+  name: 'auth_operation_total',
+  help: 'Auth operations by action and outcome',
+  labelNames: ['action', 'outcome'] as const,
+  registers: [metricsRegistry],
+})
+
+export const billingOperationTotal = new Counter({
+  name: 'billing_operation_total',
+  help: 'Billing operations by action and plan',
+  labelNames: ['action', 'plan'] as const,
+  registers: [metricsRegistry],
+})
+
+export const stripeWebhookTotal = new Counter({
+  name: 'stripe_webhook_total',
+  help: 'Stripe webhook events received by event type and outcome',
+  labelNames: ['event_type', 'outcome'] as const,
+  registers: [metricsRegistry],
+})
+
+export const onboardingStepTotal = new Counter({
+  name: 'onboarding_step_total',
+  help: 'Onboarding step completions by step number and outcome',
+  labelNames: ['step', 'outcome'] as const,
+  registers: [metricsRegistry],
+})
+
+export const onboardingCompletedTotal = new Counter({
+  name: 'onboarding_completed_total',
+  help: 'Total onboarding completions',
+  registers: [metricsRegistry],
+})
+
 // ─── Fastify plugin ────────────────────────────────────────────────────────────
 
 // Guard: collectDefaultMetrics must only be called once per registry instance.

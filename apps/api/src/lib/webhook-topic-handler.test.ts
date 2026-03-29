@@ -8,15 +8,19 @@ vi.mock('../plugins/metrics.js', () => ({
 }))
 
 vi.mock('./webhook-orders.js', () => ({
-  upsertShopifyOrderFromPayload: vi.fn().mockResolvedValue(undefined),
+  upsertShopifyOrder: vi.fn().mockResolvedValue(undefined),
 }))
 vi.mock('./webhook-products.js', () => ({
-  upsertShopifyProductFromPayload: vi.fn().mockResolvedValue(undefined),
+  upsertShopifyProduct: vi.fn().mockResolvedValue(undefined),
 }))
+
+const { upsertShopifyOrder } = await import('./webhook-orders.js')
+const { upsertShopifyProduct } = await import('./webhook-products.js')
 
 import {
   _clearWebhookHandlers,
   dispatchWebhook,
+  handleWebhookTopic,
   handleAmazonWebhook,
   handleShopeeWebhook,
   handleTikTokWebhook,
@@ -47,6 +51,43 @@ describe('handleAmazonWebhook dispatches to registered handler', () => {
     expect(event.platform).toBe('amazon')
     expect(event.topic).toBe('amazon:ORDER_CHANGE')
     expect(event.tenantId).toBe('tenant-1')
+  })
+})
+
+describe('handleWebhookTopic normalizes Shopify payloads before upsert', () => {
+  it('normalizes order payload into a stable DTO', async () => {
+    await handleWebhookTopic('orders/create', 'tenant-order', {
+      id: 42,
+      financial_status: 'paid',
+      total_price: '99.50',
+      line_items: [{ sku: 'SKU-1', quantity: 2 }],
+    })
+
+    expect(upsertShopifyOrder).toHaveBeenCalledWith('tenant-order', {
+      platformOrderId: '42',
+      status: 'paid',
+      totalPrice: '99.50',
+      items: [{ sku: 'SKU-1', quantity: 2 }],
+    })
+  })
+
+  it('normalizes product payload into a stable DTO', async () => {
+    await handleWebhookTopic('products/update', 'tenant-product', {
+      id: 7,
+      title: 'Summer Tee',
+      product_type: 'apparel',
+      variants: [{ price: '19.90' }],
+    })
+
+    expect(upsertShopifyProduct).toHaveBeenCalledWith(
+      'tenant-product',
+      expect.objectContaining({
+        platformProductId: '7',
+        title: 'Summer Tee',
+        category: 'apparel',
+        price: '19.90',
+      }),
+    )
   })
 })
 

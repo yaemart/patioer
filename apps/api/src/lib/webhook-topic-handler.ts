@@ -1,5 +1,9 @@
-import { upsertShopifyOrderFromPayload } from './webhook-orders.js'
-import { upsertShopifyProductFromPayload } from './webhook-products.js'
+import {
+  normalizeShopifyOrderPayload,
+  normalizeShopifyProductPayload,
+} from './shopify-webhook-normalizer.js'
+import { upsertShopifyOrder } from './webhook-orders.js'
+import { upsertShopifyProduct } from './webhook-products.js'
 import { webhookDispatchNoHandlerTotal, webhookHandlerErrorsTotal } from '../plugins/metrics.js'
 
 // ─── Shopify (existing) ────────────────────────────────────────────────────────
@@ -9,17 +13,15 @@ export async function handleWebhookTopic(
   tenantId: string,
   payload: unknown,
 ): Promise<void> {
-  const body = payload as Record<string, unknown>
-
   switch (topic) {
     case 'orders/create':
     case 'orders/updated':
-      await upsertShopifyOrderFromPayload(tenantId, body)
+      await upsertShopifyOrder(tenantId, normalizeShopifyOrderPayload(payload))
       break
 
     case 'products/create':
     case 'products/update':
-      await upsertShopifyProductFromPayload(tenantId, body)
+      await upsertShopifyProduct(tenantId, normalizeShopifyProductPayload(payload))
       break
 
     default:
@@ -29,7 +31,7 @@ export async function handleWebhookTopic(
 
 // ─── Phase 2: Multi-platform Webhook Topic types ──────────────────────────────
 
-export type WebhookPlatform = 'shopify' | 'amazon' | 'tiktok' | 'shopee'
+export type WebhookPlatform = 'shopify' | 'amazon' | 'tiktok' | 'shopee' | 'walmart'
 
 export type ShopifyTopic =
   | 'orders/create'
@@ -52,7 +54,9 @@ export type ShopeeTopic =
   | 'shopee:logistics.tracking_update'
   | 'shopee:shop.update_profile'
 
-export type WebhookTopic = ShopifyTopic | AmazonTopic | TikTokTopic | ShopeeTopic
+export type WalmartTopic = `walmart:${string}`
+
+export type WebhookTopic = ShopifyTopic | AmazonTopic | TikTokTopic | ShopeeTopic | WalmartTopic
 
 // ─── Unified multi-platform webhook event ─────────────────────────────────────
 
@@ -183,4 +187,13 @@ export async function handleShopeeWebhook(
   payload: unknown,
 ): Promise<void> {
   await dispatchWebhook({ platform: 'shopee', topic, tenantId, payload, receivedAt: new Date() })
+}
+
+/** Called by the Walmart webhook route after payload parsing and persistence. */
+export async function handleWalmartWebhook(
+  tenantId: string,
+  topic: WalmartTopic,
+  payload: unknown,
+): Promise<void> {
+  await dispatchWebhook({ platform: 'walmart', topic, tenantId, payload, receivedAt: new Date() })
 }

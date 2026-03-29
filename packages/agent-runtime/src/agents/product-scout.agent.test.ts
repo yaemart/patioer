@@ -121,10 +121,11 @@ describe('runProductScout', () => {
     ])
 
     await runProductScout(ctx, {})
-    expect(ctx.logAction).toHaveBeenCalledWith('product_scout.run.started', { maxProducts: 50 })
+    expect(ctx.logAction).toHaveBeenCalledWith('product_scout.run.started', { maxProducts: 50, complianceMarkets: [] })
     expect(ctx.logAction).toHaveBeenCalledWith('product_scout.run.completed', {
       scannedCount: 1,
       flaggedCount: 0,
+      complianceBlockedCount: 0,
     })
   })
 

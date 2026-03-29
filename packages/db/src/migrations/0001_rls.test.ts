@@ -80,4 +80,48 @@ describe('RLS migration safety', () => {
     expect(sql).toContain("current_setting('app.tenant_id')::uuid")
     expect(sql).toContain('FORCE ROW LEVEL SECURITY')
   })
+
+  it('0009 clipmart migration enables RLS for templates and reviews', () => {
+    const sql = readFileSync(join(migrationsDir, '0009_clipmart_tables.sql'), 'utf8')
+    expect(sql).toContain('CREATE TABLE clipmart_templates')
+    expect(sql).toContain('CREATE TABLE template_reviews')
+    expect(sql).toContain('ALTER TABLE clipmart_templates ENABLE ROW LEVEL SECURITY')
+    expect(sql).toContain('ALTER TABLE clipmart_templates FORCE ROW LEVEL SECURITY')
+    expect(sql).toContain('ALTER TABLE template_reviews ENABLE ROW LEVEL SECURITY')
+    expect(sql).toContain('ALTER TABLE template_reviews FORCE ROW LEVEL SECURITY')
+    expect(sql).toContain('CREATE POLICY clipmart_template_access ON clipmart_templates')
+    expect(sql).toContain('CREATE POLICY tenant_isolation_template_reviews ON template_reviews')
+    expect(sql).toContain("current_setting('app.tenant_id')::uuid")
+  })
+
+  it('0010 growth migration enables RLS for referral and NPS tables', () => {
+    const sql = readFileSync(join(migrationsDir, '0010_growth_tables.sql'), 'utf8')
+    const rlsTables = ['referral_codes', 'referral_rewards', 'nps_responses']
+    for (const table of rlsTables) {
+      expect(sql).toContain(`ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY`)
+      expect(sql).toContain(`ALTER TABLE ${table} FORCE ROW LEVEL SECURITY`)
+      expect(sql).toContain(`CREATE POLICY tenant_isolation_${table} ON ${table}`)
+    }
+    expect(sql).toContain("current_setting('app.tenant_id')::uuid")
+  })
+
+  it('0011 onboarding/billing migration enables RLS for all 3 tables', () => {
+    const sql = readFileSync(join(migrationsDir, '0011_onboarding_billing.sql'), 'utf8')
+    const rlsTables = ['onboarding_progress', 'billing_usage_logs', 'billing_reconciliation']
+    for (const table of rlsTables) {
+      expect(sql).toContain(`ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY`)
+      expect(sql).toContain(`ALTER TABLE ${table} FORCE ROW LEVEL SECURITY`)
+      expect(sql).toContain(`CREATE POLICY tenant_isolation_${table} ON ${table}`)
+    }
+    expect(sql).toContain("current_setting('app.tenant_id')::uuid")
+  })
+
+  it('0012 governance settings migration enables RLS for tenant settings', () => {
+    const sql = readFileSync(join(migrationsDir, '0012_governance_settings.sql'), 'utf8')
+    expect(sql).toContain('CREATE TABLE tenant_governance_settings')
+    expect(sql).toContain('ALTER TABLE tenant_governance_settings ENABLE ROW LEVEL SECURITY')
+    expect(sql).toContain('ALTER TABLE tenant_governance_settings FORCE ROW LEVEL SECURITY')
+    expect(sql).toContain('CREATE POLICY tenant_isolation_tenant_governance_settings ON tenant_governance_settings')
+    expect(sql).toContain("current_setting('app.tenant_id')::uuid")
+  })
 })

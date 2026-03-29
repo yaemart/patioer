@@ -1,27 +1,24 @@
 import { withTenantDb, schema } from '@patioer/db'
+import type { ShopifyOrderWebhookDto } from './shopify-webhook-normalizer.js'
 
-export async function upsertShopifyOrderFromPayload(
+export async function upsertShopifyOrder(
   tenantId: string,
-  payload: Record<string, unknown>,
+  order: ShopifyOrderWebhookDto,
 ): Promise<void> {
-  const orderId = String(payload.id ?? '')
-  const status = String(payload.financial_status ?? 'unknown')
-  const totalPrice = String(payload.total_price ?? '0')
-
   await withTenantDb(tenantId, async (db) => {
     await db
       .insert(schema.orders)
       .values({
         tenantId,
-        platformOrderId: orderId,
+        platformOrderId: order.platformOrderId,
         platform: 'shopify',
-        status,
-        totalPrice,
-        items: (payload.line_items as unknown) ?? null,
+        status: order.status,
+        totalPrice: order.totalPrice,
+        items: order.items,
       })
       .onConflictDoUpdate({
         target: [schema.orders.tenantId, schema.orders.platform, schema.orders.platformOrderId],
-        set: { status, totalPrice },
+        set: { status: order.status, totalPrice: order.totalPrice },
       })
   })
 }

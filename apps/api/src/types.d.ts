@@ -1,8 +1,10 @@
 import 'fastify'
 import type { AppDb } from '@patioer/db'
+import type { JwtPayload } from './routes/auth.js'
 
 declare module 'fastify' {
   interface FastifyRequest {
+    auth: JwtPayload | null
     tenantId?: string
     /**
      * Executes `callback` inside a PostgreSQL transaction where

@@ -23,6 +23,18 @@ import shopeeWebhookRoute from './routes/shopee/webhook.js'
 import platformCredentialsRoute from './routes/platform-credentials.js'
 import adsInventoryRoute from './routes/ads-inventory.js'
 import agentEventsRoute from './routes/agent-events.js'
+import consoleRoute from './routes/console.js'
+import authRoute from './routes/auth.js'
+import billingRoute from './routes/billing.js'
+import webhookStripeRoute from './routes/webhook-stripe.js'
+import onboardingWizardRoute from './routes/onboarding-wizard.js'
+import clipmartRoute from './routes/clipmart.js'
+import growthRoute from './routes/growth.js'
+import settingsRoute from './routes/settings.js'
+import dashboardRoute from './routes/dashboard.js'
+import walmartOAuthRoute from './routes/walmart/oauth.js'
+import walmartWebhookRoute from './routes/walmart/webhook.js'
+import b2bWayfairRoute from './routes/b2b-wayfair.js'
 
 export const buildServer = () => {
   const app = Fastify({ logger: true })
@@ -41,8 +53,8 @@ export const buildServer = () => {
       servers: [{ url: `http://localhost:${process.env.PORT ?? 3100}` }],
       components: {
         securitySchemes: {
+          bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
           apiKey: { type: 'apiKey', name: 'x-api-key', in: 'header' },
-          tenantId: { type: 'apiKey', name: 'x-tenant-id', in: 'header' },
         },
       },
     },
@@ -70,6 +82,18 @@ export const buildServer = () => {
   app.register(platformCredentialsRoute)
   app.register(adsInventoryRoute)
   app.register(agentEventsRoute)
+  app.register(consoleRoute)
+  app.register(authRoute)
+  app.register(billingRoute)
+  app.register(webhookStripeRoute)
+  app.register(onboardingWizardRoute)
+  app.register(clipmartRoute)
+  app.register(growthRoute)
+  app.register(settingsRoute)
+  app.register(dashboardRoute)
+  app.register(walmartOAuthRoute)
+  app.register(walmartWebhookRoute)
+  app.register(b2bWayfairRoute)
 
   return app
 }

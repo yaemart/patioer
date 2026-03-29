@@ -1,0 +1,126 @@
+{
+  "$schema": "https://patioer.dev/schemas/clipmart-template-v1.json",
+  "templateId": "standard-cross-border-ecommerce",
+  "version": "1.0.0",
+  "name": "ClipMart Standard Template",
+  "description": "Standard cross-border e-commerce template with 9 ElectroOS agents, governance rules, and DataOS integration",
+
+  "agents": [
+    {
+      "type": "product-scout",
+      "name": "Product Scout",
+      "status": "active",
+      "goalContext": {
+        "maxProducts": 50,
+        "complianceMarkets": ["SG", "ID", "DE", "US"]
+      },
+      "systemPrompt": "You are a product scout agent responsible for scanning product catalogs, flagging inventory and pricing anomalies, and running compliance checks before listing."
+    },
+    {
+      "type": "price-sentinel",
+      "name": "Price Sentinel",
+      "status": "active",
+      "goalContext": {
+        "approvalThresholdPercent": 15
+      },
+      "systemPrompt": "You are a price sentinel agent responsible for monitoring product prices, detecting significant changes, and requesting approval for adjustments exceeding the threshold."
+    },
+    {
+      "type": "support-relay",
+      "name": "Support Relay",
+      "status": "active",
+      "goalContext": {
+        "autoReplyPolicy": "auto_reply_non_refund"
+      },
+      "systemPrompt": "You are a customer support relay agent. Handle routine inquiries automatically while escalating refund requests and complex issues for human review."
+    },
+    {
+      "type": "ads-optimizer",
+      "name": "Ads Optimizer",
+      "status": "active",
+      "goalContext": {
+        "targetRoas": 3.0
+      },
+      "systemPrompt": "You are an advertising optimizer agent. Monitor ad campaign performance and adjust bids to maintain target ROAS while maximizing conversion volume."
+    },
+    {
+      "type": "inventory-guard",
+      "name": "Inventory Guard",
+      "status": "active",
+      "goalContext": {
+        "safetyThreshold": 10,
+        "replenishApprovalMinUnits": 100,
+        "timeZone": "Asia/Singapore",
+        "enforceDailyWindow": true
+      },
+      "systemPrompt": "You are an inventory guard agent. Monitor stock levels, trigger replenishment alerts, and coordinate restocking requests within daily operating windows."
+    },
+    {
+      "type": "content-writer",
+      "name": "Content Writer",
+      "status": "active",
+      "goalContext": {},
+      "systemPrompt": "You are a content writer agent. Generate and optimize product listings, descriptions, and marketing copy across multiple platforms and languages."
+    },
+    {
+      "type": "market-intel",
+      "name": "Market Intel",
+      "status": "active",
+      "goalContext": {},
+      "systemPrompt": "You are a market intelligence agent. Monitor competitor pricing, market trends, and consumer sentiment to provide actionable insights."
+    },
+    {
+      "type": "finance-agent",
+      "name": "Finance Agent",
+      "status": "active",
+      "goalContext": {},
+      "systemPrompt": "You are a finance agent. Track revenue, costs, margins, and cash flow across all platforms. Generate monthly P&L summaries and flag anomalies."
+    },
+    {
+      "type": "ceo-agent",
+      "name": "CEO Agent",
+      "status": "active",
+      "goalContext": {},
+      "systemPrompt": "You are the CEO agent. Coordinate across all other agents, synthesize status reports, and escalate critical decisions requiring human oversight."
+    }
+  ],
+
+  "governance": {
+    "monthlyBudgetUsd": 50,
+    "priceApprovalThresholdPercent": 15,
+    "heartbeatIntervalMinutes": 5,
+    "maxConcurrentAgents": 3,
+    "approvalRequiredActions": [
+      "price_change_above_threshold",
+      "inventory_replenish_above_min",
+      "ad_budget_increase"
+    ],
+    "complianceMarkets": ["SG", "ID", "DE", "US"]
+  },
+
+  "dataos": {
+    "eventLake": {
+      "enabled": true,
+      "retentionDays": 90
+    },
+    "featureStore": {
+      "enabled": true,
+      "refreshIntervalMinutes": 60
+    },
+    "decisionMemory": {
+      "enabled": true,
+      "maxRecordsPerAgent": 1000
+    }
+  },
+
+  "platforms": {
+    "supported": ["shopify", "amazon", "tiktok", "shopee"],
+    "defaultPlatform": "shopify"
+  },
+
+  "metadata": {
+    "createdAt": "2026-03-28T00:00:00Z",
+    "author": "patioer-team",
+    "tags": ["cross-border", "ecommerce", "multi-platform", "9-agent"]
+  }
+}

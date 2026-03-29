@@ -1,0 +1,28 @@
+{
+  "name": "B2B Wholesale",
+  "description": "Enterprise procurement template for B2B wholesale sellers. Includes full agent suite with B2B Harness integration and bulk pricing workflows.",
+  "category": "b2b",
+  "targetMarkets": ["US", "DE", "UK"],
+  "targetCategories": ["industrial", "office", "packaging"],
+  "platforms": ["b2b-portal", "amazon-business"],
+  "isOfficial": true,
+  "config": {
+    "agents": [
+      { "type": "product-scout", "name": "Product Scout", "status": "active", "goalContext": { "maxProducts": 1000, "b2bCatalog": true } },
+      { "type": "price-sentinel", "name": "Price Sentinel", "status": "active", "goalContext": { "approvalThresholdPercent": 5, "bulkPricingTiers": true } },
+      { "type": "support-relay", "name": "Support Relay", "status": "active", "goalContext": { "autoReplyPolicy": "escalate_all", "b2bEscalation": true } },
+      { "type": "inventory-guard", "name": "Inventory Guard", "status": "active", "goalContext": { "safetyThreshold": 50, "warehouseIntegration": true } },
+      { "type": "finance-agent", "name": "Finance Agent", "status": "active", "goalContext": { "invoicing": true, "netTerms": 30 } },
+      { "type": "content-writer", "name": "Content Writer", "status": "active", "goalContext": { "b2bListings": true } },
+      { "type": "market-intel", "name": "Market Intel", "status": "active", "goalContext": {} },
+      { "type": "ads-optimizer", "name": "Ads Optimizer", "status": "active", "goalContext": { "targetRoas": 5.0 } },
+      { "type": "ceo-agent", "name": "CEO Agent", "status": "active", "goalContext": {} }
+    ],
+    "governance": {
+      "monthlyBudgetUsd": 430,
+      "priceApprovalThresholdPercent": 5,
+      "adBudgetApprovalUsd": 500
+    },
+    "dataosTier": "full"
+  }
+}

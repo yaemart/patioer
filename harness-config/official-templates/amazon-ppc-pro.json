@@ -1,0 +1,23 @@
+{
+  "name": "Amazon PPC Pro",
+  "description": "Deep advertising optimization template for Amazon sellers. Ads Optimizer with advanced bid strategies, keyword harvesting, and ACOS targeting.",
+  "category": "advertising",
+  "targetMarkets": ["US", "DE", "UK", "JP"],
+  "targetCategories": ["electronics", "supplements", "outdoor"],
+  "platforms": ["amazon"],
+  "isOfficial": true,
+  "config": {
+    "agents": [
+      { "type": "ads-optimizer", "name": "Ads Optimizer Pro", "status": "active", "goalContext": { "targetRoas": 4.0, "targetAcos": 25, "bidStrategy": "dynamic_down_only", "keywordHarvesting": true } },
+      { "type": "product-scout", "name": "Product Scout", "status": "active", "goalContext": { "maxProducts": 200 } },
+      { "type": "price-sentinel", "name": "Price Sentinel", "status": "active", "goalContext": { "approvalThresholdPercent": 10 } },
+      { "type": "market-intel", "name": "Market Intel", "status": "active", "goalContext": { "competitorTracking": true } }
+    ],
+    "governance": {
+      "monthlyBudgetUsd": 180,
+      "priceApprovalThresholdPercent": 10,
+      "adBudgetApprovalUsd": 1000
+    },
+    "dataosTier": "partial"
+  }
+}

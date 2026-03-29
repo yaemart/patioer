@@ -1,50 +1,15 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import { createHmac, timingSafeEqual } from 'node:crypto'
 import type { FastifyPluginAsync } from 'fastify'
 import { z } from 'zod'
-import { withTenantDb, schema } from '@patioer/db'
 import { encryptToken } from '../../lib/crypto.js'
-import { registry } from '../../lib/harness-registry.js'
+import { persistOAuthCredential } from '../../lib/oauth-credential-store.js'
+import { isOAuthStateFresh, signOAuthState, verifyOAuthState } from '../../lib/oauth-state.js'
 
 const SHOPIFY_SCOPES =
   'read_products,write_products,read_inventory,write_inventory,read_orders'
+const STATE_MAX_AGE_MS = 10 * 60 * 1000
 
 const shopDomainSchema = z.string().regex(/^[a-zA-Z0-9-]+\.myshopify\.com$/)
-
-// --- CSRF state helpers ---
-// State format: <base64url(payload)>.<hex-hmac>
-// payload = JSON { tenantId, nonce, iat }
-
-function signState(tenantId: string, secret: string): string {
-  const payload = Buffer.from(
-    JSON.stringify({ tenantId, nonce: randomBytes(8).toString('hex'), iat: Date.now() }),
-  ).toString('base64url')
-  const hmac = createHmac('sha256', secret).update(payload).digest('hex')
-  return `${payload}.${hmac}`
-}
-
-function verifyState(
-  state: string,
-  secret: string,
-): { tenantId: string; iat: number } | null {
-  const dot = state.lastIndexOf('.')
-  if (dot === -1) return null
-  const payload = state.slice(0, dot)
-  const hmac = state.slice(dot + 1)
-  const expected = createHmac('sha256', secret).update(payload).digest('hex')
-  const hmacBuf = Buffer.from(hmac, 'hex')
-  const expectedBuf = Buffer.from(expected, 'hex')
-  if (hmacBuf.length !== expectedBuf.length || !timingSafeEqual(hmacBuf, expectedBuf)) {
-    return null
-  }
-  try {
-    return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as {
-      tenantId: string
-      iat: number
-    }
-  } catch {
-    return null
-  }
-}
 
 // Verifies the HMAC Shopify appends to OAuth callback query params.
 function verifyShopifyHmac(query: Record<string, string>, secret: string): boolean {
@@ -64,11 +29,18 @@ function verifyShopifyHmac(query: Record<string, string>, secret: string): boole
 const shopifyOauthRoute: FastifyPluginAsync = async (app) => {
   // Step 1 — Redirect merchant to Shopify's OAuth consent screen.
   // Requires x-tenant-id header so we can bind the OAuth state to the tenant.
-  app.get('/api/v1/shopify/auth', async (request, reply) => {
+  app.get('/api/v1/shopify/auth', {
+    schema: {
+      tags: ['Shopify OAuth'],
+      summary: 'Start Shopify OAuth for the current tenant',
+      security: [{ bearerAuth: [] }],
+    },
+  }, async (request, reply) => {
     const clientId = process.env.SHOPIFY_CLIENT_ID
     const clientSecret = process.env.SHOPIFY_CLIENT_SECRET
     const appBaseUrl = process.env.APP_BASE_URL
-    if (!clientId || !clientSecret || !appBaseUrl) {
+    const stateSecret = process.env.SHOPIFY_STATE_SECRET ?? clientSecret
+    if (!clientId || !clientSecret || !appBaseUrl || !stateSecret) {
       return reply.code(503).send({ error: 'Shopify OAuth not configured' })
     }
 
@@ -83,7 +55,7 @@ const shopifyOauthRoute: FastifyPluginAsync = async (app) => {
       return reply.code(400).send({ error: 'invalid shop domain' })
     }
 
-    const state = signState(tenantId, clientSecret)
+    const state = signOAuthState({ tenantId }, stateSecret)
     const redirectUri = `${appBaseUrl}/api/v1/shopify/callback`
     const authUrl = new URL(`https://${shopParse.data}/admin/oauth/authorize`)
     authUrl.searchParams.set('client_id', clientId)
@@ -95,11 +67,18 @@ const shopifyOauthRoute: FastifyPluginAsync = async (app) => {
   })
 
   // Step 2 — Exchange authorization code for a permanent access token.
-  app.get('/api/v1/shopify/callback', async (request, reply) => {
+  app.get('/api/v1/shopify/callback', {
+    schema: {
+      tags: ['Shopify OAuth'],
+      summary: 'Complete Shopify OAuth callback for the current tenant',
+      security: [{ bearerAuth: [] }],
+    },
+  }, async (request, reply) => {
     const clientId = process.env.SHOPIFY_CLIENT_ID
     const clientSecret = process.env.SHOPIFY_CLIENT_SECRET
     const encryptionKey = process.env.CRED_ENCRYPTION_KEY ?? process.env.SHOPIFY_ENCRYPTION_KEY
-    if (!clientId || !clientSecret || !encryptionKey) {
+    const stateSecret = process.env.SHOPIFY_STATE_SECRET ?? clientSecret
+    if (!clientId || !clientSecret || !encryptionKey || !stateSecret) {
       return reply.code(503).send({ error: 'Shopify OAuth not configured' })
     }
 
@@ -111,11 +90,14 @@ const shopifyOauthRoute: FastifyPluginAsync = async (app) => {
     }
 
     // Validate our own CSRF state (proves the user started this flow)
-    const statePayload = verifyState(query.state ?? '', clientSecret)
+    const statePayload = verifyOAuthState<{ tenantId: string; nonce: string; iat: number }>(
+      query.state ?? '',
+      stateSecret,
+    )
     if (!statePayload) {
       return reply.code(400).send({ error: 'invalid state' })
     }
-    if (Date.now() - statePayload.iat > 10 * 60 * 1000) {
+    if (!isOAuthStateFresh(statePayload, STATE_MAX_AGE_MS)) {
       return reply.code(400).send({ error: 'OAuth state expired' })
     }
 
@@ -153,38 +135,19 @@ const shopifyOauthRoute: FastifyPluginAsync = async (app) => {
 
     const encryptedToken = encryptToken(tokenData.access_token, encryptionKey)
 
-    // Persist encrypted credentials — use withTenantDb for RLS isolation
     try {
-      await withTenantDb(statePayload.tenantId, async (db) => {
-        await db
-          .insert(schema.platformCredentials)
-          .values({
-            tenantId: statePayload.tenantId,
-            platform: 'shopify',
-            region: 'global',
-            shopDomain: shopParse.data,
-            accessToken: encryptedToken,
-            scopes: tokenData.scope.split(','),
-          })
-          .onConflictDoUpdate({
-            target: [
-              schema.platformCredentials.tenantId,
-              schema.platformCredentials.platform,
-              schema.platformCredentials.region,
-            ],
-            set: {
-              shopDomain: shopParse.data,
-              accessToken: encryptedToken,
-              scopes: tokenData.scope.split(','),
-            },
-          })
+      await persistOAuthCredential({
+        tenantId: statePayload.tenantId,
+        platform: 'shopify',
+        region: 'global',
+        shopDomain: shopParse.data,
+        accessToken: encryptedToken,
+        scopes: tokenData.scope.split(','),
       })
     } catch (err) {
       app.log.error({ err, tenantId: statePayload.tenantId }, 'failed to persist OAuth credentials')
       return reply.code(500).send({ error: 'failed to save credentials' })
     }
-
-    registry.invalidate(`${statePayload.tenantId}:shopify`)
 
     return reply.send({ ok: true })
   })

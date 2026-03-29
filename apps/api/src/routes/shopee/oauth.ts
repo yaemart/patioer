@@ -1,8 +1,8 @@
 import crypto from 'node:crypto'
 import type { FastifyPluginAsync } from 'fastify'
-import { withTenantDb, schema } from '@patioer/db'
 import { encryptToken } from '../../lib/crypto.js'
-import { registry } from '../../lib/harness-registry.js'
+import { persistOAuthCredential } from '../../lib/oauth-credential-store.js'
+import { isOAuthStateFresh, signOAuthState, verifyOAuthState } from '../../lib/oauth-state.js'
 
 // Shopee OAuth code flow:
 //   1. Auth redirect signature: HMAC-SHA256(partnerKey, partnerId + path + timestamp) — no access_token/shop_id
@@ -10,6 +10,14 @@ import { registry } from '../../lib/harness-registry.js'
 
 const SHOPEE_AUTH_URL = 'https://partner.test-stable.shopeemobile.com/api/v2/shop/auth_partner'
 const SHOPEE_TOKEN_URL = 'https://partner.test-stable.shopeemobile.com/api/v2/auth/token/get'
+const STATE_MAX_AGE_MS = 10 * 60 * 1000
+
+interface ShopeeStatePayload {
+  tenantId: string
+  market: string
+  nonce: string
+  iat: number
+}
 
 export function buildShopeeAuthSign(
   partnerKey: string,
@@ -21,11 +29,18 @@ export function buildShopeeAuthSign(
 }
 
 const shopeeOAuthRoute: FastifyPluginAsync = async (app) => {
-  app.get('/auth', async (request, reply) => {
+  app.get('/auth', {
+    schema: {
+      tags: ['Shopee OAuth'],
+      summary: 'Start Shopee OAuth for the current tenant',
+      security: [{ bearerAuth: [] }],
+    },
+  }, async (request, reply) => {
     const partnerId = Number(process.env.SHOPEE_PARTNER_ID ?? 0)
     const partnerKey = process.env.SHOPEE_PARTNER_KEY ?? ''
     const appBaseUrl = process.env.APP_BASE_URL
-    if (!partnerId || !partnerKey || !appBaseUrl) {
+    const stateSecret = process.env.SHOPEE_STATE_SECRET ?? partnerKey
+    if (!partnerId || !partnerKey || !appBaseUrl || !stateSecret) {
       return reply.code(503).send({ error: 'Shopee OAuth not configured' })
     }
 
@@ -39,7 +54,7 @@ const shopeeOAuthRoute: FastifyPluginAsync = async (app) => {
     const sign = buildShopeeAuthSign(partnerKey, partnerId, path, timestamp)
 
     const redirectUrl = `${appBaseUrl}/api/v1/shopee/auth/callback`
-    const state = Buffer.from(JSON.stringify({ tenantId, market })).toString('base64url')
+    const state = signOAuthState({ tenantId, market }, stateSecret)
 
     const url = new URL(SHOPEE_AUTH_URL)
     url.searchParams.set('partner_id', String(partnerId))
@@ -51,11 +66,18 @@ const shopeeOAuthRoute: FastifyPluginAsync = async (app) => {
     return reply.redirect(url.toString())
   })
 
-  app.get('/auth/callback', async (request, reply) => {
+  app.get('/auth/callback', {
+    schema: {
+      tags: ['Shopee OAuth'],
+      summary: 'Complete Shopee OAuth callback for the current tenant',
+      security: [{ bearerAuth: [] }],
+    },
+  }, async (request, reply) => {
     const partnerId = Number(process.env.SHOPEE_PARTNER_ID ?? 0)
     const partnerKey = process.env.SHOPEE_PARTNER_KEY ?? ''
     const encKey = process.env.CRED_ENCRYPTION_KEY ?? process.env.SHOPIFY_ENCRYPTION_KEY
-    if (!partnerId || !partnerKey || !encKey) {
+    const stateSecret = process.env.SHOPEE_STATE_SECRET ?? partnerKey
+    if (!partnerId || !partnerKey || !encKey || !stateSecret) {
       return reply.code(503).send({ error: 'Shopee OAuth not configured' })
     }
 
@@ -65,15 +87,15 @@ const shopeeOAuthRoute: FastifyPluginAsync = async (app) => {
       return reply.code(400).send({ error: 'code, shop_id and state required' })
     }
 
-    let tenantId: string
-    let market: string
-    try {
-      const decoded = JSON.parse(Buffer.from(state, 'base64url').toString('utf8')) as Record<string, string>
-      tenantId = decoded.tenantId
-      market = decoded.market
-    } catch {
+    const statePayload = verifyOAuthState<ShopeeStatePayload>(state, stateSecret)
+    if (!statePayload) {
       return reply.code(400).send({ error: 'invalid state' })
     }
+    if (!isOAuthStateFresh(statePayload, STATE_MAX_AGE_MS)) {
+      return reply.code(400).send({ error: 'OAuth state expired' })
+    }
+
+    const { tenantId, market } = statePayload
 
     let tokenRes: Response
     try {
@@ -110,35 +132,18 @@ const shopeeOAuthRoute: FastifyPluginAsync = async (app) => {
     const shopIdNum = Number(shopIdRaw)
 
     try {
-      await withTenantDb(tenantId, async (db) => {
-        await db
-          .insert(schema.platformCredentials)
-          .values({
-            tenantId,
-            platform: 'shopee',
-            credentialType: 'hmac',
-            accessToken: encryptedToken,
-            region: market,
-            metadata: { partnerId, shopId: shopIdNum },
-          })
-          .onConflictDoUpdate({
-            target: [
-              schema.platformCredentials.tenantId,
-              schema.platformCredentials.platform,
-              schema.platformCredentials.region,
-            ],
-            set: {
-              accessToken: encryptedToken,
-              metadata: { partnerId, shopId: shopIdNum },
-            },
-          })
+      await persistOAuthCredential({
+        tenantId,
+        platform: 'shopee',
+        credentialType: 'hmac',
+        region: market,
+        accessToken: encryptedToken,
+        metadata: { partnerId, shopId: shopIdNum },
       })
     } catch (err) {
       app.log.error({ err, tenantId }, 'failed to persist Shopee OAuth credentials')
       return reply.code(500).send({ error: 'failed to save credentials' })
     }
-
-    registry.invalidate(`${tenantId}:shopee`)
 
     return reply.send({ ok: true, shopId: shopIdRaw, market })
   })

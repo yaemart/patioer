@@ -32,7 +32,7 @@ const adsInventoryRoute: FastifyPluginAsync = async (app) => {
         summary: 'List synced ad campaigns',
         description:
           'Returns `{ campaigns: AdsCampaign[] }`. Empty DB → `{ campaigns: [] }`. Tenant from `x-tenant-id` only.',
-        security: [{ tenantId: [] }],
+        security: [{ bearerAuth: [] }],
       },
     },
     async (request, reply) => {
@@ -63,7 +63,7 @@ const adsInventoryRoute: FastifyPluginAsync = async (app) => {
         summary: 'Ad campaign performance metrics',
         description:
           'Returns `{ items: [...] }` with spend/ROAS/budget fields per campaign. Same RLS scope as campaigns.',
-        security: [{ tenantId: [] }],
+        security: [{ bearerAuth: [] }],
       },
     },
     async (request, reply) => {
@@ -104,7 +104,7 @@ const adsInventoryRoute: FastifyPluginAsync = async (app) => {
         tags: ['Inventory'],
         summary: 'List inventory levels per product/platform',
         description: 'Returns `{ items: InventoryLevel[] }`. Tenant from `x-tenant-id` only.',
-        security: [{ tenantId: [] }],
+        security: [{ bearerAuth: [] }],
       },
     },
     async (request, reply) => {
@@ -135,7 +135,7 @@ const adsInventoryRoute: FastifyPluginAsync = async (app) => {
         summary: 'Low / out-of-stock inventory rows',
         description:
           'Returns `{ items: [...] }` where `status` is `low` or `out_of_stock`.',
-        security: [{ tenantId: [] }],
+        security: [{ bearerAuth: [] }],
       },
     },
     async (request, reply) => {

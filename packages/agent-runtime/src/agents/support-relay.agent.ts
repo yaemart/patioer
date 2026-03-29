@@ -39,10 +39,11 @@ export async function runSupportRelay(
       continue
     }
 
+    const defaultSystemPrompt =
+      'You are a helpful e-commerce customer support agent. Reply professionally and concisely. Do not mention internal systems or policies not relevant to the customer.'
     const llmResponse = await ctx.llm({
       prompt: `Customer inquiry subject: ${thread.subject}\n\nDraft a concise, friendly reply:`,
-      systemPrompt:
-        'You are a helpful e-commerce customer support agent. Reply professionally and concisely. Do not mention internal systems or policies not relevant to the customer.',
+      systemPrompt: input.toneSystemPrompt ?? defaultSystemPrompt,
     })
 
     await ctx.getHarness().replyToMessage(thread.id, llmResponse.text)

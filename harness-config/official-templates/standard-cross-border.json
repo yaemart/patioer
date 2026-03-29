@@ -1,0 +1,29 @@
+{
+  "name": "Standard Cross-Border",
+  "description": "Full-stack cross-border e-commerce template with 9 ElectroOS agents, governance rules, and DataOS integration. Suitable for sellers operating on Shopify + Amazon.",
+  "category": "full-stack",
+  "targetMarkets": ["US", "SG", "DE", "JP"],
+  "targetCategories": ["electronics", "home", "beauty"],
+  "platforms": ["shopify", "amazon"],
+  "isOfficial": true,
+  "config": {
+    "agents": [
+      { "type": "product-scout", "name": "Product Scout", "status": "active", "goalContext": { "maxProducts": 50, "complianceMarkets": ["SG", "ID", "DE", "US"] } },
+      { "type": "price-sentinel", "name": "Price Sentinel", "status": "active", "goalContext": { "approvalThresholdPercent": 15 } },
+      { "type": "support-relay", "name": "Support Relay", "status": "active", "goalContext": { "autoReplyPolicy": "auto_reply_non_refund" } },
+      { "type": "ads-optimizer", "name": "Ads Optimizer", "status": "active", "goalContext": { "targetRoas": 3.0 } },
+      { "type": "inventory-guard", "name": "Inventory Guard", "status": "active", "goalContext": { "safetyThreshold": 10 } },
+      { "type": "content-writer", "name": "Content Writer", "status": "active", "goalContext": {} },
+      { "type": "market-intel", "name": "Market Intel", "status": "active", "goalContext": {} },
+      { "type": "finance-agent", "name": "Finance Agent", "status": "active", "goalContext": {} },
+      { "type": "ceo-agent", "name": "CEO Agent", "status": "active", "goalContext": {} }
+    ],
+    "governance": {
+      "monthlyBudgetUsd": 430,
+      "priceApprovalThresholdPercent": 15,
+      "adBudgetApprovalUsd": 500,
+      "heartbeatIntervalMinutes": 5
+    },
+    "dataosTier": "full"
+  }
+}

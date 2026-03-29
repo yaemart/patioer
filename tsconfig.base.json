@@ -12,7 +12,11 @@
       "@patioer/market": ["packages/market/src/index.ts"],
       "@patioer/devos-bridge": ["packages/devos-bridge/src/index.ts"],
       "@patioer/dataos": ["packages/dataos/src/index.ts"],
-      "@patioer/dataos-client": ["packages/dataos-client/src/index.ts"]
+      "@patioer/dataos-client": ["packages/dataos-client/src/index.ts"],
+      "@patioer/billing": ["packages/billing/src/index.ts"],
+      "@patioer/onboarding": ["packages/onboarding/src/index.ts"],
+      "@patioer/clipmart": ["packages/clipmart/src/index.ts"],
+      "@patioer/growth": ["packages/growth/src/index.ts"]
     },
     "strict": true,
     "esModuleInterop": true,

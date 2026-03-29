@@ -66,12 +66,41 @@ export {
   buildInventoryGuardInput,
   buildContentWriterInput,
   buildMarketIntelInput,
+  buildCustomerSuccessInput,
 } from '../lib/agent-inputs.js'
 
 type AgentContext = ReturnType<typeof createAgentContext>
 type ExecutionLoadResult =
-  | { ok: true; agentRow: { id: string; type: string; goalContext: string | null; systemPrompt: string | null }; ctx: AgentContext; platform: SupportedPlatform }
+  | { ok: true; agentRow: { id: string; type: string; goalContext: string | null; systemPrompt: string | null }; ctx: AgentContext; platform: SupportedPlatform | 'system' }
   | { ok: false; statusCode: number; body: { error: string } }
+
+function buildCustomerSuccessContext(
+  request: FastifyRequest,
+  agentRow: { id: string; type: string; goalContext: string | null; systemPrompt: string | null },
+): AgentContext {
+  return createAgentContext(
+    { tenantId: request.tenantId!, agentId: agentRow.id },
+    {
+      harness: {
+        getHarness: () => {
+          throw new Error('customer-success does not use platform harnesses')
+        },
+        getEnabledPlatforms: () => [],
+      },
+      budget: {
+        isExceeded: async (tid, aid) => (await getExecutionServices().getBudgetStatus(tid, aid)).exceeded,
+      },
+      audit: buildAuditDeps(request, { platform: 'system' }),
+      approvals: {
+        requestApproval: async () => {},
+      },
+      tickets: buildTicketDeps(request),
+      llm: createLlmProvider(agentRow.systemPrompt),
+      approvalsQuery: buildApprovalsQueryDeps(request),
+      events: buildEventsDeps(request),
+    },
+  )
+}
 
 async function buildExecutionContext(
   request: FastifyRequest,
@@ -91,6 +120,19 @@ async function buildExecutionContext(
 
   if (!agentRow) {
     return { ok: false, statusCode: 404, body: { error: 'agent not found' } }
+  }
+
+  if (agentRow.type === 'customer-success') {
+    request.log.info(
+      { tenantId: request.tenantId, agentId: agentRow.id, agentType: agentRow.type },
+      'agent.execute.context.ready.platform_agent',
+    )
+    return {
+      ok: true,
+      agentRow: { id: agentRow.id, type: agentRow.type, goalContext: agentRow.goalContext, systemPrompt: agentRow.systemPrompt },
+      ctx: buildCustomerSuccessContext(request, agentRow),
+      platform: 'system',
+    }
   }
 
   const resolved = await resolveFirstCredential(request)
@@ -306,7 +348,7 @@ const agentsExecuteRoute: FastifyPluginAsync = async (app) => {
   })
 
   app.post('/api/v1/agents/:id/execute', {
-    schema: { tags: ['Agent Execution'], summary: 'Execute an agent', security: [{ apiKey: [], tenantId: [] }] },
+    schema: { tags: ['Agent Execution'], summary: 'Execute an agent', security: [{ apiKey: [], bearerAuth: [] }] },
   }, async (request, reply) => {
     const authReply = await verifyPaperclipAuth(request, reply)
     if (authReply) return authReply

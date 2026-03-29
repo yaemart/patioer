@@ -1,8 +1,9 @@
 import { listTenantIds, withTenantDb, schema } from '@patioer/db'
 import { eq } from 'drizzle-orm'
 import { PaperclipBridge } from '@patioer/agent-runtime'
-import { AmazonHarness, registerHarnessFactory } from '@patioer/harness'
+import { AmazonHarness, WalmartHarness, registerHarnessFactory } from '@patioer/harness'
 import { parseAmazonRegion } from './amazon-region.js'
+import { parseWalmartRegion } from './walmart-region.js'
 
 /**
  * Register platform harness factories at application startup.
@@ -40,6 +41,15 @@ export function registerPlatformHarnessFactories(): void {
       marketplaceId: process.env.AMAZON_MARKETPLACE_ID ?? 'ATVPDKIKX0DER',
       region: parseAmazonRegion(process.env.AMAZON_REGION),
       useSandbox: process.env.AMAZON_USE_SANDBOX !== 'false',
+    }),
+  )
+
+  registerHarnessFactory('walmart', (tenantId) =>
+    new WalmartHarness(tenantId, {
+      clientId: process.env.WALMART_CLIENT_ID ?? '',
+      clientSecret: process.env.WALMART_CLIENT_SECRET ?? '',
+      region: parseWalmartRegion(process.env.WALMART_REGION),
+      useSandbox: process.env.WALMART_USE_SANDBOX !== 'false',
     }),
   )
 }

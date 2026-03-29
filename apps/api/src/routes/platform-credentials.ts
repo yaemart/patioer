@@ -48,7 +48,7 @@ const platformCredentialsRoute: FastifyPluginAsync = async (app) => {
   // List connected platform credentials for a tenant.
   // SECURITY: accessToken is always redacted — only metadata is returned.
   app.get('/api/v1/platform-credentials', {
-    schema: { tags: ['Platform Credentials'], summary: 'List connected platforms', security: [{ tenantId: [] }] },
+    schema: { tags: ['Platform Credentials'], summary: 'List connected platforms', security: [{ bearerAuth: [] }] },
   }, async (request, reply) => {
     if (!request.withDb || !request.tenantId) {
       return reply.code(401).send({ error: 'x-tenant-id required' })
@@ -66,7 +66,7 @@ const platformCredentialsRoute: FastifyPluginAsync = async (app) => {
 
   // Get a single credential by ID (still redacted).
   app.get('/api/v1/platform-credentials/:id', {
-    schema: { tags: ['Platform Credentials'], summary: 'Get credential by ID', security: [{ tenantId: [] }] },
+    schema: { tags: ['Platform Credentials'], summary: 'Get credential by ID', security: [{ bearerAuth: [] }] },
   }, async (request, reply) => {
     if (!request.withDb || !request.tenantId) {
       return reply.code(401).send({ error: 'x-tenant-id required' })
@@ -99,7 +99,7 @@ const platformCredentialsRoute: FastifyPluginAsync = async (app) => {
   // Agents can call this to register / refresh tokens programmatically.
   // SECURITY: accessToken is encrypted with AES-256-GCM before storage.
   app.post('/api/v1/platform-credentials', {
-    schema: { tags: ['Platform Credentials'], summary: 'Register or refresh a platform credential', security: [{ tenantId: [] }] },
+    schema: { tags: ['Platform Credentials'], summary: 'Register or refresh a platform credential', security: [{ bearerAuth: [] }] },
   }, async (request, reply) => {
     if (!request.withDb || !request.tenantId) {
       return reply.code(401).send({ error: 'x-tenant-id required' })
@@ -155,7 +155,7 @@ const platformCredentialsRoute: FastifyPluginAsync = async (app) => {
 
   // Update individual fields of an existing credential (e.g. token refresh, metadata update).
   app.patch('/api/v1/platform-credentials/:id', {
-    schema: { tags: ['Platform Credentials'], summary: 'Update a platform credential', security: [{ tenantId: [] }] },
+    schema: { tags: ['Platform Credentials'], summary: 'Update a platform credential', security: [{ bearerAuth: [] }] },
   }, async (request, reply) => {
     if (!request.withDb || !request.tenantId) {
       return reply.code(401).send({ error: 'x-tenant-id required' })
@@ -209,7 +209,7 @@ const platformCredentialsRoute: FastifyPluginAsync = async (app) => {
 
   // Delete a credential and invalidate the harness cache for that platform.
   app.delete('/api/v1/platform-credentials/:id', {
-    schema: { tags: ['Platform Credentials'], summary: 'Disconnect a platform', security: [{ tenantId: [] }] },
+    schema: { tags: ['Platform Credentials'], summary: 'Disconnect a platform', security: [{ bearerAuth: [] }] },
   }, async (request, reply) => {
     if (!request.withDb || !request.tenantId) {
       return reply.code(401).send({ error: 'x-tenant-id required' })

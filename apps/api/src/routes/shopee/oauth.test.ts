@@ -36,6 +36,19 @@ function buildApp() {
   return app
 }
 
+async function issueAuthState(
+  app: ReturnType<typeof Fastify>,
+  tenantId = 't1',
+  market = 'SG',
+): Promise<string> {
+  const authRes = await app.inject({
+    method: 'GET',
+    url: `/api/v1/shopee/auth?tenantId=${tenantId}&market=${market}`,
+  })
+  expect(authRes.statusCode).toBe(302)
+  return new URL(authRes.headers.location as string).searchParams.get('state') ?? ''
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   Object.assign(process.env, ENV)
@@ -114,9 +127,8 @@ describe('GET /api/v1/shopee/auth/callback', () => {
       status: 400,
       json: async () => ({ error: 'bad' }),
     }) as unknown as typeof fetch
-
-    const state = Buffer.from(JSON.stringify({ tenantId: 't1', market: 'SG' })).toString('base64url')
     const app = buildApp()
+    const state = await issueAuthState(app)
     const res = await app.inject({
       method: 'GET',
       url: `/api/v1/shopee/auth/callback?code=auth-code&shop_id=999&state=${encodeURIComponent(state)}`,
@@ -141,11 +153,8 @@ describe('GET /api/v1/shopee/auth/callback', () => {
         }),
       } as never)
     })
-
-    const state = Buffer.from(JSON.stringify({ tenantId: 'tenant-uuid', market: 'MY' })).toString(
-      'base64url',
-    )
     const app = buildApp()
+    const state = await issueAuthState(app, 'tenant-uuid', 'MY')
     const res = await app.inject({
       method: 'GET',
       url: `/api/v1/shopee/auth/callback?code=ok-code&shop_id=12345&state=${encodeURIComponent(state)}`,

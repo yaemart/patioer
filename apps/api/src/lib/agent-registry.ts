@@ -1,5 +1,6 @@
 import type { FastifyRequest } from 'fastify'
 import {
+  createCustomerSuccessAgent,
   runAdsOptimizer,
   runContentWriter,
   runInventoryGuard,
@@ -12,6 +13,7 @@ import type { AgentContext } from '@patioer/agent-runtime'
 import type {
   AdsOptimizerPlatformResult,
   ContentWriterResult,
+  CustomerSuccessResult,
   InventoryGuardPlatformResult,
   MarketIntelResult,
   PriceDecision,
@@ -27,6 +29,7 @@ import {
   buildProductScoutInput,
   buildSupportRelayInput,
 } from './agent-inputs.js'
+import { createCustomerSuccessExecutionDeps } from './customer-success-execution.js'
 
 export interface ExecuteAgentResponse {
   ok: true
@@ -55,6 +58,7 @@ export interface ExecuteAgentResponse {
   }
   contentWriter?: ContentWriterResult
   marketIntel?: MarketIntelResult
+  customerSuccess?: CustomerSuccessResult
 }
 
 export type AgentRunner = (
@@ -139,4 +143,16 @@ registerRunner('market-intel', async (_req, agentRow, ctx) => {
   const input = buildMarketIntelInput(agentRow.goalContext ?? '')
   const result = await runMarketIntel(ctx, input)
   return { ok: true, agentId: agentRow.id, executedAt: new Date().toISOString(), marketIntel: result }
+})
+
+registerRunner('customer-success', async (request, agentRow, ctx) => {
+  const input = { tenantIds: [request.tenantId!] }
+  const agent = createCustomerSuccessAgent(createCustomerSuccessExecutionDeps(request.log))
+  const result = await agent.run(ctx, input)
+  return {
+    ok: true,
+    agentId: agentRow.id,
+    executedAt: new Date().toISOString(),
+    customerSuccess: result,
+  }
 })

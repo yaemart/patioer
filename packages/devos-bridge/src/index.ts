@@ -72,3 +72,69 @@ export {
   checkDbIsolationLogic,
   runSprint5AcceptanceChecklist,
 } from './sprint5-acceptance-checklist.js'
+export type {
+  Task,
+  TaskGraph,
+  TaskKind,
+  TaskStatus,
+} from './task-graph.js'
+export {
+  TaskGraphCycleError,
+  topologicalSort,
+  parallelWaves,
+  readyTasks,
+  isGraphComplete,
+  isGraphSuccessful,
+} from './task-graph.js'
+export type { LoopErrorCode, LoopErrorContext } from './loop-error.js'
+export { LoopError } from './loop-error.js'
+export type { AgentSystemPrompt } from './agent-prompts.js'
+export { AGENT_SYSTEM_PROMPTS, validateAgentPrompts } from './agent-prompts.js'
+export type {
+  EventSink,
+  LoopRunSummary,
+  LoopStage,
+  StageLog,
+  StageResult,
+} from './loop-context.js'
+export { LoopContext } from './loop-context.js'
+export type {
+  ArchDesignResult,
+  ArchitectAgentPort,
+  ApprovalContext,
+  ApprovalPort,
+  AutonomousLoopConfig,
+  CodeAgentPort,
+  CodeResult,
+  DeployAgentPort,
+  DeployContext,
+  DeployResult,
+  LoopAgentPorts,
+  PmAgentPort,
+  PmAnalysisResult,
+  PmDecomposePort,
+  QaAgentPort,
+  QaResult,
+  SecurityAgentPort,
+  SecurityResult,
+  SreAgentPort,
+  SreResult,
+} from './autonomous-loop.js'
+export { AutonomousDevLoop } from './autonomous-loop.js'
+export type {
+  LoopRunEvidence,
+  LoopRunnerOptions,
+  FailureInjection,
+  SecurityInjection,
+} from './loop-runner.js'
+export { LoopRunner, REHEARSAL_TICKET, SECURITY_TEST_TICKET } from './loop-runner.js'
+export type {
+  ApiChangelog,
+  BreakingChange,
+  HarnessAgentPort,
+  HarnessChangeReport,
+  HarnessPatch,
+  PatchFile,
+  RequiredChange,
+} from './harness-agent-port.js'
+export { createDeterministicHarnessAgent, MOCK_SHOPIFY_CHANGELOG } from './harness-agent-port.js'

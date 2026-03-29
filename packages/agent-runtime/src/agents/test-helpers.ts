@@ -1,5 +1,6 @@
 import { vi } from 'vitest'
 import type { TenantHarness } from '@patioer/harness'
+import type { AgentContext } from '../context.js'
 import type { DataOsPort } from '../types.js'
 
 export function createHarnessMock(): TenantHarness {
@@ -32,5 +33,22 @@ export function createDataOsMock(overrides?: Partial<{
     recordLakeEvent: vi.fn().mockResolvedValue(undefined),
     recordPriceEvent: vi.fn().mockResolvedValue(undefined),
     getCapabilities: vi.fn().mockResolvedValue({}),
+    queryLakeEvents: vi.fn().mockResolvedValue([]),
+  }
+}
+
+export function createTestContext(agentId: string, tenantId = 'tenant-test'): AgentContext {
+  const harness = createHarnessMock()
+  return {
+    tenantId,
+    agentId,
+    getHarness: () => harness,
+    getEnabledPlatforms: () => ['shopify'],
+    llm: vi.fn().mockResolvedValue({ text: '{}' }),
+    budget: { isExceeded: vi.fn().mockResolvedValue(false) },
+    logAction: vi.fn().mockResolvedValue(undefined),
+    requestApproval: vi.fn().mockResolvedValue(undefined),
+    createTicket: vi.fn().mockResolvedValue(undefined),
+    describeDataOsCapabilities: () => 'DataOS unavailable',
   }
 }

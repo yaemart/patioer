@@ -16,7 +16,7 @@ const agentEventsRoute: FastifyPluginAsync = async (app) => {
     schema: {
       tags: ['Agent Events'],
       summary: 'List agent execution events (audit log)',
-      security: [{ tenantId: [] }],
+      security: [{ bearerAuth: [] }],
     },
   }, async (request, reply) => {
     if (!request.withDb || !request.tenantId) {

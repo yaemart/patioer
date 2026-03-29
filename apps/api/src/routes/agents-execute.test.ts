@@ -5,6 +5,8 @@ const {
   mockRunPriceSentinel,
   mockRunProductScout,
   mockRunSupportRelay,
+  mockCreateCustomerSuccessAgent,
+  mockRunCustomerSuccess,
   mockCreateAgentContext,
   mockCreateHarness,
   mockGetOrCreate,
@@ -15,6 +17,8 @@ const {
   mockRunPriceSentinel: vi.fn(),
   mockRunProductScout: vi.fn(),
   mockRunSupportRelay: vi.fn(),
+  mockCreateCustomerSuccessAgent: vi.fn(),
+  mockRunCustomerSuccess: vi.fn(),
   mockCreateAgentContext: vi.fn(),
   mockCreateHarness: vi.fn(),
   mockGetOrCreate: vi.fn(),
@@ -25,6 +29,7 @@ const {
 
 vi.mock('@patioer/agent-runtime', () => ({
   createAgentContext: mockCreateAgentContext,
+  createCustomerSuccessAgent: mockCreateCustomerSuccessAgent,
   runPriceSentinel: mockRunPriceSentinel,
   runProductScout: mockRunProductScout,
   runSupportRelay: mockRunSupportRelay,
@@ -147,6 +152,8 @@ beforeEach(() => {
   mockRunPriceSentinel.mockReset()
   mockRunProductScout.mockReset()
   mockRunSupportRelay.mockReset()
+  mockCreateCustomerSuccessAgent.mockReset()
+  mockRunCustomerSuccess.mockReset()
   mockCreateAgentContext.mockReset()
   mockCreateHarness.mockReset()
   mockGetOrCreate.mockReset()
@@ -166,9 +173,19 @@ beforeEach(() => {
   mockCreateAgentContext.mockReturnValue({
     logAction: vi.fn().mockResolvedValue(undefined),
   })
+  mockCreateCustomerSuccessAgent.mockReturnValue({
+    run: mockRunCustomerSuccess,
+  })
   mockRunPriceSentinel.mockResolvedValue({ decisions: [] })
   mockRunProductScout.mockResolvedValue({ scouted: [] })
   mockRunSupportRelay.mockResolvedValue({ relayed: [] })
+  mockRunCustomerSuccess.mockResolvedValue({
+    runId: 'agent-cs-1',
+    tenantsScanned: 1,
+    results: [],
+    interventionsSent: 1,
+    upsellsSuggested: 0,
+  })
   mockPaperclipEnsureCompany.mockResolvedValue({ id: 'company-1' })
   mockPaperclipGetBudgetStatus.mockResolvedValue({
     exceeded: false,
@@ -320,6 +337,43 @@ describe('agents execute route', () => {
     })
     expect(response.statusCode).toBe(404)
     expect(response.json().error).toMatch(/No platform credentials found/)
+    await app.close()
+  })
+
+  it('executes customer-success without resolving platform credentials', async () => {
+    const app = createApp([
+      [{
+        id: '123e4567-e89b-12d3-a456-426614174001',
+        type: 'customer-success',
+        goalContext: JSON.stringify({ tenantIds: ['t-1', 't-2'] }),
+        systemPrompt: null,
+      }],
+    ])
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/agents/123e4567-e89b-12d3-a456-426614174001/execute',
+      headers: {
+        'x-api-key': 'paperclip-key',
+        'x-tenant-id': '123e4567-e89b-12d3-a456-426614174000',
+      },
+    })
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({
+      ok: true,
+      agentId: '123e4567-e89b-12d3-a456-426614174001',
+      customerSuccess: {
+        runId: 'agent-cs-1',
+        tenantsScanned: 1,
+        interventionsSent: 1,
+        upsellsSuggested: 0,
+        results: [],
+      },
+    })
+    expect(mockResolveFirstCredential).not.toHaveBeenCalled()
+    expect(mockRunCustomerSuccess).toHaveBeenCalledWith(
+      expect.anything(),
+      { tenantIds: ['123e4567-e89b-12d3-a456-426614174000'] },
+    )
     await app.close()
   })
 

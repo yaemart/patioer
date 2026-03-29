@@ -251,6 +251,59 @@ describe('Smoke — Business routes', () => {
   })
 })
 
+// ─── Walmart ──────────────────────────────────────────────────────────────────
+
+describe('Smoke — Walmart routes', () => {
+  it('POST /api/v1/walmart/credentials is registered (non-404)', async () => {
+    await assertRegistered('POST', '/api/v1/walmart/credentials', {
+      contentType: 'application/json',
+      payload: '{}',
+    })
+  })
+
+  it('GET /api/v1/walmart/auth is registered (non-404)', async () => {
+    await assertRegistered('GET', '/api/v1/walmart/auth')
+  })
+
+  it('GET /api/v1/walmart/auth/callback is registered (non-404)', async () => {
+    await assertRegistered('GET', '/api/v1/walmart/auth/callback')
+  })
+
+  it('POST /api/v1/webhooks/walmart is registered (non-404)', async () => {
+    await assertRegistered('POST', '/api/v1/webhooks/walmart', {
+      contentType: 'application/json',
+      payload: '{}',
+    })
+  })
+})
+
+// ─── B2B Wayfair ─────────────────────────────────────────────────────────
+
+describe('Smoke — B2B Wayfair routes', () => {
+  it('POST /api/v1/b2b/wayfair/credentials is registered (non-404)', async () => {
+    await assertRegistered('POST', '/api/v1/b2b/wayfair/credentials', {
+      contentType: 'application/json',
+      payload: '{}',
+    })
+  })
+
+  it('GET /api/v1/b2b/wayfair/status is registered (non-404)', async () => {
+    await assertRegistered('GET', '/api/v1/b2b/wayfair/status', {
+      headers: { 'x-tenant-id': '00000000-0000-0000-0000-000000000001' },
+    })
+  })
+})
+
+// ─── Console B2B ─────────────────────────────────────────────────────────
+
+describe('Smoke — Console B2B route', () => {
+  it('GET /api/v1/console/b2b is registered (non-404)', async () => {
+    await assertRegistered('GET', '/api/v1/console/b2b', {
+      headers: { 'x-tenant-id': '00000000-0000-0000-0000-000000000001' },
+    })
+  })
+})
+
 // ─── Unknown route ───────────────────────────────────────────────────────────
 
 describe('Smoke — Unknown route', () => {

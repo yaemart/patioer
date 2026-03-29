@@ -18,3 +18,72 @@ export const PRICE_APPROVAL_THRESHOLD_PERCENT = 15
  * databases and test fixtures — hence this looser pattern.
  */
 export const UUID_LOOSE_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** All 9 ElectroOS business agents (Phase 4 Agent Schedule). */
+export const ELECTROOS_AGENT_IDS = [
+  'product-scout',
+  'price-sentinel',
+  'support-relay',
+  'ads-optimizer',
+  'inventory-guard',
+  'content-writer',
+  'market-intel',
+  'finance-agent',
+  'ceo-agent',
+] as const
+
+export type ElectroOsAgentId = (typeof ELECTROOS_AGENT_IDS)[number]
+
+// ---------------------------------------------------------------------------
+// Phase 5 · SaaS Commercialization — Pricing Plans
+// ---------------------------------------------------------------------------
+
+export const PLAN_NAMES = ['starter', 'growth', 'scale'] as const
+export type PlanName = (typeof PLAN_NAMES)[number]
+
+export const PLAN_AGENT_LIMITS: Record<PlanName, readonly string[]> = {
+  starter: ['product-scout', 'price-sentinel', 'support-relay'],
+  growth: [
+    'product-scout', 'price-sentinel', 'support-relay',
+    'ads-optimizer', 'inventory-guard', 'content-writer', 'market-intel',
+  ],
+  scale: ELECTROOS_AGENT_IDS,
+}
+
+export const PLAN_MONTHLY_PRICE_USD: Record<PlanName, number> = {
+  starter: 299,
+  growth: 799,
+  scale: 1999,
+}
+
+export const PLAN_BUDGET_USD: Record<PlanName, number> = {
+  starter: 160,
+  growth: 500,
+  scale: 1200,
+}
+
+export const PLAN_PLATFORM_LIMITS: Record<PlanName, number> = {
+  starter: 1,
+  growth: 3,
+  scale: 5,
+}
+
+export const PLAN_DATAOS_TIER: Record<PlanName, 'none' | 'partial' | 'full'> = {
+  starter: 'none',
+  growth: 'partial',
+  scale: 'full',
+}
+
+export const SLA_LEVELS = {
+  starter: { uptime: 99.5, p0ResponseH: 4, p1ResponseH: 24 },
+  growth: { uptime: 99.9, p0ResponseH: 2, p1ResponseH: 8 },
+  scale: { uptime: 99.95, p0ResponseH: 0.5, p1ResponseH: 4 },
+} as const
+
+export const CUSTOMER_SUCCESS_AGENT_ID = 'customer-success'
+
+export const TRIAL_PERIOD_DAYS = 14
+
+export const REFERRAL_TRIAL_EXTENSION_DAYS = 30
+
+export const TOKEN_COST_PER_1K_USD = 0.003

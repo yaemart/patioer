@@ -8,6 +8,7 @@ import { schema } from '@patioer/db'
 import type {
   AdsOptimizerRunInput,
   ContentWriterRunInput,
+  CustomerSuccessRunInput,
   InventoryGuardRunInput,
   MarketIntelRunInput,
   PriceSentinelRunInput,
@@ -238,5 +239,15 @@ export function buildMarketIntelInput(goalContext: string): MarketIntelRunInput 
       ? parsed.platforms.filter((p): p is string => typeof p === 'string')
       : undefined,
     maxProducts: getNum(parsed, 'maxProducts'),
+  }
+}
+
+export function buildCustomerSuccessInput(goalContext: string): CustomerSuccessRunInput {
+  const parsed = parseGoalContext(goalContext)
+  if (!parsed) return {}
+  return {
+    tenantIds: Array.isArray(parsed.tenantIds)
+      ? parsed.tenantIds.filter((tenantId): tenantId is string => typeof tenantId === 'string' && tenantId.length > 0)
+      : undefined,
   }
 }

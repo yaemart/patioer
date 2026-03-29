@@ -101,7 +101,7 @@ const onboardingRoute: FastifyPluginAsync = async (app) => {
     schema: {
       tags: ['Onboarding'],
       summary: 'Initialize default agents (Step 3)',
-      security: [{ tenantId: [] }],
+      security: [{ bearerAuth: [] }],
     },
   }, async (request, reply) => {
     if (!request.withDb || !request.tenantId) {
@@ -131,7 +131,7 @@ const onboardingRoute: FastifyPluginAsync = async (app) => {
     schema: {
       tags: ['Onboarding'],
       summary: 'Onboarding health (platforms + agentHeartbeats + agents)',
-      security: [{ tenantId: [] }],
+      security: [{ bearerAuth: [] }],
     },
   }, async (request, reply) => {
     if (!request.withDb || !request.tenantId) {

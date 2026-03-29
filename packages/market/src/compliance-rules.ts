@@ -53,6 +53,28 @@ export const PROHIBITED_CATEGORIES: Record<Market, string[]> = {
     'surveillance-equipment',
     'counterfeit-goods',
   ],
+  US: [
+    'controlled-drugs',
+    'counterfeit-goods',
+    'recalled-products',
+    'weapons-automatic',
+    'hazardous-materials-unclassified',
+    'surveillance-equipment-illegal',
+  ],
+  CA: [
+    'controlled-drugs',
+    'counterfeit-goods',
+    'recalled-products',
+    'weapons-prohibited',
+    'tobacco',
+  ],
+  MX: [
+    'controlled-drugs',
+    'counterfeit-goods',
+    'weapons',
+    'tobacco',
+    'hazardous-materials-unclassified',
+  ],
 }
 
 /**
@@ -90,5 +112,24 @@ export const CERTIFICATION_REQUIREMENTS: Record<Market, Record<string, Certifica
     'electronics':      ['WEEE'],
     'electrical-goods': ['WEEE'],
     'batteries':        ['WEEE'],
+  },
+  US: {
+    'electronics':       ['FCC'],
+    'food-supplements':  ['FDA_US'],
+    'medical-devices':   ['FDA_US'],
+    'cosmetics':         ['FDA_US'],
+    'children-products': ['CPSC'],
+    'toys':              ['CPSC'],
+  },
+  CA: {
+    'electronics':       ['ISED'],
+    'food-supplements':  ['HC'],
+    'medical-devices':   ['HC'],
+    'natural-health':    ['HC'],
+  },
+  MX: {
+    'food-supplements':  ['COFEPRIS'],
+    'medical-devices':   ['COFEPRIS'],
+    'cosmetics':         ['COFEPRIS'],
   },
 }

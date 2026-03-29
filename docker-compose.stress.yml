@@ -1,0 +1,23 @@
+# Sprint 14 · Stress-test overlay
+# Usage: docker compose -f docker-compose.yml -f docker-compose.stress.yml up
+#
+# Adds PgBouncer between the API and PostgreSQL.
+# API connects to pgbouncer:6432 instead of postgres:5432.
+
+services:
+  pgbouncer:
+    image: edoburu/pgbouncer:1.22.0
+    container_name: patioer-pgbouncer
+    volumes:
+      - ./docker/pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./docker/pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
+    ports:
+      - '6432:6432'
+    depends_on:
+      - postgres
+
+  api:
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@pgbouncer:6432/patioer
+    depends_on:
+      - pgbouncer

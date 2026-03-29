@@ -3,7 +3,7 @@ import { calculateTax, extractBasePrice, getTaxRate } from './tax.js'
 import type { Market } from './types.js'
 
 describe('getTaxRate', () => {
-  it('getTaxRate returns correct rate for all 6 markets', () => {
+  it('getTaxRate returns correct rate for all markets', () => {
     const expected: Record<Market, { rate: number; name: string; inclusive: boolean }> = {
       SG: { rate: 0.09,  name: 'GST',  inclusive: false },
       MY: { rate: 0.06,  name: 'SST',  inclusive: false },
@@ -11,6 +11,9 @@ describe('getTaxRate', () => {
       ID: { rate: 0.11,  name: 'PPN',  inclusive: true  },
       UK: { rate: 0.20,  name: 'VAT',  inclusive: false },
       DE: { rate: 0.19,  name: 'MwSt', inclusive: false },
+      US: { rate: 0.00,  name: 'Sales Tax', inclusive: false },
+      CA: { rate: 0.05,  name: 'GST',  inclusive: false },
+      MX: { rate: 0.16,  name: 'IVA',  inclusive: true  },
     }
 
     for (const [market, exp] of Object.entries(expected) as [Market, typeof expected[Market]][]) {

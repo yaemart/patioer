@@ -12,6 +12,7 @@ const PLATFORM_LIMITS: Record<SupportedPlatform, PlatformRateLimit> = {
   amazon: { maxPerSecond: 0.5, burst: 1 },
   tiktok: { maxPerSecond: 10, burst: 20 },
   shopee: { maxPerSecond: 10, burst: 20 },
+  walmart: { maxPerSecond: 5, burst: 10 },
 }
 
 const PLATFORM_QUEUES: Record<SupportedPlatform, QueueName> = {
@@ -19,6 +20,7 @@ const PLATFORM_QUEUES: Record<SupportedPlatform, QueueName> = {
   amazon: 'amazon-api-requests',
   tiktok: 'tiktok-api-requests',
   shopee: 'shopee-api-requests',
+  walmart: 'walmart-api-requests',
 }
 
 export function getPlatformRateLimit(platform: SupportedPlatform): PlatformRateLimit {

@@ -15,6 +15,9 @@ export const agentTypeEnum = pgEnum('agent_type', [
   'inventory-guard',
   'content-writer',
   'market-intel',
+  'finance-agent',
+  'ceo-agent',
+  'customer-success',
 ])
 
 export const agentStatusEnum = pgEnum('agent_status', [

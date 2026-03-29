@@ -22,7 +22,8 @@
     "seed:devos-full": "pnpm exec tsx ./scripts/devos-full.seed.ts",
     "test:scripts": "pnpm --filter @patioer/api exec vitest run src/lib/seed-default-agents.test.ts",
     "dataos:clickhouse:apply-ddl": "pnpm exec tsx ./scripts/clickhouse-apply-ddl.ts",
-    "dataos:migrate": "pnpm exec tsx ./scripts/dataos-migrate.ts"
+    "dataos:migrate": "pnpm exec tsx ./scripts/dataos-migrate.ts",
+    "clipmart:import": "pnpm exec tsx ./scripts/clipmart-import.ts"
   },
   "pnpm": {
     "overrides": {

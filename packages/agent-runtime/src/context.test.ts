@@ -141,7 +141,7 @@ describe('createAgentContext', () => {
     expect(deps.harness.getHarness).toHaveBeenCalledWith('tenant-a', 'agent-a', 'amazon')
   })
 
-  it('exposes getMarket when deps.market is set (agent-native parity)', () => {
+  it('exposes market when deps.market is set', () => {
     const market: MarketContext = {
       convertPrice: vi.fn(),
       calculateTax: vi.fn(),
@@ -155,8 +155,6 @@ describe('createAgentContext', () => {
       { ...deps, market },
     )
 
-    expect(ctx.getMarket).toBeDefined()
-    expect(ctx.getMarket?.()).toBe(market)
     expect(ctx.market).toBe(market)
   })
 

@@ -12,6 +12,9 @@ const TAX_RATES: Record<Market, TaxRate> = {
   ID: { market: 'ID', rate: 0.11,  name: 'PPN',  inclusive: true  },
   UK: { market: 'UK', rate: 0.20,  name: 'VAT',  inclusive: false },
   DE: { market: 'DE', rate: 0.19,  name: 'MwSt', inclusive: false },
+  US: { market: 'US', rate: 0.00,  name: 'Sales Tax', inclusive: false },
+  CA: { market: 'CA', rate: 0.05,  name: 'GST',  inclusive: false },
+  MX: { market: 'MX', rate: 0.16,  name: 'IVA',  inclusive: true  },
 }
 
 /** Return the tax configuration for a market. O(1) lookup. */

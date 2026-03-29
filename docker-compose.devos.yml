@@ -35,6 +35,8 @@ services:
     ports:
       - '3101:3101'
       - '3200:3101'
+      # Legacy: separate HMR port when httpServerForVite is not used. Main server now shares one port for HMR.
+      - '13101:13101'
     environment:
       DATABASE_URL: postgres://postgres:postgres@devos-postgres:5432/devos
       HOST: 0.0.0.0

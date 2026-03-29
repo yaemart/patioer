@@ -13,6 +13,7 @@ export type QueueName =
   | 'amazon-api-requests'
   | 'tiktok-api-requests'
   | 'shopee-api-requests'
+  | 'walmart-api-requests'
   | 'webhook-processing'
 
 const queueCache = new Map<QueueName, Queue>()

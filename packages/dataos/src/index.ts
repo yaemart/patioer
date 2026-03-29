@@ -10,6 +10,7 @@ export * from './event-lake.js'
 export * from './feature-store.js'
 export * from './decision-memory.js'
 export * from './embeddings.js'
+export * from './platform-events.js'
 
 export interface DataOsServicesConfig {
   databaseUrl: string

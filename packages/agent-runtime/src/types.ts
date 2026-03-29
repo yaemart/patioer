@@ -94,6 +94,14 @@ export interface AgentContextOptions {
 /** Phase 3 · DataOS (optional; degraded when unavailable). */
 export type DataOsFeatureSnapshot = Record<string, unknown>
 
+export interface LakeEventRow {
+  agentId: string
+  eventType: string
+  entityId?: string
+  payload: unknown
+  createdAt: string
+}
+
 export interface DataOsPort {
   getFeatures(platform: string, productId: string): Promise<DataOsFeatureSnapshot | null>
   recallMemory(agentId: string, context: unknown, opts?: { limit?: number; minSimilarity?: number }): Promise<unknown[] | null>
@@ -127,6 +135,14 @@ export interface DataOsPort {
     [key: string]: unknown
   }): Promise<boolean>
   getCapabilities(): Promise<unknown | null>
+
+  /** Query Event Lake rows with filters; used by Finance Agent for monthly P&L aggregation. */
+  queryLakeEvents?(params: {
+    agentId?: string
+    eventType?: string
+    limit?: number
+    sinceMs?: number
+  }): Promise<LakeEventRow[]>
 }
 
 export interface CreateAgentContextDeps {
@@ -137,7 +153,7 @@ export interface CreateAgentContextDeps {
   tickets: TicketPort
   llm: LlmPort
   /**
-   * When set, `ctx.market` and `ctx.getMarket()` are available for tax / FX / compliance (see `@patioer/market`).
+   * When set, `ctx.market` is available for tax / FX / compliance (see `@patioer/market`).
    * Injected by `apps/api` agent execute route with Redis-backed `createMarketContext`.
    */
   market?: MarketContext
@@ -170,6 +186,8 @@ export interface PriceDecision {
 
 export interface ProductScoutRunInput {
   maxProducts?: number
+  /** When set, run compliance checks for these markets before listing. */
+  complianceMarkets?: string[]
 }
 
 export interface ScoutedProduct {
@@ -182,6 +200,8 @@ export interface ScoutedProduct {
 
 export interface SupportRelayRunInput {
   autoReplyPolicy?: 'auto_reply_non_refund' | 'all_manual'
+  /** Override the default LLM system prompt for tone control (e.g. formal B2B tone). */
+  toneSystemPrompt?: string
 }
 
 export interface RelayedThread {
@@ -328,3 +348,122 @@ export interface MarketIntelResult {
   insights: MarketIntelCompetitorInsight[]
   featuresUpdated: number
 }
+
+// ---------------------------------------------------------------------------
+// Finance Agent (E-09) — Phase 4 Sprint 10
+// ---------------------------------------------------------------------------
+
+export interface FinanceAgentRunInput {
+  month: number
+  year: number
+  platforms?: string[]
+}
+
+export interface PnlLineItem {
+  category: 'revenue' | 'ads_spend' | 'cogs' | 'returns' | 'other'
+  platform: string
+  amount: number
+  currency: string
+  itemCount: number
+}
+
+export interface PnlReport {
+  month: number
+  year: number
+  totalRevenue: number
+  totalAdsSpend: number
+  totalCogs: number
+  totalReturns: number
+  grossProfit: number
+  grossMarginPct: number
+  lineItems: PnlLineItem[]
+  insights: string[]
+}
+
+export interface FinanceAgentResult {
+  runId: string
+  report: PnlReport | null
+  platforms: string[]
+  eventsFetched: number
+}
+
+/** Monthly on the 1st (see Phase 4 Agent Schedule). */
+export const FINANCE_AGENT_HEARTBEAT_MS = 30 * 24 * 60 * 60 * 1000
+
+// ---------------------------------------------------------------------------
+// CEO Agent (E-01) — Phase 4 Sprint 10
+// ---------------------------------------------------------------------------
+
+export interface CeoAgentRunInput {
+  enforceDailyWindow?: boolean
+  timeZone?: string
+}
+
+export interface AgentStatusSummary {
+  agentId: string
+  recentEventCount: number
+  lastEventAt: string | null
+  hasErrors: boolean
+  pendingApprovals: number
+}
+
+export interface ConflictDetection {
+  agentA: string
+  agentB: string
+  conflictType: 'budget_contention' | 'inventory_vs_ads' | 'price_conflict' | 'resource_overlap'
+  description: string
+  resolution: string
+}
+
+export interface CoordinationReport {
+  date: string
+  agentStatuses: AgentStatusSummary[]
+  conflicts: ConflictDetection[]
+  recommendations: string[]
+  ticketsCreated: number
+}
+
+export interface CeoAgentResult {
+  runId: string
+  report: CoordinationReport | null
+  agentsChecked: number
+  conflictsFound: number
+  ticketsCreated: number
+}
+
+/** Daily 08:00 (see Phase 4 Agent Schedule). */
+export const CEO_AGENT_HEARTBEAT_MS = 24 * 60 * 60 * 1000
+
+// ---------------------------------------------------------------------------
+// Customer Success Agent (E-10) — Phase 5 Sprint 19
+// Platform-level agent: not owned by any tenant; scans ALL active tenants.
+// ---------------------------------------------------------------------------
+
+export interface CustomerSuccessRunInput {
+  tenantIds?: string[]
+}
+
+export interface TenantHealthDimension {
+  dimension: 'heartbeat_rate' | 'login_frequency' | 'approval_response' | 'gmv_trend'
+  rawValue: number
+  score: number
+  weight: number
+}
+
+export interface TenantHealthResult {
+  tenantId: string
+  score: number
+  dimensions: TenantHealthDimension[]
+  action: 'none' | 'intervention' | 'upsell_suggestion' | 'review_invitation'
+}
+
+export interface CustomerSuccessResult {
+  runId: string
+  tenantsScanned: number
+  results: TenantHealthResult[]
+  interventionsSent: number
+  upsellsSuggested: number
+}
+
+/** Daily 09:00 (see Phase 5 Agent Schedule). */
+export const CS_AGENT_HEARTBEAT_MS = 24 * 60 * 60 * 1000

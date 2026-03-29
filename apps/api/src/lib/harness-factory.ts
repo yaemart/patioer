@@ -3,11 +3,13 @@ import {
   ShopifyHarness,
   TikTokHarness,
   ShopeeHarness,
+  WalmartHarness,
   type ShopeeMarket,
   type TenantHarness,
 } from '@patioer/harness'
 import { decryptToken } from './crypto.js'
 import { parseAmazonRegion } from './amazon-region.js'
+import { parseWalmartRegion } from './walmart-region.js'
 
 export { SUPPORTED_PLATFORMS, type SupportedPlatform } from './supported-platforms.js'
 import type { SupportedPlatform } from './supported-platforms.js'
@@ -129,6 +131,27 @@ export function createHarness(
         accessToken: token,
         shopId: meta.shopId,
         market,
+      })
+    }
+
+    case 'walmart': {
+      const meta = credential.metadata as { region?: string } | null
+      const region = parseWalmartRegion(meta?.region ?? credential.region)
+      const clientSecret =
+        (typeof credential.metadata?.clientSecret === 'string' ? credential.metadata.clientSecret : null) ??
+        process.env.WALMART_CLIENT_SECRET ??
+        null
+      if (!clientSecret) {
+        throw new Error(
+          'Walmart clientSecret is missing. Set WALMART_CLIENT_SECRET env var or store it in credential metadata.',
+        )
+      }
+      const useSandbox = process.env.WALMART_USE_SANDBOX !== 'false'
+      return new WalmartHarness(tenantId, {
+        clientId: token,
+        clientSecret,
+        region,
+        useSandbox,
       })
     }
 

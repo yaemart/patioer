@@ -25,7 +25,7 @@ const resolveBodySchema = z.object({
 
 const approvalsRoute: FastifyPluginAsync = async (app) => {
   app.get('/api/v1/approvals', {
-    schema: { tags: ['Approvals'], summary: 'List approvals (optionally filter by status)', security: [{ tenantId: [] }] },
+    schema: { tags: ['Approvals'], summary: 'List approvals (optionally filter by status)', security: [{ bearerAuth: [] }] },
   }, async (request, reply) => {
     if (!request.withDb || !request.tenantId) {
       return reply.code(401).send({ error: 'x-tenant-id required' })
@@ -47,7 +47,7 @@ const approvalsRoute: FastifyPluginAsync = async (app) => {
   })
 
   app.get('/api/v1/approvals/:id', {
-    schema: { tags: ['Approvals'], summary: 'Get approval by ID', security: [{ tenantId: [] }] },
+    schema: { tags: ['Approvals'], summary: 'Get approval by ID', security: [{ bearerAuth: [] }] },
   }, async (request, reply) => {
     if (!request.withDb || !request.tenantId) {
       return reply.code(401).send({ error: 'x-tenant-id required' })
@@ -77,7 +77,7 @@ const approvalsRoute: FastifyPluginAsync = async (app) => {
   })
 
   app.patch('/api/v1/approvals/:id/resolve', {
-    schema: { tags: ['Approvals'], summary: 'Resolve an approval (approve or reject)', security: [{ tenantId: [] }] },
+    schema: { tags: ['Approvals'], summary: 'Resolve an approval (approve or reject)', security: [{ bearerAuth: [] }] },
   }, async (request, reply) => {
     if (!request.withDb || !request.tenantId) {
       return reply.code(401).send({ error: 'x-tenant-id required' })
@@ -179,7 +179,7 @@ const approvalsRoute: FastifyPluginAsync = async (app) => {
 
   // Allow operators to delete resolved/stale approvals.
   app.delete('/api/v1/approvals/:id', {
-    schema: { tags: ['Approvals'], summary: 'Delete an approval', security: [{ tenantId: [] }] },
+    schema: { tags: ['Approvals'], summary: 'Delete an approval', security: [{ bearerAuth: [] }] },
   }, async (request, reply) => {
     if (!request.withDb || !request.tenantId) {
       return reply.code(401).send({ error: 'x-tenant-id required' })

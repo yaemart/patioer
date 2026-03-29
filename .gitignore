@@ -12,5 +12,8 @@ coverage
 paperclip/
 .cursor/
 
+# Next.js build output
+.next/
+
 # Local scratch / agent temp output
 .tmp/

@@ -1,0 +1,23 @@
+{
+  "name": "SEA Marketplace",
+  "description": "Optimized for Southeast Asian multi-platform sellers on TikTok Shop and Shopee. Includes pricing, customer support, and advertising agents with regional compliance.",
+  "category": "sea",
+  "targetMarkets": ["SG", "ID", "MY", "TH", "VN", "PH"],
+  "targetCategories": ["fashion", "beauty", "home"],
+  "platforms": ["tiktok", "shopee"],
+  "isOfficial": true,
+  "config": {
+    "agents": [
+      { "type": "product-scout", "name": "Product Scout", "status": "active", "goalContext": { "maxProducts": 100, "complianceMarkets": ["SG", "ID", "MY"] } },
+      { "type": "price-sentinel", "name": "Price Sentinel", "status": "active", "goalContext": { "approvalThresholdPercent": 10 } },
+      { "type": "support-relay", "name": "Support Relay", "status": "active", "goalContext": { "autoReplyPolicy": "auto_reply_non_refund", "languages": ["en", "zh", "id", "th"] } },
+      { "type": "ads-optimizer", "name": "Ads Optimizer", "status": "active", "goalContext": { "targetRoas": 2.5 } }
+    ],
+    "governance": {
+      "monthlyBudgetUsd": 220,
+      "priceApprovalThresholdPercent": 10,
+      "adBudgetApprovalUsd": 300
+    },
+    "dataosTier": "partial"
+  }
+}

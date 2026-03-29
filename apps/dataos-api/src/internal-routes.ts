@@ -1,10 +1,25 @@
 import { timingSafeEqual } from 'node:crypto'
+import { resolve } from 'node:path'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { z } from 'zod'
 import type { DataOsServices } from '@patioer/dataos'
 import { UUID_LOOSE_RE } from '@patioer/shared'
+import { buildCodebaseIndex, queryCodebase, type CodebaseIndex } from '@patioer/devos-bridge'
 import { featureCacheHits, featureCacheMisses, lakeEventsInserted } from './metrics.js'
 import { _runInsightAgentTick } from './workers/insight-agent.js'
+
+const MONOREPO_ROOT = resolve(import.meta.dirname, '../../..')
+const CODEBASE_INDEX_TTL_MS = 15 * 60 * 1000
+
+let _cachedIndex: CodebaseIndex | null = null
+
+function getCodebaseIndex(): CodebaseIndex {
+  const now = Date.now()
+  if (!_cachedIndex || now - new Date(_cachedIndex.scannedAt).getTime() > CODEBASE_INDEX_TTL_MS) {
+    _cachedIndex = buildCodebaseIndex(MONOREPO_ROOT)
+  }
+  return _cachedIndex
+}
 
 const zUuid = z.string().regex(UUID_LOOSE_RE).transform((v) => v.toLowerCase())
 
@@ -13,7 +28,7 @@ const MAX_PAYLOAD_BYTES = 65_536
 const zBoundedPayload = z.unknown().refine(
   (v) => {
     const s = JSON.stringify(v ?? null)
-    return s !== undefined && s.length <= MAX_PAYLOAD_BYTES
+    return s.length <= MAX_PAYLOAD_BYTES
   },
   { message: `payload must be <= ${MAX_PAYLOAD_BYTES} bytes` },
 )
@@ -57,6 +72,19 @@ function requireKey(request: FastifyRequest, reply: FastifyReply, expectedKey: s
   return true
 }
 
+/** Rejects if parsed body tenantId doesn't match the header-derived tenantId. Returns false after replying 403. */
+function assertBodyTenant(
+  bodyTenantId: string,
+  headerTenantId: string,
+  reply: FastifyReply,
+): boolean {
+  if (bodyTenantId !== headerTenantId) {
+    void reply.code(403).send({ error: 'body tenantId does not match X-Tenant-Id' })
+    return false
+  }
+  return true
+}
+
 /** Validates API key + tenant UUID header. Returns tenantId on success, null after replying with error. */
 function authGuard(request: FastifyRequest, reply: FastifyReply, expectedKey: string): string | null {
   if (!requireKey(request, reply, expectedKey)) return null
@@ -69,8 +97,14 @@ function authGuard(request: FastifyRequest, reply: FastifyReply, expectedKey: st
 }
 
 const CAPABILITIES_RESPONSE = {
-  version: '1.0.0',
+  version: '1.1.0',
   entities: {
+    codebase: {
+      operations: [
+        { method: 'GET', path: '/internal/v1/codebase/query', description: 'Query the monorepo codebase index by natural language (e.g. "Price Sentinel 在哪个文件？")', parameters: { q: 'string (required)' } },
+        { method: 'POST', path: '/internal/v1/codebase/reindex', description: 'Invalidate and rebuild the in-memory codebase index immediately (Agent-Native: D-12 Codebase Intel)' },
+      ],
+    },
     events: {
       operations: [
         { method: 'POST', path: '/internal/v1/lake/events', description: 'Insert a generic event into the Event Lake (ClickHouse)' },
@@ -120,9 +154,7 @@ export function registerInternalRoutes(
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid body' })
     }
-    if (parsed.data.tenantId !== tenantId) {
-      return reply.code(403).send({ error: 'body tenantId does not match X-Tenant-Id' })
-    }
+    if (!assertBodyTenant(parsed.data.tenantId, tenantId, reply)) return
     await services.eventLake.insertEvent(parsed.data)
     lakeEventsInserted.inc()
     return reply.send({ ok: true })
@@ -135,9 +167,7 @@ export function registerInternalRoutes(
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid body' })
     }
-    if (parsed.data.tenantId !== tenantId) {
-      return reply.code(403).send({ error: 'body tenantId does not match X-Tenant-Id' })
-    }
+    if (!assertBodyTenant(parsed.data.tenantId, tenantId, reply)) return
     await services.eventLake.insertPriceEvent(parsed.data)
     lakeEventsInserted.inc()
     return reply.send({ ok: true })
@@ -227,9 +257,7 @@ export function registerInternalRoutes(
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid body' })
     }
-    if (parsed.data.tenantId !== tenantId) {
-      return reply.code(403).send({ error: 'body tenantId does not match X-Tenant-Id' })
-    }
+    if (!assertBodyTenant(parsed.data.tenantId, tenantId, reply)) return
     await services.featureStore.upsert(parsed.data)
     return reply.send({ ok: true })
   })
@@ -285,9 +313,7 @@ export function registerInternalRoutes(
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid body' })
     }
-    if (parsed.data.tenantId !== tenantId) {
-      return reply.code(403).send({ error: 'body tenantId does not match X-Tenant-Id' })
-    }
+    if (!assertBodyTenant(parsed.data.tenantId, tenantId, reply)) return
     await services.decisionMemory.writeOutcome(parsed.data.decisionId, tenantId, parsed.data.outcome)
     return reply.send({ ok: true })
   })
@@ -312,5 +338,33 @@ export function registerInternalRoutes(
       tenantId,
     })
     return reply.send({ ok: true, ...result })
+  })
+
+  // Codebase Intel (D-12) — Agent-Native Parity: agents can query codebase location
+  app.get('/internal/v1/codebase/query', async (request, reply) => {
+    if (!requireKey(request, reply, internalKey)) return
+    const q = ((request.query as Record<string, string>).q ?? '').trim()
+    if (!q) {
+      return reply.code(400).send({ error: 'query param "q" is required' })
+    }
+    const index = getCodebaseIndex()
+    const result = queryCodebase(index, q)
+    return reply.send({
+      query: result.query,
+      matches: result.matches,
+      indexedAt: index.scannedAt,
+      totalEntries: index.entries.length,
+    })
+  })
+
+  app.post('/internal/v1/codebase/reindex', async (request, reply) => {
+    if (!requireKey(request, reply, internalKey)) return
+    _cachedIndex = null
+    const index = getCodebaseIndex()
+    return reply.send({
+      ok: true,
+      entriesCount: index.entries.length,
+      scannedAt: index.scannedAt,
+    })
   })
 }

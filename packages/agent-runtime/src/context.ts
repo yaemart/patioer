@@ -33,13 +33,8 @@ export interface AgentContext {
   getHarness(platform?: string): TenantHarness
   /** Platforms the tenant has connected (credential rows present), stable order (shopify → … → shopee). */
   getEnabledPlatforms(): string[]
-  /**
-   * Injected `MarketContext` when `deps.market` is set (Phase 2 / `@patioer/market`).
-   * Same object as `getMarket()` when present.
-   */
+  /** Injected `MarketContext` when `deps.market` is set (Phase 2 / `@patioer/market`). */
   market?: MarketContext
-  /** Present when `CreateAgentContextDeps.market` is set (e.g. API execute route + Redis). */
-  getMarket?(): MarketContext
 
   llm(params: LlmParams): Promise<LlmResponse>
 
@@ -54,6 +49,8 @@ export interface AgentContext {
   listPendingApprovals?: () => Promise<PendingApprovalItem[]>
   /** Returns the last `limit` agent_events for this agent (requires `deps.events`; otherwise `[]`). */
   getRecentEvents?: (limit: number) => Promise<RecentAgentEvent[]>
+  /** Query events for a specific agent by ID; used by CEO Agent for cross-agent coordination. */
+  getEventsForAgent?: (agentId: string, limit: number) => Promise<RecentAgentEvent[]>
 }
 
 export function createAgentContext(
@@ -112,6 +109,11 @@ export function createAgentContext(
     return deps.events.getRecent(tenantId, agentId, limit)
   }
 
+  ctx.getEventsForAgent = (targetAgentId: string, limit: number) => {
+    if (!deps.events) return Promise.resolve([])
+    return deps.events.getRecent(tenantId, targetAgentId, limit)
+  }
+
   if (deps.dataOS) {
     ctx.dataOS = deps.dataOS
     ctx.describeDataOsCapabilities = () =>
@@ -119,9 +121,7 @@ export function createAgentContext(
   }
 
   if (deps.market) {
-    const market = deps.market
-    ctx.market = market
-    ctx.getMarket = () => market
+    ctx.market = deps.market
   }
 
   return ctx
