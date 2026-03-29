@@ -23,6 +23,16 @@ async function main() {
       'ads_campaigns',
       'inventory_levels',
       'devos_tickets',
+      // Phase 5 tables
+      'billing_usage_logs',
+      'billing_reconciliation',
+      'clipmart_templates',
+      'template_reviews',
+      'referral_codes',
+      'referral_rewards',
+      'nps_responses',
+      'onboarding_progress',
+      'tenant_governance_settings',
     ]
 
     for (const table of tenantScopedTables) {
@@ -70,6 +80,38 @@ async function main() {
 
       `DROP POLICY IF EXISTS tenant_or_system_devos_tickets ON devos_tickets`,
       `CREATE POLICY tenant_or_system_devos_tickets ON devos_tickets USING (tenant_id IS NULL OR tenant_id = current_setting('app.tenant_id')::uuid)`,
+
+      // Phase 5 — billing
+      `DROP POLICY IF EXISTS tenant_isolation_billing_usage_logs ON billing_usage_logs`,
+      `CREATE POLICY tenant_isolation_billing_usage_logs ON billing_usage_logs USING (tenant_id = current_setting('app.tenant_id')::uuid)`,
+
+      `DROP POLICY IF EXISTS tenant_isolation_billing_reconciliation ON billing_reconciliation`,
+      `CREATE POLICY tenant_isolation_billing_reconciliation ON billing_reconciliation USING (tenant_id = current_setting('app.tenant_id')::uuid)`,
+
+      // Phase 5 — clipmart (public templates visible to all; private scoped to author)
+      `DROP POLICY IF EXISTS clipmart_template_access ON clipmart_templates`,
+      `CREATE POLICY clipmart_template_access ON clipmart_templates USING (is_public = true OR author_tenant_id = current_setting('app.tenant_id')::uuid)`,
+
+      `DROP POLICY IF EXISTS template_review_access ON template_reviews`,
+      `CREATE POLICY template_review_access ON template_reviews USING (tenant_id = current_setting('app.tenant_id')::uuid)`,
+
+      // Phase 5 — growth
+      `DROP POLICY IF EXISTS tenant_isolation_referral_codes ON referral_codes`,
+      `CREATE POLICY tenant_isolation_referral_codes ON referral_codes USING (tenant_id = current_setting('app.tenant_id')::uuid)`,
+
+      `DROP POLICY IF EXISTS tenant_isolation_referral_rewards ON referral_rewards`,
+      `CREATE POLICY tenant_isolation_referral_rewards ON referral_rewards USING (referrer_tenant_id = current_setting('app.tenant_id')::uuid)`,
+
+      `DROP POLICY IF EXISTS tenant_isolation_nps_responses ON nps_responses`,
+      `CREATE POLICY tenant_isolation_nps_responses ON nps_responses USING (tenant_id = current_setting('app.tenant_id')::uuid)`,
+
+      // Phase 5 — onboarding
+      `DROP POLICY IF EXISTS tenant_isolation_onboarding_progress ON onboarding_progress`,
+      `CREATE POLICY tenant_isolation_onboarding_progress ON onboarding_progress USING (tenant_id = current_setting('app.tenant_id')::uuid)`,
+
+      // Phase 5 — governance settings
+      `DROP POLICY IF EXISTS tenant_isolation_governance_settings ON tenant_governance_settings`,
+      `CREATE POLICY tenant_isolation_governance_settings ON tenant_governance_settings USING (tenant_id = current_setting('app.tenant_id')::uuid)`,
     ]
 
     for (const stmt of policyStatements) {
