@@ -4,6 +4,7 @@
  */
 import type { FastifyRequest } from 'fastify'
 import { and, eq } from 'drizzle-orm'
+import { z } from 'zod'
 import { schema } from '@patioer/db'
 import type {
   AdsOptimizerRunInput,
@@ -15,6 +16,28 @@ import type {
   ProductScoutRunInput,
   SupportRelayRunInput,
 } from '@patioer/agent-runtime'
+import { platformZod } from './platform-schema.js'
+
+const MAX_PRICE_SENTINEL_PROPOSALS = 100
+const MAX_MARKET_INTEL_PRODUCTS = 50
+
+const priceSentinelProposalSchema = z.object({
+  productId: z.string().min(1),
+  platform: platformZod.optional(),
+  currentPrice: z.number().positive(),
+  proposedPrice: z.number().positive(),
+  reason: z.string().min(1),
+})
+
+const priceSentinelInputSchema = z.object({
+  proposals: z.array(priceSentinelProposalSchema).max(MAX_PRICE_SENTINEL_PROPOSALS),
+  approvalThresholdPercent: z.number().nonnegative().max(100).optional(),
+}).passthrough()
+
+const marketIntelInputSchema = z.object({
+  platforms: z.array(platformZod).optional(),
+  maxProducts: z.number().int().positive().max(MAX_MARKET_INTEL_PRODUCTS).optional(),
+}).passthrough()
 
 function parseGoalContext(goalContext: string): Record<string, unknown> | null {
   if (!goalContext) return null
@@ -32,9 +55,8 @@ function getNum(obj: Record<string, unknown> | null, key: string): number | unde
 
 export function buildPriceSentinelInput(goalContext: string): PriceSentinelRunInput {
   const parsed = parseGoalContext(goalContext)
-  if (parsed && Array.isArray(parsed.proposals)) {
-    return parsed as unknown as PriceSentinelRunInput
-  }
+  const result = priceSentinelInputSchema.safeParse(parsed)
+  if (result.success) return result.data
   return { proposals: [] }
 }
 
@@ -59,7 +81,8 @@ export function buildContentWriterInput(goalContext: string): ContentWriterRunIn
   if (!parsed) throw new Error('content-writer requires goalContext with productId')
   const productId = typeof parsed.productId === 'string' && parsed.productId ? parsed.productId : ''
   if (!productId) throw new Error('content-writer requires a non-empty productId')
-  const platform = typeof parsed.platform === 'string' ? parsed.platform : undefined
+  const platformResult = platformZod.safeParse(parsed.platform)
+  const platform = platformResult.success ? platformResult.data : undefined
   const tone = ['professional', 'casual', 'luxury', 'value'].includes(parsed.tone as string)
     ? (parsed.tone as ContentWriterRunInput['tone'])
     : undefined
@@ -233,13 +256,8 @@ export function buildInventoryGuardInput(
 
 export function buildMarketIntelInput(goalContext: string): MarketIntelRunInput {
   const parsed = parseGoalContext(goalContext)
-  if (!parsed) return {}
-  return {
-    platforms: Array.isArray(parsed.platforms)
-      ? parsed.platforms.filter((p): p is string => typeof p === 'string')
-      : undefined,
-    maxProducts: getNum(parsed, 'maxProducts'),
-  }
+  const result = marketIntelInputSchema.safeParse(parsed)
+  return result.success ? result.data : {}
 }
 
 export function buildCustomerSuccessInput(goalContext: string): CustomerSuccessRunInput {

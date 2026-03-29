@@ -181,7 +181,7 @@ export const AGENT_SYSTEM_PROMPTS: Record<DevOsAgentId, AgentSystemPrompt> = {
     role: 'QA Engineer — 测试执行与覆盖率门控',
     responsibilities: [
       '运行项目测试套件（vitest），收集覆盖率指标',
-      '覆盖率 <80% 时返回失败，触发 LoopError("coverage_below_80")',
+      '覆盖率 <80% 时返回失败 summary，failureCode = "coverage_below_80"',
       '分析失败测试并报告失败原因',
       '确保新代码有对应的单元测试',
     ],
@@ -204,7 +204,7 @@ export const AGENT_SYSTEM_PROMPTS: Record<DevOsAgentId, AgentSystemPrompt> = {
     responsibilities: [
       '扫描代码变更中的安全问题：硬编码 secrets、SQL 注入、依赖漏洞',
       '检测 Harness 违规（直调平台 SDK 而非 Harness 层）',
-      '漏洞发现后阻塞 Loop 直到修复，触发 LoopError("security_issues")',
+      '漏洞发现后阻塞 Loop 直到修复，返回失败 summary，failureCode = "security_issues"',
       'pre-merge 阶段执行，确保安全问题不进入 main 分支',
     ],
     availableTools: [

@@ -1,7 +1,7 @@
 import { HarnessError } from '@patioer/harness'
 import type { AgentContext } from '../context.js'
+import type { PriceDecision, PriceSentinelRunInput } from '../commerce-types.js'
 import { errorMessage } from '../error-message.js'
-import type { PriceDecision, PriceSentinelRunInput } from '../types.js'
 
 const DEFAULT_APPROVAL_THRESHOLD_PERCENT = 15
 
@@ -11,11 +11,15 @@ function calcDeltaPercent(currentPrice: number, proposedPrice: number): number {
 
 function assertValidProposal(proposal: {
   productId: string
+  platform?: string
   currentPrice: number
   proposedPrice: number
   reason: string
 }): void {
   if (!proposal.productId) throw new Error('proposal.productId is required')
+  if (proposal.platform !== undefined && !proposal.platform) {
+    throw new Error('proposal.platform must be a non-empty string when provided')
+  }
   if (!Number.isFinite(proposal.currentPrice) || proposal.currentPrice <= 0) {
     throw new Error('proposal.currentPrice must be a positive number')
   }
@@ -27,6 +31,7 @@ function assertValidProposal(proposal: {
 
 function buildDecision(
   productId: string,
+  platform: string | undefined,
   currentPrice: number,
   proposedPrice: number,
   reason: string,
@@ -36,6 +41,7 @@ function buildDecision(
   const requiresApproval = Math.abs(deltaPercent) > threshold
   return {
     productId,
+    platform,
     currentPrice,
     proposedPrice,
     deltaPercent,
@@ -89,10 +95,11 @@ export async function runPriceSentinel(
   }
 
   const decisions: PriceDecision[] = []
-  const platform = ctx.getEnabledPlatforms()[0] ?? 'shopify'
+  const defaultPlatform = ctx.getEnabledPlatforms()[0] ?? 'shopify'
 
   for (const proposal of input.proposals) {
     assertValidProposal(proposal)
+    const platform = proposal.platform ?? defaultPlatform
 
     // AN-FIX-02: read Feature Store to adaptively tune approval threshold per product.
     // High-converting products get a tighter threshold; low performers get looser.
@@ -117,6 +124,7 @@ export async function runPriceSentinel(
 
     const decision = buildDecision(
       proposal.productId,
+      platform,
       proposal.currentPrice,
       proposal.proposedPrice,
       proposal.reason,
@@ -133,6 +141,7 @@ export async function runPriceSentinel(
       await ctx.logAction('price_sentinel.approval_requested', { decision })
       await safeDataOsWrite(ctx, proposal.productId, async () => {
         await ctx.dataOS!.recordLakeEvent({
+          platform,
           agentId: ctx.agentId,
           eventType: 'price_change_pending',
           entityId: proposal.productId,
@@ -172,6 +181,7 @@ export async function runPriceSentinel(
     await safeDataOsWrite(ctx, proposal.productId, async () => {
       const decisionId = await ctx.dataOS!.recordMemory({
         agentId: 'price-sentinel',
+        platform,
         entityId: proposal.productId,
         context: { product: proposal },
         action: {
@@ -188,6 +198,7 @@ export async function runPriceSentinel(
         })
       }
       await ctx.dataOS!.recordLakeEvent({
+        platform,
         agentId: ctx.agentId,
         eventType: 'price_changed',
         entityId: proposal.productId,

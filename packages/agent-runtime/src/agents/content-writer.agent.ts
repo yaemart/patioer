@@ -1,8 +1,8 @@
 import { HarnessError } from '@patioer/harness'
 import type { AgentContext } from '../context.js'
+import type { ContentWriterRunInput, ContentWriterResult } from '../commerce-types.js'
 import { errorMessage } from '../error-message.js'
 import { extractFirstJsonObject } from '../extract-json.js'
-import type { ContentWriterRunInput, ContentWriterResult } from '../types.js'
 
 const DEFAULT_TONE = 'professional' as const
 const DEFAULT_MAX_LENGTH = 2000
@@ -48,7 +48,7 @@ Respond with valid JSON in this exact shape:
   return lines.join('\n')
 }
 
-function parseLlmResponse(text: string, productId: string): ContentWriterResult {
+function parseLlmResponse(text: string, productId: string): ContentWriterResult | null {
   try {
     const jsonMatch = extractFirstJsonObject(text)
     if (!jsonMatch) throw new Error('no JSON object found')
@@ -65,13 +65,18 @@ function parseLlmResponse(text: string, productId: string): ContentWriterResult 
         : [],
     }
   } catch {
-    return {
-      productId,
-      title: text.slice(0, 200),
-      description: text.slice(0, 5000),
-      bulletPoints: [],
-      seoKeywords: [],
-    }
+    return null
+  }
+}
+
+function clampResultLength(result: ContentWriterResult, maxLength: number): ContentWriterResult {
+  const boundedLength = Math.max(1, maxLength)
+  return {
+    ...result,
+    title: result.title.slice(0, Math.min(200, boundedLength)),
+    description: result.description.slice(0, boundedLength),
+    bulletPoints: result.bulletPoints.map((point) => point.slice(0, Math.min(200, boundedLength))),
+    seoKeywords: result.seoKeywords.map((keyword) => keyword.slice(0, Math.min(100, boundedLength))),
   }
 }
 
@@ -136,12 +141,26 @@ export async function runContentWriter(
     systemPrompt: `You are an expert e-commerce content writer. Generate compelling, SEO-optimized product content. Always respond with valid JSON.\n\nData context: ${dataOsContext}`,
   })
 
-  const result = parseLlmResponse(llmResponse.text, productId)
+  const parsedResult = parseLlmResponse(llmResponse.text, productId)
+  if (!parsedResult) {
+    await ctx.logAction('content_writer.parse_failed', { productId })
+    const emptyResult = { productId, title: '', description: '', bulletPoints: [], seoKeywords: [] }
+    await ctx.logAction('content_writer.run.completed', {
+      productId,
+      titleLength: 0,
+      bulletCount: 0,
+      keywordCount: 0,
+    })
+    return emptyResult
+  }
+
+  const result = clampResultLength(parsedResult, maxLength)
 
   if (ctx.dataOS) {
     try {
       await ctx.dataOS.recordMemory({
         agentId: 'content-writer',
+        platform,
         entityId: productId,
         context: { productId, features, tone },
         action: { title: result.title, description: result.description, bulletPoints: result.bulletPoints },
@@ -151,6 +170,7 @@ export async function runContentWriter(
     }
     try {
       await ctx.dataOS.recordLakeEvent({
+        platform,
         agentId: ctx.agentId,
         eventType: 'content_generated',
         entityId: productId,

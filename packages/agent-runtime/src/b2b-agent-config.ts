@@ -5,7 +5,7 @@
  * Constitution §4.3: Price approval threshold → 5% for B2B (vs 15% B2C).
  */
 
-import type { PriceSentinelRunInput, SupportRelayRunInput } from './types.js'
+import type { PriceSentinelRunInput, SupportRelayRunInput } from './commerce-types.js'
 
 /**
  * B2B Price Sentinel uses a tighter 5% threshold.

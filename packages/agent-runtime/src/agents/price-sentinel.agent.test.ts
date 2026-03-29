@@ -25,6 +25,9 @@ function createCtx(overrides?: {
     logAction,
     requestApproval,
     createTicket,
+    listPendingApprovals: vi.fn().mockResolvedValue([]),
+    getRecentEvents: vi.fn().mockResolvedValue([]),
+    getEventsForAgent: vi.fn().mockResolvedValue([]),
     describeDataOsCapabilities: () => 'DataOS not available',
   }
 
@@ -212,6 +215,33 @@ describe('runPriceSentinel', () => {
     expect(result.decisions).toHaveLength(2)
     expect(result.decisions[0]?.productId).toBe('p-1')
     expect(result.decisions[1]?.productId).toBe('p-2')
+  })
+
+  it('uses per-proposal platform for feature reads, harness writes, and lake writes', async () => {
+    const { ctx } = createCtx()
+    const dataOS = createDataOsMock()
+    const getHarnessSpy = vi.fn(ctx.getHarness)
+    ctx.getHarness = getHarnessSpy
+    ctx.dataOS = dataOS
+
+    const result = await runPriceSentinel(ctx, {
+      proposals: [
+        {
+          productId: 'p-1',
+          platform: 'amazon',
+          currentPrice: 100,
+          proposedPrice: 105,
+          reason: 'small move',
+        },
+      ],
+    })
+
+    expect(result.decisions[0]?.platform).toBe('amazon')
+    expect(dataOS.getFeatures).toHaveBeenCalledWith('amazon', 'p-1')
+    expect(getHarnessSpy).toHaveBeenCalledWith('amazon')
+    expect(dataOS.recordMemory).toHaveBeenCalledWith(expect.objectContaining({ platform: 'amazon' }))
+    expect(dataOS.recordLakeEvent).toHaveBeenCalledWith(expect.objectContaining({ platform: 'amazon' }))
+    expect(dataOS.recordPriceEvent).toHaveBeenCalledWith(expect.objectContaining({ platform: 'amazon' }))
   })
 
   describe('HarnessError handling — Constitution §2.3 + §4.3', () => {

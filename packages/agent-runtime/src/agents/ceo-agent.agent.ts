@@ -1,15 +1,15 @@
 import type { AgentContext } from '../context.js'
-import { errorMessage } from '../error-message.js'
-import { extractFirstJsonObject } from '../extract-json.js'
-import { randomRunId } from '../run-id.js'
 import type {
   AgentStatusSummary,
   CeoAgentRunInput,
   CeoAgentResult,
   ConflictDetection,
   CoordinationReport,
-  RecentAgentEvent,
-} from '../types.js'
+} from '../ceo-types.js'
+import type { RecentAgentEvent } from '../ports.js'
+import { errorMessage } from '../error-message.js'
+import { extractFirstJsonObject } from '../extract-json.js'
+import { randomRunId } from '../run-id.js'
 import { ELECTROOS_AGENT_IDS } from '@patioer/shared'
 
 const CEO_LOCAL_HOUR = 8

@@ -13,8 +13,12 @@ export function tryCreateDataOsPort(tenantId: string, defaultPlatform: string): 
         ...input,
         platform: input.platform ?? defaultPlatform,
       }),
-    recordLakeEvent: (input) => client.recordLakeEvent({ tenantId, platform: defaultPlatform, ...input }).then(() => undefined),
-    recordPriceEvent: (input) => client.recordPriceEvent({ tenantId, platform: defaultPlatform, ...input }).then(() => undefined),
+    recordLakeEvent: (input) => {
+      const { platform, ...rest } = input
+      return client.recordLakeEvent({ tenantId, platform, ...rest }).then(() => undefined)
+    },
+    recordPriceEvent: (input) =>
+      client.recordPriceEvent({ tenantId, platform: input.platform ?? defaultPlatform, ...input }).then(() => undefined),
 
     writeOutcome: (decisionId, outcome) => client.writeOutcome(decisionId, outcome),
     upsertFeature: (input) => client.upsertFeature({ ...input, platform: input.platform ?? defaultPlatform }),

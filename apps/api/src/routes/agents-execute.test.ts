@@ -96,6 +96,8 @@ vi.mock('../lib/execution-services.js', async (importOriginal) => {
 import { HarnessError } from '@patioer/harness'
 import * as execServices from '../lib/execution-services.js'
 import agentsExecuteRoute, {
+  buildContentWriterInput,
+  buildMarketIntelInput,
   buildPriceSentinelInput,
   buildProductScoutInput,
   buildSupportRelayInput,
@@ -210,6 +212,31 @@ describe('buildPriceSentinelInput', () => {
     expect(input.proposals[0]?.productId).toBe('p1')
   })
 
+  it('drops invalid proposals instead of returning malformed input', () => {
+    const input = buildPriceSentinelInput(
+      JSON.stringify({
+        proposals: [
+          { productId: 'p1', currentPrice: 100, proposedPrice: 'bad', reason: 'test' },
+        ],
+      }),
+    )
+    expect(input).toEqual({ proposals: [] })
+  })
+
+  it('drops price-sentinel input when proposal count exceeds the cap', () => {
+    const input = buildPriceSentinelInput(
+      JSON.stringify({
+        proposals: Array.from({ length: 101 }, (_, i) => ({
+          productId: `p${i}`,
+          currentPrice: 100,
+          proposedPrice: 110,
+          reason: 'test',
+        })),
+      }),
+    )
+    expect(input).toEqual({ proposals: [] })
+  })
+
   it('returns empty proposals when goalContext is invalid json', () => {
     const input = buildPriceSentinelInput('{not-json')
     expect(input).toEqual({ proposals: [] })
@@ -218,6 +245,31 @@ describe('buildPriceSentinelInput', () => {
   it('returns empty proposals when goalContext shape is invalid', () => {
     const input = buildPriceSentinelInput(JSON.stringify({ foo: 'bar' }))
     expect(input).toEqual({ proposals: [] })
+  })
+})
+
+describe('buildContentWriterInput', () => {
+  it('throws when productId is missing', () => {
+    expect(() => buildContentWriterInput(JSON.stringify({ tone: 'casual' }))).toThrow(
+      'content-writer requires a non-empty productId',
+    )
+  })
+
+  it('ignores unsupported platform values', () => {
+    const input = buildContentWriterInput(JSON.stringify({ productId: 'p1', platform: 'invalid' }))
+    expect(input).toEqual({ productId: 'p1', platform: undefined, tone: undefined, maxLength: undefined })
+  })
+})
+
+describe('buildMarketIntelInput', () => {
+  it('filters invalid market-intel payloads to empty input', () => {
+    const input = buildMarketIntelInput(JSON.stringify({ platforms: ['shopify', 'invalid'] }))
+    expect(input).toEqual({})
+  })
+
+  it('drops maxProducts above the hard cap', () => {
+    const input = buildMarketIntelInput(JSON.stringify({ maxProducts: 500 }))
+    expect(input).toEqual({})
   })
 })
 

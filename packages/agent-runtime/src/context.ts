@@ -4,13 +4,13 @@ import type {
   AgentContextOptions,
   ApprovalRequest,
   CreateAgentContextDeps,
-  DataOsPort,
   LlmParams,
   LlmResponse,
   PendingApprovalItem,
   RecentAgentEvent,
   TicketParams,
-} from './types.js'
+} from './ports.js'
+import type { DataOsPort } from './dataos-types.js'
 
 export interface AgentContext {
   tenantId: string
@@ -45,12 +45,12 @@ export interface AgentContext {
   logAction(action: string, payload: unknown): Promise<void>
   requestApproval(params: ApprovalRequest): Promise<void>
   createTicket(params: TicketParams): Promise<void>
-  /** Returns pending approvals created by this agent (requires `deps.approvalsQuery`; otherwise `[]`). */
-  listPendingApprovals?: () => Promise<PendingApprovalItem[]>
-  /** Returns the last `limit` agent_events for this agent (requires `deps.events`; otherwise `[]`). */
-  getRecentEvents?: (limit: number) => Promise<RecentAgentEvent[]>
-  /** Query events for a specific agent by ID; used by CEO Agent for cross-agent coordination. */
-  getEventsForAgent?: (agentId: string, limit: number) => Promise<RecentAgentEvent[]>
+  /** Returns pending approvals created by this agent; defaults to `[]` when no query port is wired. */
+  listPendingApprovals(): Promise<PendingApprovalItem[]>
+  /** Returns the last `limit` agent_events for this agent; defaults to `[]` when no events port is wired. */
+  getRecentEvents(limit: number): Promise<RecentAgentEvent[]>
+  /** Query events for a specific agent by ID; defaults to `[]` when no events port is wired. */
+  getEventsForAgent(agentId: string, limit: number): Promise<RecentAgentEvent[]>
 }
 
 export function createAgentContext(
@@ -93,25 +93,24 @@ export function createAgentContext(
       return deps.tickets.createTicket(tenantId, agentId, params)
     },
 
+    listPendingApprovals(): Promise<PendingApprovalItem[]> {
+      if (!deps.approvalsQuery) return Promise.resolve([])
+      return deps.approvalsQuery.listPending(tenantId, agentId)
+    },
+
+    getRecentEvents(limit: number): Promise<RecentAgentEvent[]> {
+      if (!deps.events) return Promise.resolve([])
+      return deps.events.getRecent(tenantId, agentId, limit)
+    },
+
+    getEventsForAgent(targetAgentId: string, limit: number): Promise<RecentAgentEvent[]> {
+      if (!deps.events) return Promise.resolve([])
+      return deps.events.getRecent(tenantId, targetAgentId, limit)
+    },
+
     describeDataOsCapabilities(): string {
       return 'DataOS is not available. You are operating in degraded (memoryless) mode.'
     },
-
-  }
-
-  ctx.listPendingApprovals = () => {
-    if (!deps.approvalsQuery) return Promise.resolve([])
-    return deps.approvalsQuery.listPending(tenantId, agentId)
-  }
-
-  ctx.getRecentEvents = (limit: number) => {
-    if (!deps.events) return Promise.resolve([])
-    return deps.events.getRecent(tenantId, agentId, limit)
-  }
-
-  ctx.getEventsForAgent = (targetAgentId: string, limit: number) => {
-    if (!deps.events) return Promise.resolve([])
-    return deps.events.getRecent(tenantId, targetAgentId, limit)
   }
 
   if (deps.dataOS) {

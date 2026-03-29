@@ -24,7 +24,7 @@ describe('LoopError', () => {
 
   it('all LoopError codes are handled (exhaustive)', () => {
     const codes = [
-      'coverage_below_80', 'security_issues', 'deployment_failed',
+      'coverage_below_80', 'security_issues', 'code_execution_failed', 'deployment_failed',
       'approval_timeout', 'approval_rejected', 'health_check_failed',
       'rollback_triggered', 'task_graph_cycle', 'agent_budget_exceeded',
       'stage_timeout',

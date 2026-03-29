@@ -3,6 +3,7 @@ import { and, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { schema } from '@patioer/db'
 import { UUID_LOOSE_RE } from '@patioer/shared'
+import { optionalPlatformZod, platformZod } from '../lib/platform-schema.js'
 
 // Must stay in sync with DB agentTypeEnum in packages/db/src/schema/agents.ts.
 const AGENT_TYPES = [
@@ -18,6 +19,9 @@ const AGENT_TYPES = [
   'customer-success',
 ] as const
 
+const MAX_PRICE_SENTINEL_PROPOSALS = 100
+const MAX_MARKET_INTEL_PRODUCTS = 50
+
 export type AgentType = (typeof AGENT_TYPES)[number]
 
 // Per-type goalContext validation. Each agent type defines what JSON
@@ -26,12 +30,13 @@ export type AgentType = (typeof AGENT_TYPES)[number]
 const goalContextSchemas: Partial<Record<AgentType, z.ZodTypeAny>> = {
   'price-sentinel': z.object({
     proposals: z.array(z.object({
-      productId: z.string(),
-      currentPrice: z.number(),
-      proposedPrice: z.number(),
-      reason: z.string().optional(),
-    })).optional(),
-    approvalThresholdPercent: z.number().optional(),
+      productId: z.string().min(1),
+      platform: optionalPlatformZod,
+      currentPrice: z.number().positive(),
+      proposedPrice: z.number().positive(),
+      reason: z.string().min(1),
+    })).max(MAX_PRICE_SENTINEL_PROPOSALS).optional(),
+    approvalThresholdPercent: z.number().nonnegative().max(100).optional(),
   }).passthrough(),
   'product-scout': z.object({
     maxProducts: z.number().int().positive().optional(),
@@ -49,14 +54,14 @@ const goalContextSchemas: Partial<Record<AgentType, z.ZodTypeAny>> = {
     enforceDailyWindow: z.boolean().optional(),
   }).passthrough(),
   'content-writer': z.object({
-    productId: z.string(),
-    platform: z.string().optional(),
+    productId: z.string().min(1),
+    platform: optionalPlatformZod,
     tone: z.enum(['professional', 'casual', 'luxury', 'value']).optional(),
     maxLength: z.number().int().positive().optional(),
   }).passthrough(),
   'market-intel': z.object({
-    platforms: z.array(z.string()).optional(),
-    maxProducts: z.number().int().positive().optional(),
+    platforms: z.array(platformZod).optional(),
+    maxProducts: z.number().int().positive().max(MAX_MARKET_INTEL_PRODUCTS).optional(),
   }).passthrough(),
 }
 

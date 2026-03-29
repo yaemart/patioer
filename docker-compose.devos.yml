@@ -42,7 +42,8 @@ services:
       HOST: 0.0.0.0
       PORT: 3101
       PAPERCLIP_DEPLOYMENT_MODE: authenticated
-      BETTER_AUTH_SECRET: devos-local-secret
+      BETTER_AUTH_SECRET: BL1cJvAH2LsKitDpAGIBVHQNAMa/Eb6yICkkE6n0+dg=
+      BETTER_AUTH_BASE_URL: http://localhost:3101
     depends_on:
       devos-postgres:
         condition: service_healthy

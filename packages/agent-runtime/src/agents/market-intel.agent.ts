@@ -1,13 +1,13 @@
 import { HarnessError } from '@patioer/harness'
 import type { AgentContext } from '../context.js'
-import { errorMessage } from '../error-message.js'
-import { extractFirstJsonObject } from '../extract-json.js'
-import { randomRunId } from '../run-id.js'
 import type {
   MarketIntelCompetitorInsight,
   MarketIntelRunInput,
   MarketIntelResult,
-} from '../types.js'
+} from '../commerce-types.js'
+import { errorMessage } from '../error-message.js'
+import { extractFirstJsonObject } from '../extract-json.js'
+import { randomRunId } from '../run-id.js'
 
 const DEFAULT_MAX_PRODUCTS = 50
 
@@ -79,7 +79,11 @@ export async function runMarketIntel(
 ): Promise<MarketIntelResult> {
   const runId = randomRunId()
   const platforms = input.platforms ?? ctx.getEnabledPlatforms()
-  const maxProducts = input.maxProducts ?? DEFAULT_MAX_PRODUCTS
+  const requestedMaxProducts = input.maxProducts ?? DEFAULT_MAX_PRODUCTS
+  const maxProducts =
+    Number.isFinite(requestedMaxProducts) && requestedMaxProducts > 0
+      ? Math.min(requestedMaxProducts, DEFAULT_MAX_PRODUCTS)
+      : DEFAULT_MAX_PRODUCTS
 
   await ctx.logAction('market_intel.run.started', { runId, platforms, maxProducts })
 
@@ -175,6 +179,7 @@ export async function runMarketIntel(
   if (ctx.dataOS) {
     try {
       await ctx.dataOS.recordLakeEvent({
+        platform: platforms.length === 1 ? platforms[0] : undefined,
         agentId: ctx.agentId,
         eventType: 'market_intel_completed',
         payload: { runId, analyzedProducts, featuresUpdated, insightCount: insights.length },

@@ -131,8 +131,8 @@ describe('AutonomousDevLoop — full 9-stage E2E stub (AC-P4-01)', () => {
   })
 })
 
-describe('AC-P4-02: Stage 06 coverage_below_80 throws LoopError', () => {
-  it('throws LoopError("coverage_below_80") when coverage < 80% on all retries', async () => {
+describe('AC-P4-02: Stage 06 coverage_below_80 returns failure summary', () => {
+  it('returns failure summary with code "coverage_below_80" when coverage < 80% on all retries', async () => {
     const ports = makePorts({
       qa: {
         runTests: vi.fn().mockResolvedValue({
@@ -146,6 +146,7 @@ describe('AC-P4-02: Stage 06 coverage_below_80 throws LoopError', () => {
     const summary = await loop.run(TICKET, 'run-cov-fail')
 
     expect(summary.overallResult).toBe('failure')
+    expect(summary.failureCode).toBe('coverage_below_80')
     const stage6 = summary.stages.find((s) => s.stage === 6)
     expect(stage6?.result).toBe('failure')
   })
@@ -170,7 +171,7 @@ describe('AC-P4-02: Stage 06 coverage_below_80 throws LoopError', () => {
   })
 })
 
-describe('AC-P4-02: Stage 06 security_issues throws LoopError', () => {
+describe('AC-P4-02: Stage 06 security_issues returns failure summary', () => {
   it('returns failure summary when security issues found on all retries', async () => {
     const ports = makePorts({
       security: {
@@ -183,6 +184,7 @@ describe('AC-P4-02: Stage 06 security_issues throws LoopError', () => {
     const loop = makeLoop(ports)
     const summary = await loop.run(TICKET, 'run-sec-fail')
     expect(summary.overallResult).toBe('failure')
+    expect(summary.failureCode).toBe('security_issues')
     const stage6 = summary.stages.find((s) => s.stage === 6)
     expect(stage6?.result).toBe('failure')
   })
@@ -199,6 +201,7 @@ describe('AC-P4-04: Stage 07 human approval gate', () => {
     const summary = await loop.run(TICKET, 'run-reject')
 
     expect(summary.overallResult).toBe('failure')
+    expect(summary.failureCode).toBe('approval_rejected')
     expect(ports.deploy.deploy).not.toHaveBeenCalled()
     expect(ports.sre.monitor).not.toHaveBeenCalled()
   })
@@ -213,6 +216,7 @@ describe('AC-P4-04: Stage 07 human approval gate', () => {
     const summary = await loop.run(TICKET, 'run-timeout')
 
     expect(summary.overallResult).toBe('failure')
+    expect(summary.failureCode).toBe('approval_timeout')
     expect(ports.deploy.deploy).not.toHaveBeenCalled()
   })
 })
@@ -234,6 +238,7 @@ describe('AC-P4-05: Stage 09 SRE health check failure → follow-up Ticket', () 
     const summary = await loop.run(TICKET, 'run-sre-fail')
 
     expect(summary.overallResult).toBe('failure')
+    expect(summary.failureCode).toBe('health_check_failed')
     expect(createTicket).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'bug',
@@ -260,6 +265,7 @@ describe('Stage 04: TaskGraph cycle detection', () => {
     const summary = await loop.run(TICKET, 'run-cycle')
 
     expect(summary.overallResult).toBe('failure')
+    expect(summary.failureCode).toBe('task_graph_cycle')
     const stage4 = summary.stages.find((s) => s.stage === 4)
     expect(stage4?.result).toBe('failure')
     // Subsequent stages must NOT have been called
@@ -279,6 +285,7 @@ describe('Stage 05: code execution failure', () => {
     const summary = await loop.run(TICKET, 'run-code-fail')
 
     expect(summary.overallResult).toBe('failure')
+    expect(summary.failureCode).toBe('code_execution_failed')
     expect(ports.approval.requestApproval).not.toHaveBeenCalled()
   })
 })
@@ -293,6 +300,7 @@ describe('Stage 08: deploy failure', () => {
     const loop = makeLoop(ports)
     const summary = await loop.run(TICKET, 'run-deploy-fail')
     expect(summary.overallResult).toBe('failure')
+    expect(summary.failureCode).toBe('deployment_failed')
     expect(ports.sre.monitor).not.toHaveBeenCalled()
   })
 })

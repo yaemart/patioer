@@ -1,13 +1,13 @@
 import { isInventoryCapable } from '@patioer/harness'
 import type { HarnessInventoryLevel } from '@patioer/harness'
 import type { AgentContext } from '../context.js'
+import {
+  INVENTORY_GUARD_HEARTBEAT_MS,
+  type InventoryGuardPersistRow,
+  type InventoryGuardRunInput,
+  type InventoryGuardRunResult,
+} from '../commerce-types.js'
 import { errorMessage } from '../error-message.js'
-import type {
-  InventoryGuardPersistRow,
-  InventoryGuardRunInput,
-  InventoryGuardRunResult,
-} from '../types.js'
-import { INVENTORY_GUARD_HEARTBEAT_MS } from '../types.js'
 import {
   deriveInventoryStatus,
   effectiveReplenishApprovalMinUnits,

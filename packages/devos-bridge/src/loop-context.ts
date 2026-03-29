@@ -12,6 +12,7 @@
  */
 
 import type { TaskGraph } from './task-graph.js'
+import type { LoopErrorCode } from './loop-error.js'
 
 export type LoopStage =
   | 1   // Ticket Intake
@@ -44,6 +45,8 @@ export interface LoopRunSummary {
   completedAt?: string
   currentStage: LoopStage
   overallResult: StageResult
+  failureCode?: LoopErrorCode
+  failureDetails?: string
   stages: StageLog[]
   taskGraph?: TaskGraph
   deployedRef?: string
@@ -78,6 +81,8 @@ export class LoopContext {
   private overallResult: StageResult = 'pending'
   private taskGraph: TaskGraph | undefined
   private deployedRef: string | undefined
+  private failureCode: LoopErrorCode | undefined
+  private failureDetails: string | undefined
 
   constructor(
     readonly runId: string,
@@ -143,9 +148,19 @@ export class LoopContext {
   }
 
   /** Mark the entire Loop run as complete (called from Stage 09). */
-  complete(result: 'success' | 'failure'): void {
+  complete(
+    result: 'success' | 'failure',
+    failure?: { code: LoopErrorCode; details?: string },
+  ): void {
     this.overallResult = result
-    void this.emit('loop.run.complete', 9, { result, runId: this.runId })
+    this.failureCode = failure?.code
+    this.failureDetails = failure?.details
+    void this.emit('loop.run.complete', 9, {
+      result,
+      runId: this.runId,
+      failureCode: failure?.code,
+      failureDetails: failure?.details,
+    })
   }
 
   /** Returns the current run summary. */
@@ -159,6 +174,8 @@ export class LoopContext {
       completedAt: lastCompleted?.completedAt,
       currentStage: (stages.at(-1)?.stage ?? 1) as LoopStage,
       overallResult: this.overallResult,
+      failureCode: this.failureCode,
+      failureDetails: this.failureDetails,
       stages,
       taskGraph: this.taskGraph,
       deployedRef: this.deployedRef,

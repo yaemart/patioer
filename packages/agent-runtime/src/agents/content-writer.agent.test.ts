@@ -36,6 +36,9 @@ function createCtx(overrides?: {
     logAction: vi.fn().mockResolvedValue(undefined),
     requestApproval: vi.fn().mockResolvedValue(undefined),
     createTicket: vi.fn().mockResolvedValue(undefined),
+    listPendingApprovals: vi.fn().mockResolvedValue([]),
+    getRecentEvents: vi.fn().mockResolvedValue([]),
+    getEventsForAgent: vi.fn().mockResolvedValue([]),
     describeDataOsCapabilities: () => 'DataOS not available',
     dataOS: overrides?.withDataOS !== false ? dataOS : undefined,
   }
@@ -110,15 +113,39 @@ describe('runContentWriter', () => {
     )
   })
 
-  it('handles non-JSON LLM response gracefully', async () => {
-    const { ctx } = createCtx({ llmText: 'This is just plain text without JSON' })
+  it('returns empty content and logs parse_failed on non-JSON LLM response', async () => {
+    const { ctx, dataOS } = createCtx({ llmText: 'This is just plain text without JSON' })
 
     const result = await runContentWriter(ctx, { productId: 'p-1' })
 
-    expect(result.productId).toBe('p-1')
-    expect(result.description).toBe('This is just plain text without JSON')
-    expect(result.bulletPoints).toEqual([])
-    expect(result.seoKeywords).toEqual([])
+    expect(result).toEqual({
+      productId: 'p-1',
+      title: '',
+      description: '',
+      bulletPoints: [],
+      seoKeywords: [],
+    })
+    expect(ctx.logAction).toHaveBeenCalledWith('content_writer.parse_failed', { productId: 'p-1' })
+    expect(dataOS.recordMemory).not.toHaveBeenCalled()
+    expect(dataOS.recordLakeEvent).not.toHaveBeenCalled()
+  })
+
+  it('clamps returned content to maxLength', async () => {
+    const { ctx } = createCtx({
+      llmText: JSON.stringify({
+        title: 'T'.repeat(300),
+        description: 'D'.repeat(500),
+        bulletPoints: ['B'.repeat(400)],
+        seoKeywords: ['K'.repeat(200)],
+      }),
+    })
+
+    const result = await runContentWriter(ctx, { productId: 'p-1', maxLength: 120 })
+
+    expect(result.title).toHaveLength(120)
+    expect(result.description).toHaveLength(120)
+    expect(result.bulletPoints[0]).toHaveLength(120)
+    expect(result.seoKeywords[0]).toHaveLength(100)
   })
 
   it('extracts JSON from LLM response with surrounding text', async () => {
@@ -148,11 +175,13 @@ describe('runContentWriter', () => {
     expect(dataOS.recordMemory).toHaveBeenCalledWith(
       expect.objectContaining({
         agentId: 'content-writer',
+        platform: 'shopify',
         entityId: 'p-1',
       }),
     )
     expect(dataOS.recordLakeEvent).toHaveBeenCalledWith(
       expect.objectContaining({
+        platform: 'shopify',
         eventType: 'content_generated',
         entityId: 'p-1',
         metadata: expect.objectContaining({ agentType: 'content-writer' }),
@@ -267,7 +296,7 @@ describe('runContentWriter', () => {
   })
 
   it('respects platform input parameter', async () => {
-    const { ctx } = createCtx({ withDataOS: true })
+    const { ctx, dataOS } = createCtx({ withDataOS: true })
 
     await runContentWriter(ctx, { productId: 'p-1', platform: 'amazon' })
 
@@ -275,5 +304,7 @@ describe('runContentWriter', () => {
       'content_writer.run.started',
       expect.objectContaining({ platform: 'amazon' }),
     )
+    expect(dataOS.recordMemory).toHaveBeenCalledWith(expect.objectContaining({ platform: 'amazon' }))
+    expect(dataOS.recordLakeEvent).toHaveBeenCalledWith(expect.objectContaining({ platform: 'amazon' }))
   })
 })

@@ -1,5 +1,5 @@
 import type { AgentContext } from '../context.js'
-import type { RelayedThread, SupportRelayRunInput } from '../types.js'
+import type { RelayedThread, SupportRelayRunInput } from '../commerce-types.js'
 
 const REFUND_KEYWORDS = ['refund', 'return', 'money back', 'cancel order', 'chargeback']
 

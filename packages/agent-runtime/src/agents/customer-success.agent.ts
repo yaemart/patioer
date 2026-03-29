@@ -2,10 +2,10 @@ import type { AgentContext } from '../context.js'
 import type {
   CustomerSuccessRunInput,
   CustomerSuccessResult,
-  TenantHealthResult,
   TenantHealthDimension,
-  TicketParams,
-} from '../types.js'
+  TenantHealthResult,
+} from '../customer-success-types.js'
+import type { TicketParams } from '../ports.js'
 
 const HEALTH_WEIGHTS = {
   heartbeat_rate: 0.3,

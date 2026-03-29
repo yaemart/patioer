@@ -1,14 +1,10 @@
 import type { AgentContext } from './context.js'
-import { ELECTROOS_FULL_SEED, type ElectroOsAgentSeedEntry } from './electroos-seed.js'
+import {
+  ELECTROOS_FULL_SEED,
+  getElectroOsHeartbeatEntry,
+  type ElectroOsAgentSeedEntry,
+} from './electroos-seed.js'
 import { randomRunId } from './run-id.js'
-import { runProductScout } from './agents/product-scout.agent.js'
-import { runPriceSentinel } from './agents/price-sentinel.agent.js'
-import { runAdsOptimizer } from './agents/ads-optimizer.agent.js'
-import { runInventoryGuard } from './agents/inventory-guard.agent.js'
-import { runContentWriter } from './agents/content-writer.agent.js'
-import { runMarketIntel } from './agents/market-intel.agent.js'
-import { runFinanceAgent } from './agents/finance-agent.agent.js'
-import { runCeoAgent } from './agents/ceo-agent.agent.js'
 import type { ElectroOsAgentId } from '@patioer/shared'
 
 export interface HeartbeatTickResult {
@@ -48,49 +44,6 @@ export interface HeartbeatRunnerOptions {
   onCycle?: (result: HeartbeatCycleResult) => void
 }
 
-async function executeAgent(
-  seed: ElectroOsAgentSeedEntry,
-  ctx: AgentContext,
-): Promise<{ success: boolean; error?: string }> {
-  const now = new Date()
-  const month = now.getMonth() + 1
-  const year = now.getFullYear()
-
-  switch (seed.id) {
-    case 'product-scout':
-      await runProductScout(ctx, { maxProducts: 10 })
-      return { success: true }
-    case 'price-sentinel':
-      await runPriceSentinel(ctx, { proposals: [] })
-      return { success: true }
-    case 'ads-optimizer':
-      await runAdsOptimizer(ctx, {})
-      return { success: true }
-    case 'inventory-guard':
-      await runInventoryGuard(ctx, {})
-      return { success: true }
-    case 'content-writer':
-      await runContentWriter(ctx, { productId: 'heartbeat-probe' })
-      return { success: true }
-    case 'market-intel':
-      await runMarketIntel(ctx, { maxProducts: 5 })
-      return { success: true }
-    case 'finance-agent':
-      await runFinanceAgent(ctx, { month, year })
-      return { success: true }
-    case 'ceo-agent':
-      await runCeoAgent(ctx, {})
-      return { success: true }
-    case 'support-relay':
-      await ctx.logAction('heartbeat.support_relay.probe', { status: 'event-driven-skip' })
-      return { success: true }
-    default: {
-      const _exhaustive: never = seed.id
-      return { success: false, error: `Unknown agent: ${_exhaustive}` }
-    }
-  }
-}
-
 export class HeartbeatRunner {
   private readonly options: HeartbeatRunnerOptions
   private readonly agents: readonly ElectroOsAgentSeedEntry[]
@@ -117,9 +70,9 @@ export class HeartbeatRunner {
 
       try {
         const ctx = this.options.ctxFactory(seed.id)
-        const result = await executeAgent(seed, ctx)
-        success = result.success
-        error = result.error
+        const entry = getElectroOsHeartbeatEntry(seed.id)
+        await entry.runHeartbeat(ctx)
+        success = true
       } catch (err) {
         success = false
         error = err instanceof Error ? err.message : String(err)

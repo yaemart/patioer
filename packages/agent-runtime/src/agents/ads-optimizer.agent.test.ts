@@ -47,6 +47,9 @@ function createCtx(overrides: {
     logAction,
     requestApproval,
     createTicket: vi.fn(),
+    listPendingApprovals: vi.fn().mockResolvedValue([]),
+    getRecentEvents: vi.fn().mockResolvedValue([]),
+    getEventsForAgent: vi.fn().mockResolvedValue([]),
     describeDataOsCapabilities: () => 'DataOS not available',
   }
 }

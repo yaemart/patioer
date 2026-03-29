@@ -1,8 +1,9 @@
 /**
  * LoopError — Autonomous Dev Loop 结构化错误（Phase 4 §S8 任务 8.2）
  *
- * 当 Loop 某阶段检测到违反质量门的情况时，抛出 LoopError 打回当前 Stage。
- * Loop 主协调器捕获后决定：重试、降级还是终止本次循环。
+ * 当 Loop 某阶段检测到违反质量门的情况时，使用 LoopError code + context
+ * 表达结构化失败原因。当前 Phase 4 主流程以 summary-first 为主，
+ * LoopError 更适合承载统一的失败码和错误文案，而不是作为对外主契约。
  *
  * Constitution §7.2：禁止降低覆盖率（≥80%）→ coverage_below_80
  * Constitution §9：安全漏洞必须修复 → security_issues
@@ -11,6 +12,7 @@
 export type LoopErrorCode =
   | 'coverage_below_80'      // Stage 06：QA Agent 检测到行覆盖率 < 80%
   | 'security_issues'        // Stage 06：Security Agent 发现未修复漏洞
+  | 'code_execution_failed'  // Stage 05：代码任务执行失败
   | 'deployment_failed'      // Stage 08：DevOps Agent 部署失败
   | 'approval_timeout'       // Stage 07：人工审批超时
   | 'approval_rejected'      // Stage 07：人工审批被拒绝
@@ -48,6 +50,8 @@ export class LoopError extends Error {
         return `LoopError${stage}: code coverage ${ctx.coverage ?? '?'}% < 80% threshold (Constitution §7.2)${ticket}`
       case 'security_issues':
         return `LoopError${stage}: ${ctx.vulnerabilities ?? '?'} security issue(s) unresolved (Constitution §9)${ticket}`
+      case 'code_execution_failed':
+        return `LoopError${stage}: code execution failed — ${ctx.details ?? 'unknown error'}${ticket}`
       case 'deployment_failed':
         return `LoopError${stage}: deployment failed — ${ctx.details ?? 'unknown error'}${ticket}`
       case 'approval_timeout':

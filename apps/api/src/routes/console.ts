@@ -1,20 +1,13 @@
 /**
- * Console API — Three-layer status dashboard (Phase 4 §S13 tasks 13.1–13.5)
+ * Console API — trusted tenant operations overview.
  *
- * Provides a unified view of:
- *  1. ElectroOS: 9 Agent heartbeat / budget / pending approvals
- *  2. DevOS: Loop tasks / 12 Agent statuses / pending deployments
- *  3. DataOS: Event Lake write rate / Feature Store / Memory counts
- *  4. Approval Hub: aggregated pending approvals across all agents
- *  5. Alert Hub: P0/P1 alerts + SRE handling records
- *
- * AC-P4-23: Three-layer dashboard displays correctly
+ * The console should expose only fields we can back with real storage/query
+ * paths. Avoid placeholder counters or synthetic alert payloads here.
  */
 
 import type { FastifyPluginAsync } from 'fastify'
 import { and, count, desc, eq, gte, sql } from 'drizzle-orm'
-import { z } from 'zod'
-import { schema } from '@patioer/db'
+import { schema, type AppDb } from '@patioer/db'
 import { ELECTROOS_AGENT_IDS } from '@patioer/shared'
 
 // ─── Shared ───────────────────────────────────────────────────────────────────
@@ -44,8 +37,6 @@ interface AgentStatusSummary {
 interface DevOsAgentStatus {
   agentId: string
   lastEvent: string | null
-  loopTasksActive: number
-  pendingDeployments: number
 }
 
 // ─── 3. DataOS Status (§13.3) ─────────────────────────────────────────────────
@@ -56,28 +47,206 @@ interface DataOsStatus {
     recentWriteRate: number
     lastWriteAt: string | null
   }
-  featureStore: {
-    totalFeatures: number
-    lastUpdateAt: string | null
+}
+
+interface ConsoleOverview {
+  electroos: {
+    agentCount: number
+    expectedAgents: number
+    healthyAgents: number
+    pendingApprovals: number
   }
-  decisionMemory: {
-    totalRecords: number
-    lastWriteAt: string | null
+  devos: {
+    totalAgents: number
+    openTickets: number
+  }
+  dataos: DataOsStatus['eventLake']
+  checkedAt: string
+}
+
+async function loadElectroOsStatus(
+  db: AppDb,
+  tenantId: string,
+  now: Date,
+): Promise<{ healthy: boolean; agentCount: number; agents: AgentStatusSummary[] }> {
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+  const agentRows = await db
+    .select()
+    .from(schema.agents)
+    .where(eq(schema.agents.tenantId, tenantId))
+
+  const results: AgentStatusSummary[] = []
+
+  for (const agentType of ELECTROOS_AGENT_IDS) {
+    const agentRow = agentRows.find((row) => row.type === agentType)
+    if (!agentRow) {
+      results.push({
+        agentId: agentType,
+        agentType,
+        lastHeartbeat: null,
+        healthy: false,
+        pendingApprovals: 0,
+        monthlyBudgetUsed: 0,
+        monthlyBudgetLimit: 0,
+      })
+      continue
+    }
+
+    const [pendingResult] = await db
+      .select({ cnt: count() })
+      .from(schema.approvals)
+      .where(and(
+        eq(schema.approvals.tenantId, tenantId),
+        eq(schema.approvals.agentId, agentRow.id),
+        eq(schema.approvals.status, 'pending'),
+      ))
+
+    const [lastEventRow] = await db
+      .select({ createdAt: schema.agentEvents.createdAt })
+      .from(schema.agentEvents)
+      .where(and(
+        eq(schema.agentEvents.tenantId, tenantId),
+        eq(schema.agentEvents.agentId, agentRow.id),
+      ))
+      .orderBy(desc(schema.agentEvents.createdAt))
+      .limit(1)
+
+    const lastHeartbeat = lastEventRow?.createdAt?.toISOString() ?? null
+    const fiveMinAgo = new Date(now.getTime() - 5 * 60 * 1000)
+    const healthy = lastEventRow?.createdAt != null && lastEventRow.createdAt >= fiveMinAgo
+
+    const budgetLimit = 50
+    const [budgetResult] = await db
+      .select({ total: sql<string>`coalesce(sum(${schema.billingUsageLogs.costUsd}), 0)` })
+      .from(schema.billingUsageLogs)
+      .where(and(
+        eq(schema.billingUsageLogs.tenantId, tenantId),
+        eq(schema.billingUsageLogs.agentId, agentRow.id),
+        gte(schema.billingUsageLogs.createdAt, monthStart),
+      ))
+
+    results.push({
+      agentId: agentRow.id,
+      agentType,
+      lastHeartbeat,
+      healthy,
+      pendingApprovals: pendingResult?.cnt ?? 0,
+      monthlyBudgetUsed: Number(budgetResult?.total ?? 0),
+      monthlyBudgetLimit: budgetLimit,
+    })
+  }
+
+  return {
+    healthy: results.every((agent) => agent.healthy),
+    agentCount: results.length,
+    agents: results,
   }
 }
 
-// ─── 4. Alert Entry (§13.5) ──────────────────────────────────────────────────
+async function loadDevOsStatus(
+  db: AppDb,
+  tenantId: string,
+): Promise<{ totalAgents: number; openTickets: number; agents: DevOsAgentStatus[] }> {
+  const agentRows = await db
+    .select()
+    .from(schema.agents)
+    .where(eq(schema.agents.tenantId, tenantId))
 
-type AlertSeverity = 'P0' | 'P1' | 'P2'
+  const [openTicketsRow] = await db
+    .select({ cnt: count() })
+    .from(schema.devosTickets)
+    .where(and(
+      eq(schema.devosTickets.tenantId, tenantId),
+      eq(schema.devosTickets.status, 'open'),
+    ))
 
-interface AlertEntry {
-  id: string
-  severity: AlertSeverity
-  source: string
-  message: string
-  createdAt: string
-  resolvedAt: string | null
-  resolvedBy: string | null
+  const agentStatuses: DevOsAgentStatus[] = []
+
+  for (const agent of agentRows) {
+    const [lastEvent] = await db
+      .select({ createdAt: schema.agentEvents.createdAt })
+      .from(schema.agentEvents)
+      .where(and(
+        eq(schema.agentEvents.tenantId, tenantId),
+        eq(schema.agentEvents.agentId, agent.id),
+      ))
+      .orderBy(desc(schema.agentEvents.createdAt))
+      .limit(1)
+
+    agentStatuses.push({
+      agentId: agent.id,
+      lastEvent: lastEvent?.createdAt?.toISOString() ?? null,
+    })
+  }
+
+  return {
+    totalAgents: agentStatuses.length,
+    openTickets: openTicketsRow?.cnt ?? 0,
+    agents: agentStatuses,
+  }
+}
+
+async function loadDataOsStatus(
+  db: AppDb,
+  tenantId: string,
+  now: Date,
+): Promise<DataOsStatus> {
+  const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000)
+
+  const [totalEventsResult] = await db
+    .select({ cnt: count() })
+    .from(schema.agentEvents)
+    .where(eq(schema.agentEvents.tenantId, tenantId))
+
+  const [recentEventsResult] = await db
+    .select({ cnt: count() })
+    .from(schema.agentEvents)
+    .where(and(
+      eq(schema.agentEvents.tenantId, tenantId),
+      gte(schema.agentEvents.createdAt, oneHourAgo),
+    ))
+
+  const [lastEventWrite] = await db
+    .select({ createdAt: schema.agentEvents.createdAt })
+    .from(schema.agentEvents)
+    .where(eq(schema.agentEvents.tenantId, tenantId))
+    .orderBy(desc(schema.agentEvents.createdAt))
+    .limit(1)
+
+  return {
+    eventLake: {
+      totalEvents: totalEventsResult?.cnt ?? 0,
+      recentWriteRate: recentEventsResult?.cnt ?? 0,
+      lastWriteAt: lastEventWrite?.createdAt?.toISOString() ?? null,
+    },
+  }
+}
+
+async function buildConsoleOverview(
+  db: AppDb,
+  tenantId: string,
+  now: Date,
+): Promise<ConsoleOverview> {
+  const [electroos, devos, dataos] = await Promise.all([
+    loadElectroOsStatus(db, tenantId, now),
+    loadDevOsStatus(db, tenantId),
+    loadDataOsStatus(db, tenantId, now),
+  ])
+
+  return {
+    electroos: {
+      agentCount: electroos.agentCount,
+      expectedAgents: ELECTROOS_AGENT_IDS.length,
+      healthyAgents: electroos.agents.filter((agent) => agent.healthy).length,
+      pendingApprovals: electroos.agents.reduce((sum, agent) => sum + agent.pendingApprovals, 0),
+    },
+    devos: {
+      totalAgents: devos.totalAgents,
+      openTickets: devos.openTickets,
+    },
+    dataos: dataos.eventLake,
+    checkedAt: now.toISOString(),
+  }
 }
 
 // ─── Console Route Plugin ─────────────────────────────────────────────────────
@@ -97,85 +266,13 @@ const consoleRoute: FastifyPluginAsync = async (app) => {
     if (!request.withDb) return reply.code(500).send({ error: 'db unavailable' })
 
     const now = new Date()
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-
-    const agents = await request.withDb(async (db) => {
-      const agentRows = await db
-        .select()
-        .from(schema.agents)
-        .where(eq(schema.agents.tenantId, tenantId))
-
-      const results: AgentStatusSummary[] = []
-
-      for (const agentType of ELECTROOS_AGENT_IDS) {
-        const agentRow = agentRows.find((r) => r.type === agentType)
-        if (!agentRow) {
-          results.push({
-            agentId: agentType,
-            agentType,
-            lastHeartbeat: null,
-            healthy: false,
-            pendingApprovals: 0,
-            monthlyBudgetUsed: 0,
-            monthlyBudgetLimit: 0,
-          })
-          continue
-        }
-
-        const [pendingResult] = await db
-          .select({ cnt: count() })
-          .from(schema.approvals)
-          .where(and(
-            eq(schema.approvals.tenantId, tenantId),
-            eq(schema.approvals.agentId, agentRow.id),
-            eq(schema.approvals.status, 'pending'),
-          ))
-
-        const [lastEventRow] = await db
-          .select({ createdAt: schema.agentEvents.createdAt })
-          .from(schema.agentEvents)
-          .where(and(
-            eq(schema.agentEvents.tenantId, tenantId),
-            eq(schema.agentEvents.agentId, agentRow.id),
-          ))
-          .orderBy(desc(schema.agentEvents.createdAt))
-          .limit(1)
-
-        const lastHeartbeat = lastEventRow?.createdAt?.toISOString() ?? null
-        const fiveMinAgo = new Date(now.getTime() - 5 * 60 * 1000)
-        const healthy = lastEventRow?.createdAt != null && lastEventRow.createdAt >= fiveMinAgo
-
-        const budgetLimit = 50
-        const [budgetResult] = await db
-          .select({ total: sql<string>`coalesce(sum(${schema.billingUsageLogs.costUsd}), 0)` })
-          .from(schema.billingUsageLogs)
-          .where(and(
-            eq(schema.billingUsageLogs.tenantId, tenantId),
-            eq(schema.billingUsageLogs.agentId, agentRow.id),
-            gte(schema.billingUsageLogs.createdAt, monthStart),
-          ))
-
-        results.push({
-          agentId: agentRow.id,
-          agentType,
-          lastHeartbeat,
-          healthy,
-          pendingApprovals: pendingResult?.cnt ?? 0,
-          monthlyBudgetUsed: Number(budgetResult?.total ?? 0),
-          monthlyBudgetLimit: budgetLimit,
-        })
-      }
-
-      return results
-    })
-
-    const overallHealthy = agents.every((a) => a.healthy)
+    const electroos = await request.withDb((db) => loadElectroOsStatus(db, tenantId, now))
 
     return reply.send({
       layer: 'ElectroOS',
-      healthy: overallHealthy,
-      agentCount: agents.length,
-      agents,
+      healthy: electroos.healthy,
+      agentCount: electroos.agentCount,
+      agents: electroos.agents,
       checkedAt: now.toISOString(),
     })
   })
@@ -185,7 +282,7 @@ const consoleRoute: FastifyPluginAsync = async (app) => {
   app.get('/api/v1/console/devos', {
     schema: {
       tags: ['Console'],
-      summary: 'DevOS layer status: Loop tasks, 12 Agent states, pending deployments',
+      summary: 'DevOS layer status backed by agent events and open DevOS tickets',
       security: [{ bearerAuth: [] }],
     },
   }, async (request, reply) => {
@@ -193,52 +290,13 @@ const consoleRoute: FastifyPluginAsync = async (app) => {
     if (!tenantId) return
     if (!request.withDb) return reply.code(500).send({ error: 'db unavailable' })
 
-    const devosStatus = await request.withDb(async (db) => {
-      const agentRows = await db
-        .select()
-        .from(schema.agents)
-        .where(eq(schema.agents.tenantId, tenantId))
-
-      const agentStatuses: DevOsAgentStatus[] = []
-
-      for (const agent of agentRows) {
-        const [lastEvent] = await db
-          .select({ createdAt: schema.agentEvents.createdAt })
-          .from(schema.agentEvents)
-          .where(and(
-            eq(schema.agentEvents.tenantId, tenantId),
-            eq(schema.agentEvents.agentId, agent.id),
-          ))
-          .orderBy(desc(schema.agentEvents.createdAt))
-          .limit(1)
-
-        const [pendingDeployments] = await db
-          .select({ cnt: count() })
-          .from(schema.approvals)
-          .where(and(
-            eq(schema.approvals.tenantId, tenantId),
-            eq(schema.approvals.agentId, agent.id),
-            eq(schema.approvals.status, 'pending'),
-          ))
-
-        agentStatuses.push({
-          agentId: agent.id,
-          lastEvent: lastEvent?.createdAt?.toISOString() ?? null,
-          loopTasksActive: 0,
-          pendingDeployments: pendingDeployments?.cnt ?? 0,
-        })
-      }
-
-      return agentStatuses
-    })
-
-    const totalPending = devosStatus.reduce((sum, a) => sum + a.pendingDeployments, 0)
+    const devos = await request.withDb((db) => loadDevOsStatus(db, tenantId))
 
     return reply.send({
       layer: 'DevOS',
-      totalAgents: devosStatus.length,
-      totalPendingDeployments: totalPending,
-      agents: devosStatus,
+      totalAgents: devos.totalAgents,
+      openTickets: devos.openTickets,
+      agents: devos.agents,
       checkedAt: new Date().toISOString(),
     })
   })
@@ -286,7 +344,7 @@ const consoleRoute: FastifyPluginAsync = async (app) => {
   app.get('/api/v1/console/dataos', {
     schema: {
       tags: ['Console'],
-      summary: 'DataOS layer status: Event Lake write rate, Feature Store, Decision Memory',
+      summary: 'DataOS layer status backed by Event Lake writes',
       security: [{ bearerAuth: [] }],
     },
   }, async (request, reply) => {
@@ -294,51 +352,13 @@ const consoleRoute: FastifyPluginAsync = async (app) => {
     if (!tenantId) return
     if (!request.withDb) return reply.code(500).send({ error: 'db unavailable' })
 
-    const status: DataOsStatus = await request.withDb(async (db) => {
-      const now = new Date()
-      const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000)
-
-      const [totalEventsResult] = await db
-        .select({ cnt: count() })
-        .from(schema.agentEvents)
-        .where(eq(schema.agentEvents.tenantId, tenantId))
-
-      const [recentEventsResult] = await db
-        .select({ cnt: count() })
-        .from(schema.agentEvents)
-        .where(and(
-          eq(schema.agentEvents.tenantId, tenantId),
-          gte(schema.agentEvents.createdAt, oneHourAgo),
-        ))
-
-      const [lastEventWrite] = await db
-        .select({ createdAt: schema.agentEvents.createdAt })
-        .from(schema.agentEvents)
-        .where(eq(schema.agentEvents.tenantId, tenantId))
-        .orderBy(desc(schema.agentEvents.createdAt))
-        .limit(1)
-
-      return {
-        eventLake: {
-          totalEvents: totalEventsResult?.cnt ?? 0,
-          recentWriteRate: recentEventsResult?.cnt ?? 0,
-          lastWriteAt: lastEventWrite?.createdAt?.toISOString() ?? null,
-        },
-        featureStore: {
-          totalFeatures: 0,
-          lastUpdateAt: null,
-        },
-        decisionMemory: {
-          totalRecords: 0,
-          lastWriteAt: null,
-        },
-      }
-    })
+    const now = new Date()
+    const status = await request.withDb((db) => loadDataOsStatus(db, tenantId, now))
 
     return reply.send({
       layer: 'DataOS',
       ...status,
-      checkedAt: new Date().toISOString(),
+      checkedAt: now.toISOString(),
     })
   })
 
@@ -383,34 +403,16 @@ const consoleRoute: FastifyPluginAsync = async (app) => {
 
   // ── §13.5 Alert Hub ───────────────────────────────────────────────────────
 
-  const listAlertsQuerySchema = z.object({
-    severity: z.enum(['P0', 'P1', 'P2']).optional(),
-    resolved: z.enum(['true', 'false']).optional(),
-    limit: z.coerce.number().int().min(1).max(100).default(50),
-  })
-
   app.get('/api/v1/console/alerts', {
     schema: {
       tags: ['Console'],
-      summary: 'Alert hub: P0/P1 alerts + SRE handling records',
+      summary: 'Alerts backend not yet wired for trusted console responses',
       security: [{ bearerAuth: [] }],
     },
   }, async (request, reply) => {
     const tenantId = requireTenant(request, reply)
     if (!tenantId) return
-
-    const query = listAlertsQuerySchema.safeParse(request.query)
-    if (!query.success) {
-      return reply.code(400).send({ error: 'invalid query params' })
-    }
-
-    const alerts: AlertEntry[] = generateSyntheticAlerts(tenantId, query.data)
-
-    return reply.send({
-      totalAlerts: alerts.length,
-      alerts,
-      checkedAt: new Date().toISOString(),
-    })
+    return reply.code(501).send({ error: 'alerts backend not configured' })
   })
 
   // ── §13.1–13.3 Combined Overview ─────────────────────────────────────────
@@ -426,98 +428,11 @@ const consoleRoute: FastifyPluginAsync = async (app) => {
     if (!tenantId) return
     if (!request.withDb) return reply.code(500).send({ error: 'db unavailable' })
 
-    const overview = await request.withDb(async (db) => {
-      const now = new Date()
-      const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000)
-
-      const [agentCountResult] = await db
-        .select({ cnt: count() })
-        .from(schema.agents)
-        .where(eq(schema.agents.tenantId, tenantId))
-
-      const [pendingApprovalCount] = await db
-        .select({ cnt: count() })
-        .from(schema.approvals)
-        .where(and(
-          eq(schema.approvals.tenantId, tenantId),
-          eq(schema.approvals.status, 'pending'),
-        ))
-
-      const [totalEventCount] = await db
-        .select({ cnt: count() })
-        .from(schema.agentEvents)
-        .where(eq(schema.agentEvents.tenantId, tenantId))
-
-      const [recentEventCount] = await db
-        .select({ cnt: count() })
-        .from(schema.agentEvents)
-        .where(and(
-          eq(schema.agentEvents.tenantId, tenantId),
-          gte(schema.agentEvents.createdAt, oneHourAgo),
-        ))
-
-      return {
-        electroos: {
-          agentCount: agentCountResult?.cnt ?? 0,
-          expectedAgents: ELECTROOS_AGENT_IDS.length,
-        },
-        devos: {
-          totalAgents: agentCountResult?.cnt ?? 0,
-          pendingDeployments: pendingApprovalCount?.cnt ?? 0,
-        },
-        dataos: {
-          totalEvents: totalEventCount?.cnt ?? 0,
-          recentWriteRate: recentEventCount?.cnt ?? 0,
-        },
-        pendingApprovals: pendingApprovalCount?.cnt ?? 0,
-        checkedAt: now.toISOString(),
-      }
-    })
+    const now = new Date()
+    const overview = await request.withDb((db) => buildConsoleOverview(db, tenantId, now))
 
     return reply.send(overview)
   })
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-/**
- * Synthetic alert generation for the alert hub.
- * In production this would query a dedicated alerts table or Prometheus AlertManager.
- */
-function generateSyntheticAlerts(
-  _tenantId: string,
-  filters: { severity?: string; resolved?: string; limit: number },
-): AlertEntry[] {
-  const alerts: AlertEntry[] = []
-  const now = new Date()
-
-  if (!filters.severity || filters.severity === 'P0') {
-    if (!filters.resolved || filters.resolved === 'false') {
-      alerts.push({
-        id: 'alert-synthetic-p0-001',
-        severity: 'P0',
-        source: 'heartbeat-runner',
-        message: 'No heartbeat events in last 10 minutes',
-        createdAt: new Date(now.getTime() - 600_000).toISOString(),
-        resolvedAt: null,
-        resolvedBy: null,
-      })
-    }
-  }
-
-  if (!filters.severity || filters.severity === 'P1') {
-    alerts.push({
-      id: 'alert-synthetic-p1-001',
-      severity: 'P1',
-      source: 'budget-monitor',
-      message: 'Monthly budget utilization at 85%',
-      createdAt: new Date(now.getTime() - 3_600_000).toISOString(),
-      resolvedAt: null,
-      resolvedBy: null,
-    })
-  }
-
-  return alerts.slice(0, filters.limit)
 }
 
 export default consoleRoute

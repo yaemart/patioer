@@ -1,5 +1,5 @@
 import type { AgentContext } from '../context.js'
-import type { ProductScoutRunInput, ScoutedProduct } from '../types.js'
+import type { ProductScoutRunInput, ScoutedProduct } from '../commerce-types.js'
 import { runComplianceCheck } from '../compliance/compliance-pipeline.js'
 import type { ComplianceMarket, ComplianceProductInput } from '../compliance/prohibited-keywords.js'
 import { ALL_COMPLIANCE_MARKETS } from '../compliance/prohibited-keywords.js'

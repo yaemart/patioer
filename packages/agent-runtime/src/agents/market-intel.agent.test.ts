@@ -47,6 +47,9 @@ function createCtx(overrides?: {
     logAction: vi.fn().mockResolvedValue(undefined),
     requestApproval: vi.fn().mockResolvedValue(undefined),
     createTicket: vi.fn().mockResolvedValue(undefined),
+    listPendingApprovals: vi.fn().mockResolvedValue([]),
+    getRecentEvents: vi.fn().mockResolvedValue([]),
+    getEventsForAgent: vi.fn().mockResolvedValue([]),
     describeDataOsCapabilities: () => 'DataOS not available',
     dataOS: overrides?.withDataOS !== false ? dataOS : undefined,
   }
@@ -111,6 +114,14 @@ describe('runMarketIntel', () => {
     await runMarketIntel(ctx, { maxProducts: 10 })
 
     expect(harness.getProducts).toHaveBeenCalledWith({ limit: 10 })
+  })
+
+  it('clamps oversized maxProducts to the hard limit', async () => {
+    const { ctx, harness } = createCtx()
+
+    await runMarketIntel(ctx, { maxProducts: 500 })
+
+    expect(harness.getProducts).toHaveBeenCalledWith({ limit: 50 })
   })
 
   it('uses default maxProducts of 50', async () => {
@@ -197,6 +208,7 @@ describe('runMarketIntel', () => {
 
     expect(dataOS.recordLakeEvent).toHaveBeenCalledWith(
       expect.objectContaining({
+        platform: 'shopify',
         eventType: 'market_intel_completed',
         metadata: expect.objectContaining({ agentType: 'market-intel' }),
       }),

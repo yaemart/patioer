@@ -1,14 +1,14 @@
 import type { AgentContext } from '../context.js'
+import type { LakeEventRow } from '../dataos-types.js'
 import { errorMessage } from '../error-message.js'
 import { extractFirstJsonObject } from '../extract-json.js'
-import { randomRunId } from '../run-id.js'
 import type {
   FinanceAgentRunInput,
   FinanceAgentResult,
-  LakeEventRow,
   PnlLineItem,
   PnlReport,
-} from '../types.js'
+} from '../finance-types.js'
+import { randomRunId } from '../run-id.js'
 
 function monthRangeMs(month: number, year: number): { startMs: number; endMs: number } {
   const start = new Date(year, month - 1, 1, 0, 0, 0, 0)
