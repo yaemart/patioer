@@ -21,20 +21,19 @@ export async function processOutcomeJob(job: Job<OutcomeJobPayload>): Promise<vo
   const { scope, decisionId, tenantId, decisionPayload } = job.data
 
   const evaluator = getEvaluator(scope)
-  let result: OutcomeResult | null = null
-
-  if (evaluator) {
-    try {
-      result = await evaluator.evaluate(decisionId, tenantId, decisionPayload)
-      outcomeEvaluationTotal.labels(scope, result.verdict).inc()
-    } catch (err) {
-      outcomeEvaluationTotal.labels(scope, 'error').inc()
-      console.error(`[outcome-worker] Evaluator threw for ${scope} decision ${decisionId}:`, err)
-      return
-    }
-  } else {
+  if (!evaluator) {
     outcomeEvaluationTotal.labels(scope, 'no_evaluator').inc()
     console.warn(`[outcome-worker] No evaluator registered for scope "${scope}", skipping evaluation`)
+    return
+  }
+
+  let result: OutcomeResult
+  try {
+    result = await evaluator.evaluate(decisionId, tenantId, decisionPayload)
+    outcomeEvaluationTotal.labels(scope, result.verdict).inc()
+  } catch (err) {
+    outcomeEvaluationTotal.labels(scope, 'error').inc()
+    console.error(`[outcome-worker] Evaluator threw for ${scope} decision ${decisionId}:`, err)
     return
   }
 
