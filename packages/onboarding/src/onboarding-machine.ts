@@ -38,7 +38,7 @@ function validateCompanyInfo(input: StepInput): string | null {
 
 function validatePlatformOauth(input: StepInput): string | null {
   if (!input.platforms || input.platforms.length === 0) return 'At least one platform is required'
-  const allowed = ['shopify', 'amazon', 'tiktok', 'shopee']
+  const allowed = ['shopify', 'amazon', 'tiktok', 'shopee', 'walmart', 'wayfair']
   for (const p of input.platforms) {
     if (!allowed.includes(p)) return `Unsupported platform: ${p}`
   }

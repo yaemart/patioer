@@ -105,6 +105,56 @@ export const onboardingCompletedTotal = new Counter({
   registers: [metricsRegistry],
 })
 
+export const agentDecisionTotal = new Counter({
+  name: 'agent_decision_total',
+  help: 'Agent decisions by type and action outcome',
+  labelNames: ['agent_type', 'action'] as const,
+  registers: [metricsRegistry],
+})
+
+export const agentDecisionConfidence = new Histogram({
+  name: 'agent_decision_confidence',
+  help: 'Distribution of agent decision confidence scores',
+  labelNames: ['agent_type'] as const,
+  buckets: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 1.0],
+  registers: [metricsRegistry],
+})
+
+export const agentDegradationTotal = new Counter({
+  name: 'agent_degradation_total',
+  help: 'Count of degraded agent decisions by flag type',
+  labelNames: ['agent_type', 'flag'] as const,
+  registers: [metricsRegistry],
+})
+
+export const agentDecisionQualityScore = new Gauge({
+  name: 'agent_decision_quality_score',
+  help: 'Rolling quality score (0-1) of agent decisions by agent type',
+  labelNames: ['agent_type'] as const,
+  registers: [metricsRegistry],
+})
+
+export const tenantGmvDaily = new Gauge({
+  name: 'tenant_gmv_daily',
+  help: 'Estimated daily GMV in USD by tenant',
+  labelNames: ['tenant_id'] as const,
+  registers: [metricsRegistry],
+})
+
+export const sopScenarioActiveCount = new Gauge({
+  name: 'sop_scenario_active_count',
+  help: 'Number of currently active SOP scenarios by tenant',
+  labelNames: ['tenant_id'] as const,
+  registers: [metricsRegistry],
+})
+
+export const outcomeEvaluationTotal = new Counter({
+  name: 'outcome_evaluation_total',
+  help: 'Delayed outcome evaluations by scope and result',
+  labelNames: ['scope', 'result'] as const,
+  registers: [metricsRegistry],
+})
+
 // ─── Fastify plugin ────────────────────────────────────────────────────────────
 
 // Guard: collectDefaultMetrics must only be called once per registry instance.

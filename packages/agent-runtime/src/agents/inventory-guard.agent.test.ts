@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { TenantHarness } from '@patioer/harness'
 import type { AgentContext } from '../context.js'
+import { DEFAULT_GOVERNANCE_SETTINGS } from '../ports.js'
 
 vi.mock('./inventory-guard.schedule.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./inventory-guard.schedule.js')>()
@@ -57,6 +58,10 @@ function createCtx(overrides: {
     getRecentEvents: vi.fn().mockResolvedValue([]),
     getEventsForAgent: vi.fn().mockResolvedValue([]),
     describeDataOsCapabilities: () => 'DataOS not available',
+    getGovernanceSettings: vi.fn().mockResolvedValue({ ...DEFAULT_GOVERNANCE_SETTINGS }),
+    getEffectiveGovernance: vi.fn().mockResolvedValue({ ...DEFAULT_GOVERNANCE_SETTINGS }),
+    isHumanInLoop: vi.fn().mockResolvedValue(false),
+    getActiveSop: vi.fn().mockResolvedValue(null),
   }
 }
 
@@ -122,6 +127,189 @@ describe('runInventoryGuard', () => {
       }),
     )
     expect(h.updateInventory).not.toHaveBeenCalled()
+  })
+
+  it('enriches approval payload with inventory planning business context', async () => {
+    const h = baseHarness()
+    h.getInventoryLevels = vi.fn().mockResolvedValue([{ platformProductId: 'p1', quantity: 2 }])
+    const ctx = createCtx({ harness: h })
+    ctx.business = {
+      unitEconomics: {
+        getSkuEconomics: vi.fn(),
+        getDailyOverview: vi.fn(),
+      },
+      inventoryPlanning: {
+        getInboundShipments: vi.fn().mockResolvedValue([
+          {
+            id: 's1',
+            sku: 'p1',
+            productId: 'p1',
+            platform: 'shopify',
+            quantity: 50,
+            status: 'in_transit',
+            expectedArrival: '2026-04-10',
+            supplier: 'Factory A',
+            leadTimeDays: 12,
+            landedCostPerUnit: 1.2,
+          },
+        ]),
+        getReplenishmentSuggestions: vi.fn().mockResolvedValue([
+          {
+            productId: 'p1',
+            sku: 'p1',
+            platform: 'shopify',
+            currentStock: 2,
+            dailyVelocity: 3,
+            daysOfStock: 0.7,
+            suggestedQty: 40,
+            urgency: 'low',
+          },
+        ]),
+      },
+      accountHealth: {
+        getHealthSummary: vi.fn(),
+        getListingIssues: vi.fn(),
+      },
+      serviceOps: {
+        getCases: vi.fn(),
+        getRefundSummary: vi.fn(),
+      },
+    }
+
+    await runInventoryGuard(ctx, {
+      safetyThreshold: 10,
+      replenishApprovalMinUnits: 5,
+      hasPendingInventoryAdjust: vi.fn().mockResolvedValue(false),
+    })
+
+    expect(ctx.requestApproval).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({
+        businessContext: expect.objectContaining({
+          daysOfStock: 0.7,
+          dailyVelocity: 3,
+          suggestedQty30d: 40,
+          nextInboundQuantity: 50,
+          nextInboundExpectedArrival: '2026-04-10',
+        }),
+      }),
+    }))
+  })
+
+  it('defers low-stock action when daysOfStock runway is still long', async () => {
+    const h = baseHarness()
+    h.getInventoryLevels = vi.fn().mockResolvedValue([{ platformProductId: 'p1', quantity: 2 }])
+    const ctx = createCtx({ harness: h })
+    ctx.business = {
+      unitEconomics: {
+        getSkuEconomics: vi.fn(),
+        getDailyOverview: vi.fn(),
+      },
+      inventoryPlanning: {
+        getInboundShipments: vi.fn().mockResolvedValue([]),
+        getReplenishmentSuggestions: vi.fn().mockResolvedValue([
+          {
+            productId: 'p1',
+            sku: 'p1',
+            platform: 'shopify',
+            currentStock: 2,
+            dailyVelocity: 0.1,
+            daysOfStock: 20,
+            suggestedQty: 8,
+            urgency: 'low',
+          },
+        ]),
+      },
+      accountHealth: {
+        getHealthSummary: vi.fn(),
+        getListingIssues: vi.fn(),
+      },
+      serviceOps: {
+        getCases: vi.fn(),
+        getRefundSummary: vi.fn(),
+      },
+    }
+
+    const result = await runInventoryGuard(ctx, {
+      safetyThreshold: 10,
+      replenishApprovalMinUnits: 5,
+      hasPendingInventoryAdjust: vi.fn().mockResolvedValue(false),
+    })
+
+    expect(ctx.createTicket).not.toHaveBeenCalled()
+    expect(ctx.requestApproval).not.toHaveBeenCalled()
+    expect(ctx.logAction).toHaveBeenCalledWith(
+      'inventory_guard.business_guard_deferred',
+      expect.objectContaining({
+        platformProductId: 'p1',
+        businessGuardReason: expect.stringContaining('days_of_stock 20 >= 14d runway'),
+      }),
+    )
+    expect(result.replenishApprovalsRequested).toBeUndefined()
+  })
+
+  it('defers action when inbound arrives before projected stockout', async () => {
+    const h = baseHarness()
+    h.getInventoryLevels = vi.fn().mockResolvedValue([{ platformProductId: 'p1', quantity: 2 }])
+    const ctx = createCtx({ harness: h })
+    const inboundSoon = new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10)
+    ctx.business = {
+      unitEconomics: {
+        getSkuEconomics: vi.fn(),
+        getDailyOverview: vi.fn(),
+      },
+      inventoryPlanning: {
+        getInboundShipments: vi.fn().mockResolvedValue([
+          {
+            id: 's1',
+            sku: 'p1',
+            productId: 'p1',
+            platform: 'shopify',
+            quantity: 50,
+            status: 'in_transit',
+            expectedArrival: inboundSoon,
+            supplier: 'Factory A',
+            leadTimeDays: 12,
+            landedCostPerUnit: 1.2,
+          },
+        ]),
+        getReplenishmentSuggestions: vi.fn().mockResolvedValue([
+          {
+            productId: 'p1',
+            sku: 'p1',
+            platform: 'shopify',
+            currentStock: 2,
+            dailyVelocity: 1,
+            daysOfStock: 3,
+            suggestedQty: 15,
+            urgency: 'low',
+          },
+        ]),
+      },
+      accountHealth: {
+        getHealthSummary: vi.fn(),
+        getListingIssues: vi.fn(),
+      },
+      serviceOps: {
+        getCases: vi.fn(),
+        getRefundSummary: vi.fn(),
+      },
+    }
+
+    await runInventoryGuard(ctx, {
+      safetyThreshold: 10,
+      replenishApprovalMinUnits: 5,
+      hasPendingInventoryAdjust: vi.fn().mockResolvedValue(false),
+    })
+
+    expect(ctx.createTicket).not.toHaveBeenCalled()
+    expect(ctx.requestApproval).not.toHaveBeenCalled()
+    expect(ctx.logAction).toHaveBeenCalledWith(
+      'inventory_guard.business_guard_deferred',
+      expect.objectContaining({
+        platformProductId: 'p1',
+        businessGuardReason: expect.stringContaining('inbound 50 arriving in'),
+      }),
+    )
   })
 
   it('does not create ticket when all normal', async () => {

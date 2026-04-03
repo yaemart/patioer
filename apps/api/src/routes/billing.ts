@@ -1,4 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify'
+import { and, eq, gte, sql } from 'drizzle-orm'
+import { schema } from '@patioer/db'
 import { billingOperationTotal } from '../plugins/metrics.js'
 import { PLAN_BUDGET_USD, PLAN_NAMES, TRIAL_PERIOD_DAYS } from '@patioer/shared'
 import type { PlanName } from '@patioer/shared'
@@ -7,17 +9,14 @@ import {
   StripeBillingClientError,
 } from '@patioer/billing'
 
-import type { JwtPayload } from './auth.js'
-
 interface CheckoutSessionBody {
   plan: 'starter' | 'growth' | 'scale'
   successUrl?: string
   cancelUrl?: string
 }
 
-function resolvePlan(rawHeader: string | undefined, auth: JwtPayload | null | undefined): PlanName {
+function resolvePlan(auth: { plan: string } | null | undefined): PlanName {
   if (auth && (PLAN_NAMES as readonly string[]).includes(auth.plan)) return auth.plan as PlanName
-  if (rawHeader && (PLAN_NAMES as readonly string[]).includes(rawHeader)) return rawHeader as PlanName
   return 'starter'
 }
 
@@ -123,15 +122,21 @@ const billingRoute: FastifyPluginAsync = async (app) => {
     },
   }, async (request, reply) => {
     const tenantId = request.tenantId
-    if (!tenantId) {
+    if (!tenantId || !request.withDb) {
       return reply.status(400).send({ message: 'Tenant context required' })
     }
 
-    // TODO: look up stripe_customer_id from tenants table via request.withDb
-    // once DB integration is wired. Accepting header is a stub for API tests.
-    const stripeCustomerId = (request.headers['x-stripe-customer-id'] as string) ?? ''
+    const [tenant] = await request.withDb((tdb) =>
+      tdb
+        .select({ stripeCustomerId: schema.tenants.stripeCustomerId })
+        .from(schema.tenants)
+        .where(eq(schema.tenants.id, tenantId))
+        .limit(1),
+    )
+
+    const stripeCustomerId = tenant?.stripeCustomerId ?? ''
     if (!stripeCustomerId) {
-      return reply.status(400).send({ message: 'Stripe customer ID required (will be resolved from DB in production)' })
+      return reply.status(400).send({ message: 'No Stripe customer linked to this tenant' })
     }
 
     try {
@@ -177,21 +182,39 @@ const billingRoute: FastifyPluginAsync = async (app) => {
     },
   }, async (request, reply) => {
     const tenantId = request.tenantId
-    if (!tenantId) {
+    if (!tenantId || !request.withDb) {
       return reply.status(400).send({ message: 'Tenant context required' })
     }
 
-    // TODO: resolve plan from JWT claims or tenant DB row
-    const plan = resolvePlan(request.headers['x-plan'] as string | undefined, request.auth)
+    const plan = resolvePlan(request.auth)
     const budget = PLAN_BUDGET_USD[plan]
+
+    const monthStart = new Date()
+    monthStart.setUTCDate(1)
+    monthStart.setUTCHours(0, 0, 0, 0)
+
+    const usedUsd = await request.withDb(async (tdb) => {
+      const [row] = await tdb
+        .select({
+          total: sql<string>`coalesce(sum(${schema.billingUsageLogs.costUsd}), 0)`,
+        })
+        .from(schema.billingUsageLogs)
+        .where(
+          and(
+            eq(schema.billingUsageLogs.tenantId, tenantId),
+            gte(schema.billingUsageLogs.createdAt, monthStart),
+          ),
+        )
+      return Number(row?.total ?? 0)
+    })
 
     return {
       tenantId,
       plan,
       budgetUsd: budget,
-      usedUsd: 0,
-      remainingUsd: budget,
-      isOverBudget: false,
+      usedUsd,
+      remainingUsd: Math.max(budget - usedUsd, 0),
+      isOverBudget: usedUsd > budget,
     }
   })
 }

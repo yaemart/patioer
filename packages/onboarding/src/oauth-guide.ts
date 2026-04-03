@@ -1,6 +1,6 @@
 import type { OAuthStatus } from './onboarding.types.js'
 
-export type OAuthPlatform = 'shopify' | 'amazon' | 'tiktok' | 'shopee'
+export type OAuthPlatform = 'shopify' | 'amazon' | 'tiktok' | 'shopee' | 'walmart' | 'wayfair'
 
 export type OAuthFailureReason =
   | 'invalid_redirect_uri'
@@ -23,6 +23,8 @@ const PLATFORM_OAUTH_URLS: Record<OAuthPlatform, string> = {
   amazon: 'https://sellercentral.amazon.com/apps/authorize/consent',
   tiktok: 'https://auth.tiktok-shops.com/oauth/authorize',
   shopee: 'https://partner.shopeemobile.com/api/v2/shop/auth_partner',
+  walmart: 'https://developer.walmart.com/api/detail',
+  wayfair: 'https://partners.wayfair.com/developer/applications',
 }
 
 const FAILURE_MESSAGES: Record<OAuthFailureReason, string> = {
@@ -89,7 +91,7 @@ export function buildGuideResult(
 }
 
 export function getSupportedPlatforms(): readonly OAuthPlatform[] {
-  return ['shopify', 'amazon', 'tiktok', 'shopee'] as const
+  return ['shopify', 'amazon', 'tiktok', 'shopee', 'walmart', 'wayfair'] as const
 }
 
 export function validatePlatformSelection(platforms: string[]): { valid: OAuthPlatform[]; invalid: string[] } {

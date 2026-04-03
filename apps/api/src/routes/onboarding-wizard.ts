@@ -131,6 +131,8 @@ function getHealthChecker(): OnboardingHealthChecker {
             | undefined
         )?.agentConfig?.enabledAgents ?? []
 
+      const platformStepDone = state.stepData[4] != null
+
       const platformRows = await withDb((db) =>
         db
           .select({ id: schema.platformCredentials.id })
@@ -169,7 +171,7 @@ function getHealthChecker(): OnboardingHealthChecker {
           const lastEventAge = latestEvent
             ? Math.max(0, Math.round((Date.now() - latestEvent.getTime()) / 1000))
             : null
-          return { ok: platformRows.length > 0, lastEventAge }
+          return { ok: platformRows.length > 0 || platformStepDone, lastEventAge }
         },
         async checkApprovalSystem() {
           return { ok: true, pendingCount: pendingApprovals.length }

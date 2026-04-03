@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { AgentContext } from './context.js'
+import { DEFAULT_GOVERNANCE_SETTINGS } from './ports.js'
 import { HeartbeatRunner } from './heartbeat-runner.js'
 import { createHarnessMock, createDataOsMock } from './agents/test-helpers.js'
 import { ELECTROOS_AGENT_IDS } from '@patioer/shared'
@@ -45,6 +46,10 @@ function createHeartbeatCtx(agentId: string, overrides?: {
     getRecentEvents: vi.fn().mockResolvedValue([]),
     getEventsForAgent: vi.fn().mockResolvedValue([]),
     listPendingApprovals: vi.fn().mockResolvedValue([]),
+    getGovernanceSettings: vi.fn().mockResolvedValue({ ...DEFAULT_GOVERNANCE_SETTINGS }),
+    getEffectiveGovernance: vi.fn().mockResolvedValue({ ...DEFAULT_GOVERNANCE_SETTINGS }),
+    isHumanInLoop: vi.fn().mockResolvedValue(false),
+    getActiveSop: vi.fn().mockResolvedValue(null),
   }
 }
 

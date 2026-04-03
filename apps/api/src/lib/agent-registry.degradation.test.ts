@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { FastifyRequest } from 'fastify'
 import type { TenantHarness } from '@patioer/harness'
 import type { AgentContext } from '@patioer/agent-runtime'
+import { DEFAULT_GOVERNANCE_SETTINGS } from '@patioer/agent-runtime'
 import { getRunner } from './agent-registry.js'
 
 function createHarnessMock(): TenantHarness {
@@ -56,6 +57,10 @@ function buildCtxWithoutDataOS(): AgentContext {
     getRecentEvents: vi.fn().mockResolvedValue([]),
     getEventsForAgent: vi.fn().mockResolvedValue([]),
     describeDataOsCapabilities: () => 'DataOS is not available. You are operating in degraded (memoryless) mode.',
+    getGovernanceSettings: vi.fn().mockResolvedValue({ ...DEFAULT_GOVERNANCE_SETTINGS }),
+    getEffectiveGovernance: vi.fn().mockResolvedValue({ ...DEFAULT_GOVERNANCE_SETTINGS }),
+    isHumanInLoop: vi.fn().mockResolvedValue(false),
+    getActiveSop: vi.fn().mockResolvedValue(null),
     dataOS: undefined,
   }
 }

@@ -56,24 +56,24 @@ describe('Console Routes', () => {
 
   // ─── Alert Hub ────────────────────────────────────────────────────────
 
-  it('returns 501 for /alerts until a real backend is wired', async () => {
+  it('returns 500 for /alerts without DB', async () => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/v1/console/alerts',
       headers: { 'x-tenant-id': '11111111-1111-1111-1111-111111111111' },
     })
-    expect(res.statusCode).toBe(501)
-    expect(JSON.parse(res.body)).toEqual({ error: 'alerts backend not configured' })
+    expect(res.statusCode).toBe(500)
+    expect(JSON.parse(res.body)).toEqual({ error: 'db unavailable' })
   })
 
-  it('returns 501 for /alerts even when filters are present', async () => {
+  it('returns 500 for /alerts even when filters are present', async () => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/v1/console/alerts?severity=P0',
       headers: { 'x-tenant-id': '11111111-1111-1111-1111-111111111111' },
     })
-    expect(res.statusCode).toBe(501)
-    expect(JSON.parse(res.body)).toEqual({ error: 'alerts backend not configured' })
+    expect(res.statusCode).toBe(500)
+    expect(JSON.parse(res.body)).toEqual({ error: 'db unavailable' })
   })
 
   // ─── DB-dependent routes return 500 without DB ─────────────────────────

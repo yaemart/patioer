@@ -16,7 +16,8 @@
       "@patioer/billing": ["packages/billing/src/index.ts"],
       "@patioer/onboarding": ["packages/onboarding/src/index.ts"],
       "@patioer/clipmart": ["packages/clipmart/src/index.ts"],
-      "@patioer/growth": ["packages/growth/src/index.ts"]
+      "@patioer/growth": ["packages/growth/src/index.ts"],
+      "@patioer/sop": ["packages/sop/src/index.ts"]
     },
     "strict": true,
     "esModuleInterop": true,

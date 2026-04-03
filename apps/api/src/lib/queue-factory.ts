@@ -15,6 +15,7 @@ export type QueueName =
   | 'shopee-api-requests'
   | 'walmart-api-requests'
   | 'webhook-processing'
+  | 'outcome-evaluation'
 
 const queueCache = new Map<QueueName, Queue>()
 // Workers must use a dedicated Redis connection because BullMQ Workers use

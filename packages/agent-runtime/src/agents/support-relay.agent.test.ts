@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { AgentContext } from '../context.js'
+import { DEFAULT_GOVERNANCE_SETTINGS } from '../ports.js'
 import { runSupportRelay } from './support-relay.agent.js'
 
 function createMockContext(
@@ -36,6 +37,10 @@ function createMockContext(
     getRecentEvents: vi.fn().mockResolvedValue([]),
     getEventsForAgent: vi.fn().mockResolvedValue([]),
     describeDataOsCapabilities: () => 'DataOS not available',
+    getGovernanceSettings: vi.fn().mockResolvedValue({ ...DEFAULT_GOVERNANCE_SETTINGS }),
+    getEffectiveGovernance: vi.fn().mockResolvedValue({ ...DEFAULT_GOVERNANCE_SETTINGS }),
+    isHumanInLoop: vi.fn().mockResolvedValue(false),
+    getActiveSop: vi.fn().mockResolvedValue(null),
     ...overrides,
   }
 }

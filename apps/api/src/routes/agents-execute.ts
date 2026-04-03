@@ -4,7 +4,11 @@ import { UUID_LOOSE_RE } from '@patioer/shared'
 import { and, desc, eq } from 'drizzle-orm'
 import { schema } from '@patioer/db'
 import { HarnessError } from '@patioer/harness'
-import { createAgentContext } from '@patioer/agent-runtime'
+import {
+  createAgentContext,
+  DEFAULT_GOVERNANCE_SETTINGS,
+  type GovernanceSettings,
+} from '@patioer/agent-runtime'
 import { registry } from '../lib/harness-registry.js'
 import { getOrCreateHarnessFromCredential } from '../lib/harness-from-credential.js'
 import type { SupportedPlatform } from '../lib/harness-factory.js'
@@ -21,6 +25,7 @@ import { createLlmProvider } from '../lib/llm-client.js'
 import { getRunner, type ExecuteAgentResponse } from '../lib/agent-registry.js'
 import { createLakeQueueEnqueuer } from '../lib/dataos-queue.js'
 import { tryCreateDataOsPort } from '../lib/dataos-port.js'
+import { buildBusinessPortDeps } from '../lib/business-ports.js'
 import { getExecutionServices } from '../lib/execution-services.js'
 import type { BudgetStatus } from '../lib/execution-services.js'
 
@@ -79,7 +84,7 @@ function buildCustomerSuccessContext(
   agentRow: { id: string; type: string; goalContext: string | null; systemPrompt: string | null },
 ): AgentContext {
   return createAgentContext(
-    { tenantId: request.tenantId!, agentId: agentRow.id },
+    { tenantId: request.tenantId!, agentId: agentRow.id, agentType: agentRow.type },
     {
       harness: {
         getHarness: () => {
@@ -98,6 +103,9 @@ function buildCustomerSuccessContext(
       llm: createLlmProvider(agentRow.systemPrompt),
       approvalsQuery: buildApprovalsQueryDeps(request),
       events: buildEventsDeps(request),
+      governance: buildGovernanceDeps(request),
+      sop: buildSopDeps(request),
+      ...buildBusinessPortDeps(request),
     },
   )
 }
@@ -190,7 +198,7 @@ async function buildExecutionContext(
   const dataOS = tryCreateDataOsPort(request.tenantId!, platform)
 
   const ctx = createAgentContext(
-    { tenantId: request.tenantId, agentId: agentRow.id },
+    { tenantId: request.tenantId, agentId: agentRow.id, agentType: agentRow.type },
     {
       harness: buildHarnessDeps(harnessByPlatform, defaultHarness, enabledPlatforms),
       budget: {
@@ -204,6 +212,9 @@ async function buildExecutionContext(
       approvalsQuery: buildApprovalsQueryDeps(request),
       events: buildEventsDeps(request),
       dataOS,
+      governance: buildGovernanceDeps(request),
+      sop: buildSopDeps(request),
+      ...buildBusinessPortDeps(request),
     },
   )
 
@@ -222,7 +233,7 @@ function buildHarnessDeps(
 ) {
   return {
     getHarness: (_tenantId: string, _agentId: string, platformKey?: string) => {
-      if (!platformKey || platformKey === '') return defaultHarness
+      if (!platformKey) return defaultHarness
       const n = platformKey.trim().toLowerCase()
       if (!SUPPORTED_PLATFORMS.includes(n as SupportedPlatform)) {
         throw new Error(`Unknown platform "${platformKey}" (expected one of: ${SUPPORTED_PLATFORMS.join(', ')})`)
@@ -242,7 +253,7 @@ function buildAuditDeps(request: FastifyRequest, opts: { platform: string }) {
         await db.insert(schema.agentEvents).values({ tenantId, agentId, action, payload })
       })
       const p = payload as Record<string, unknown>
-      const entityId = typeof p?.productId === 'string' ? (p.productId as string) : undefined
+      const entityId = typeof p?.productId === 'string' ? p.productId : undefined
       await enqueueDataOsLakeEvent({
         tenantId,
         platform: opts.platform,
@@ -262,6 +273,12 @@ function buildApprovalDeps(request: FastifyRequest, defaultPlatform: string) {
       const payloadObj = (params.payload ?? {}) as Record<string, unknown>
       const explicitPlatform =
         typeof payloadObj.platform === 'string' ? payloadObj.platform : undefined
+
+      const displayTitle = typeof payloadObj.displayTitle === 'string' ? payloadObj.displayTitle : null
+      const displayDescription = typeof payloadObj.displayDescription === 'string' ? payloadObj.displayDescription : null
+      const impactPreview = payloadObj.impactPreview != null ? payloadObj.impactPreview : null
+      const rollbackPlan = typeof payloadObj.rollbackPlan === 'string' ? payloadObj.rollbackPlan : null
+
       await request.withDb!(async (db) => {
         await db.insert(schema.approvals).values({
           tenantId,
@@ -269,6 +286,10 @@ function buildApprovalDeps(request: FastifyRequest, defaultPlatform: string) {
           action: params.action,
           payload: { ...payloadObj, electroosPlatform: explicitPlatform ?? defaultPlatform },
           status: 'pending',
+          displayTitle,
+          displayDescription,
+          impactPreview,
+          rollbackPlan,
         })
       })
     },
@@ -338,6 +359,69 @@ function buildEventsDeps(request: FastifyRequest) {
           .orderBy(desc(schema.agentEvents.createdAt))
           .limit(limit),
       )
+    },
+  }
+}
+
+function buildGovernanceDeps(request: FastifyRequest) {
+  return {
+    getSettings: async (tenantId: string): Promise<GovernanceSettings> => {
+      if (!request.withDb) return { ...DEFAULT_GOVERNANCE_SETTINGS }
+
+      const [row] = await request.withDb((db) =>
+        db
+          .select()
+          .from(schema.tenantGovernanceSettings)
+          .where(eq(schema.tenantGovernanceSettings.tenantId, tenantId))
+          .limit(1),
+      )
+
+      if (!row) {
+        return { ...DEFAULT_GOVERNANCE_SETTINGS }
+      }
+
+      return {
+        priceChangeThreshold: row.priceChangeThreshold,
+        adsBudgetApproval: row.adsBudgetApproval,
+        newListingApproval: row.newListingApproval,
+        humanInLoopAgents: Array.isArray(row.humanInLoopAgents)
+          ? row.humanInLoopAgents.filter((value): value is string => typeof value === 'string')
+          : [],
+        approvalMode: (row.approvalMode ?? 'approval_required') as 'approval_required' | 'approval_informed',
+      }
+    },
+  }
+}
+
+function buildSopDeps(request: FastifyRequest) {
+  return {
+    getActiveSops: async (tenantId: string) => {
+      if (!request.withDb) return []
+      const rows = await request.withDb((db) =>
+        db
+          .select()
+          .from(schema.tenantSops)
+          .where(
+            and(
+              eq(schema.tenantSops.tenantId, tenantId),
+              eq(schema.tenantSops.status, 'active'),
+            ),
+          ),
+      )
+      return rows.map((r) => ({
+        id: r.id,
+        scope: r.scope,
+        platform: r.platform,
+        entityType: r.entityType,
+        entityId: r.entityId,
+        status: r.status as 'active',
+        effectiveFrom: r.effectiveFrom,
+        effectiveTo: r.effectiveTo,
+        version: r.version,
+        extractedGoalContext: r.extractedGoalContext as Record<string, unknown> | null,
+        extractedSystemPrompt: r.extractedSystemPrompt,
+        extractedGovernance: r.extractedGovernance as Record<string, unknown> | null,
+      }))
     },
   }
 }

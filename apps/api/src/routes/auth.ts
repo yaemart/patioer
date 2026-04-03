@@ -1,6 +1,9 @@
 import type { FastifyPluginAsync } from 'fastify'
 import { randomBytes, randomUUID, scryptSync, timingSafeEqual, createHmac } from 'node:crypto'
+import { eq } from 'drizzle-orm'
 import { TRIAL_PERIOD_DAYS } from '@patioer/shared'
+// eslint-disable-next-line @typescript-eslint/no-restricted-imports -- auth bootstrap runs before tenant context exists
+import * as dbPackage from '@patioer/db'
 import { authOperationTotal } from '../plugins/metrics.js'
 
 type AuthErrorType =
@@ -32,6 +35,14 @@ interface MachineTokenBody {
   scopes?: string[]
 }
 
+function getPublicDb(): NonNullable<(typeof dbPackage)['db']> {
+  return dbPackage.db
+}
+
+function getSchema(): NonNullable<(typeof dbPackage)['schema']> {
+  return dbPackage.schema
+}
+
 export interface UserRecord {
   id: string
   email: string
@@ -48,6 +59,15 @@ export interface UserStore {
   create(user: UserRecord): Promise<void>
   clear(): Promise<void>
 }
+
+type TenantRecord = { id: string }
+type TenantCreatorInput = {
+  company: string
+  slug: string
+  plan: string
+  trialEndsAt: Date
+}
+type TenantCreator = (input: TenantCreatorInput) => Promise<TenantRecord | null>
 
 interface BaseJwtPayload {
   tenantId: string
@@ -135,10 +155,13 @@ const TOKEN_COOKIE_NAME = 'eos_token'
 const COOKIE_MAX_AGE_SECONDS = 86400
 
 function setTokenCookie(reply: { header: (name: string, value: string) => void }, token: string): void {
-  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : ''
+  const isProd = process.env.NODE_ENV === 'production'
+  const crossSite = Boolean(process.env.CORS_ORIGINS?.trim())
+  const sameSite = isProd && crossSite ? 'None' : 'Lax'
+  const secure = isProd ? '; Secure' : ''
   reply.header(
     'Set-Cookie',
-    `${TOKEN_COOKIE_NAME}=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${COOKIE_MAX_AGE_SECONDS}${secure}`,
+    `${TOKEN_COOKIE_NAME}=${token}; HttpOnly; SameSite=${sameSite}; Path=/; Max-Age=${COOKIE_MAX_AGE_SECONDS}${secure}`,
   )
 }
 
@@ -249,6 +272,60 @@ function createInMemoryUserStore(): UserStore {
   }
 }
 
+export function createDbUserStore(): UserStore {
+  return {
+    async findByEmail(email) {
+      const schema = getSchema()
+      const [row] = await getPublicDb()
+        .select()
+        .from(schema.users)
+        .where(eq(schema.users.email, email))
+      if (!row) return null
+      return {
+        id: row.id,
+        email: row.email,
+        passwordHash: row.passwordHash,
+        tenantId: row.tenantId,
+        role: row.role,
+        plan: row.plan,
+        company: row.company,
+      }
+    },
+    async findById(id) {
+      const schema = getSchema()
+      const [row] = await getPublicDb()
+        .select()
+        .from(schema.users)
+        .where(eq(schema.users.id, id))
+      if (!row) return null
+      return {
+        id: row.id,
+        email: row.email,
+        passwordHash: row.passwordHash,
+        tenantId: row.tenantId,
+        role: row.role,
+        plan: row.plan,
+        company: row.company,
+      }
+    },
+    async create(user) {
+      const schema = getSchema()
+      await getPublicDb().insert(schema.users).values({
+        id: user.id,
+        email: user.email,
+        passwordHash: user.passwordHash,
+        tenantId: user.tenantId,
+        role: user.role,
+        plan: user.plan,
+        company: user.company,
+      })
+    },
+    async clear() {
+      await getPublicDb().delete(getSchema().users)
+    },
+  }
+}
+
 const AUTH_ERROR_SCHEMA = {
   type: 'object' as const,
   properties: {
@@ -258,14 +335,34 @@ const AUTH_ERROR_SCHEMA = {
 }
 
 let _userStore: UserStore | null = null
+let _tenantCreator: TenantCreator | null = null
 
 export function setUserStore(store: UserStore): void {
   _userStore = store
 }
 
+export function setTenantCreatorForTest(creator: TenantCreator | null): void {
+  _tenantCreator = creator
+}
+
 function getUserStore(): UserStore {
   if (!_userStore) _userStore = createInMemoryUserStore()
   return _userStore
+}
+
+async function createTenantRecord(input: TenantCreatorInput): Promise<TenantRecord | null> {
+  if (_tenantCreator) return _tenantCreator(input)
+  const schema = getSchema()
+  const [tenant] = await getPublicDb()
+    .insert(schema.tenants)
+    .values({
+      name: input.company,
+      slug: input.slug,
+      plan: input.plan,
+      trialEndsAt: input.trialEndsAt,
+    })
+    .returning()
+  return tenant ?? null
 }
 
 const authRoute: FastifyPluginAsync = async (app) => {
@@ -307,8 +404,15 @@ const authRoute: FastifyPluginAsync = async (app) => {
     }
 
     const userId = randomUUID()
-    const tenantId = randomUUID()
     const plan = 'starter'
+    const slug = company.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `tenant-${Date.now()}`
+    const trialEndsAt = new Date(Date.now() + TRIAL_PERIOD_DAYS * 24 * 60 * 60 * 1000)
+
+    const tenant = await createTenantRecord({ company, slug, plan, trialEndsAt })
+    if (!tenant) {
+      return reply.status(500).send({ type: 'internal', message: 'Failed to create tenant' })
+    }
+    const tenantId = tenant.id
 
     const user: UserRecord = {
       id: userId,
@@ -321,7 +425,6 @@ const authRoute: FastifyPluginAsync = async (app) => {
     }
     await store.create(user)
 
-    const trialEndsAt = new Date(Date.now() + TRIAL_PERIOD_DAYS * 24 * 60 * 60 * 1000)
     app.log.info({ userId, tenantId, company, trialEndsAt: trialEndsAt.toISOString() }, 'New user registered')
 
     const token = generateJwt({ userId, tenantId, email, role: 'owner', plan })

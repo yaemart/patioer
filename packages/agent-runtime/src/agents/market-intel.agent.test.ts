@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { HarnessError } from '@patioer/harness'
 import type { TenantHarness } from '@patioer/harness'
 import type { AgentContext } from '../context.js'
+import { DEFAULT_GOVERNANCE_SETTINGS } from '../ports.js'
 import type { DataOsPort } from '../types.js'
 import { runMarketIntel } from './market-intel.agent.js'
 import { createHarnessMock, createDataOsMock } from './test-helpers.js'
@@ -52,6 +53,10 @@ function createCtx(overrides?: {
     getEventsForAgent: vi.fn().mockResolvedValue([]),
     describeDataOsCapabilities: () => 'DataOS not available',
     dataOS: overrides?.withDataOS !== false ? dataOS : undefined,
+    getGovernanceSettings: vi.fn().mockResolvedValue({ ...DEFAULT_GOVERNANCE_SETTINGS }),
+    getEffectiveGovernance: vi.fn().mockResolvedValue({ ...DEFAULT_GOVERNANCE_SETTINGS }),
+    isHumanInLoop: vi.fn().mockResolvedValue(false),
+    getActiveSop: vi.fn().mockResolvedValue(null),
   }
   return { ctx, harness, dataOS }
 }

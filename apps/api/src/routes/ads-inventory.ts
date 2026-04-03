@@ -1,21 +1,25 @@
 import type { FastifyPluginAsync } from 'fastify'
 import { schema } from '@patioer/db'
-import { desc, inArray } from 'drizzle-orm'
+import { and, desc, eq, gte, inArray, lte } from 'drizzle-orm'
 import { z } from 'zod'
 
-/**
- * Read-only list/query params. Tenant scope comes from `x-tenant-id` → `withTenantDb` (RLS), not from query.
- */
 const listQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(250).optional(),
 })
 
-const DEFAULT_LIMIT = 100
+const campaignQuerySchema = z.object({
+  campaignId: z.string().uuid(),
+  limit: z.coerce.number().int().min(1).max(500).optional(),
+})
 
-function clampLimit(raw: number | undefined): number {
-  const n = raw ?? DEFAULT_LIMIT
-  return Math.min(Math.max(n, 1), 250)
-}
+const metricsQuerySchema = z.object({
+  campaignId: z.string().uuid(),
+  from: z.string().optional(),
+  to: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(500).optional(),
+})
+
+const DEFAULT_LIMIT = 100
 
 /**
  * GET /api/v1/ads/campaigns — full rows from `ads_campaigns`.
@@ -43,13 +47,12 @@ const adsInventoryRoute: FastifyPluginAsync = async (app) => {
       if (!parsed.success) {
         return reply.code(400).send({ error: 'invalid query' })
       }
-      const limit = clampLimit(parsed.data.limit)
       const rows = await request.withDb((db) =>
         db
           .select()
           .from(schema.adsCampaigns)
           .orderBy(desc(schema.adsCampaigns.createdAt))
-          .limit(limit),
+          .limit(parsed.data.limit ?? DEFAULT_LIMIT),
       )
       return reply.send({ campaigns: rows })
     },
@@ -74,7 +77,6 @@ const adsInventoryRoute: FastifyPluginAsync = async (app) => {
       if (!parsed.success) {
         return reply.code(400).send({ error: 'invalid query' })
       }
-      const limit = clampLimit(parsed.data.limit)
       const rows = await request.withDb((db) =>
         db
           .select({
@@ -91,9 +93,93 @@ const adsInventoryRoute: FastifyPluginAsync = async (app) => {
           })
           .from(schema.adsCampaigns)
           .orderBy(desc(schema.adsCampaigns.createdAt))
-          .limit(limit),
+          .limit(parsed.data.limit ?? DEFAULT_LIMIT),
       )
       return reply.send({ items: rows })
+    },
+  )
+
+  app.get(
+    '/api/v1/ads/keywords',
+    {
+      schema: {
+        tags: ['Ads'],
+        summary: 'List keywords for a campaign',
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request, reply) => {
+      if (!request.withDb) return reply.code(401).send({ error: 'x-tenant-id required' })
+      const parsed = campaignQuerySchema.safeParse(request.query)
+      if (!parsed.success) return reply.code(400).send({ error: 'campaignId (uuid) required' })
+      const { campaignId, limit } = parsed.data
+      const rows = await request.withDb((db) =>
+        db
+          .select()
+          .from(schema.adsKeywords)
+          .where(eq(schema.adsKeywords.campaignId, campaignId))
+          .orderBy(desc(schema.adsKeywords.createdAt))
+          .limit(limit ?? DEFAULT_LIMIT),
+      )
+      return reply.send({ keywords: rows })
+    },
+  )
+
+  app.get(
+    '/api/v1/ads/search-terms',
+    {
+      schema: {
+        tags: ['Ads'],
+        summary: 'Search term report for a campaign',
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request, reply) => {
+      if (!request.withDb) return reply.code(401).send({ error: 'x-tenant-id required' })
+      const parsed = metricsQuerySchema.safeParse(request.query)
+      if (!parsed.success) return reply.code(400).send({ error: 'campaignId (uuid) required' })
+      const { campaignId, from, to, limit } = parsed.data
+      const conditions = [eq(schema.adsSearchTerms.campaignId, campaignId)]
+      if (from) conditions.push(gte(schema.adsSearchTerms.reportDate, from))
+      if (to) conditions.push(lte(schema.adsSearchTerms.reportDate, to))
+      const rows = await request.withDb((db) =>
+        db
+          .select()
+          .from(schema.adsSearchTerms)
+          .where(and(...conditions))
+          .orderBy(desc(schema.adsSearchTerms.reportDate))
+          .limit(limit ?? DEFAULT_LIMIT),
+      )
+      return reply.send({ searchTerms: rows })
+    },
+  )
+
+  app.get(
+    '/api/v1/ads/metrics-daily',
+    {
+      schema: {
+        tags: ['Ads'],
+        summary: 'Daily campaign metrics',
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request, reply) => {
+      if (!request.withDb) return reply.code(401).send({ error: 'x-tenant-id required' })
+      const parsed = metricsQuerySchema.safeParse(request.query)
+      if (!parsed.success) return reply.code(400).send({ error: 'campaignId (uuid) required' })
+      const { campaignId, from, to, limit } = parsed.data
+      const conditions = [eq(schema.adsMetricsDaily.campaignId, campaignId)]
+      if (from) conditions.push(gte(schema.adsMetricsDaily.date, from))
+      if (to) conditions.push(lte(schema.adsMetricsDaily.date, to))
+      const rows = await request.withDb((db) =>
+        db
+          .select()
+          .from(schema.adsMetricsDaily)
+          .where(and(...conditions))
+          .orderBy(desc(schema.adsMetricsDaily.date))
+          .limit(limit ?? DEFAULT_LIMIT),
+      )
+      return reply.send({ metrics: rows })
     },
   )
 
@@ -115,13 +201,12 @@ const adsInventoryRoute: FastifyPluginAsync = async (app) => {
       if (!parsed.success) {
         return reply.code(400).send({ error: 'invalid query' })
       }
-      const limit = clampLimit(parsed.data.limit)
       const rows = await request.withDb((db) =>
         db
           .select()
           .from(schema.inventoryLevels)
           .orderBy(desc(schema.inventoryLevels.createdAt))
-          .limit(limit),
+          .limit(parsed.data.limit ?? DEFAULT_LIMIT),
       )
       return reply.send({ items: rows })
     },
@@ -146,14 +231,13 @@ const adsInventoryRoute: FastifyPluginAsync = async (app) => {
       if (!parsed.success) {
         return reply.code(400).send({ error: 'invalid query' })
       }
-      const limit = clampLimit(parsed.data.limit)
       const rows = await request.withDb((db) =>
         db
           .select()
           .from(schema.inventoryLevels)
           .where(inArray(schema.inventoryLevels.status, ['low', 'out_of_stock']))
           .orderBy(desc(schema.inventoryLevels.createdAt))
-          .limit(limit),
+          .limit(parsed.data.limit ?? DEFAULT_LIMIT),
       )
       return reply.send({ items: rows })
     },

@@ -2,12 +2,16 @@ import Fastify from 'fastify'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import billingRoute from './billing.js'
 
+const TEST_TENANT_ID = '123e4567-e89b-12d3-a456-426614174000'
+
 const {
   mockCreateCheckoutSession,
   mockCreatePortalSession,
+  mockDbSelect,
 } = vi.hoisted(() => ({
   mockCreateCheckoutSession: vi.fn(),
   mockCreatePortalSession: vi.fn(),
+  mockDbSelect: vi.fn(),
 }))
 
 vi.mock('@patioer/billing', async () => {
@@ -21,16 +25,55 @@ vi.mock('@patioer/billing', async () => {
   }
 })
 
+vi.mock('@patioer/db', async () => {
+  const actual = await vi.importActual<typeof import('@patioer/db')>('@patioer/db')
+  const fromFn = vi.fn(() => ({ where: vi.fn(() => mockDbSelect()) }))
+  return {
+    ...actual,
+    db: {
+      select: vi.fn(() => ({ from: fromFn })),
+    },
+  }
+})
+
 const { StripeBillingClientError, createStripeBillingClient } = await import('@patioer/billing')
 
-function createApp(options?: { withTenant?: boolean }) {
+function createApp(options?: { withTenant?: boolean; plan?: string }) {
   const app = Fastify()
+  app.decorateRequest('withDb', null)
+  app.decorateRequest('auth', null)
   app.addHook('onRequest', async (request) => {
     if (options?.withTenant === false) {
       request.tenantId = undefined
       return
     }
-    request.tenantId = '123e4567-e89b-12d3-a456-426614174000'
+    request.tenantId = TEST_TENANT_ID
+    request.auth = {
+      tenantId: TEST_TENANT_ID,
+      userId: 'u1',
+      email: 'test@test.com',
+      role: 'owner',
+      plan: options?.plan ?? 'starter',
+      subjectType: 'user' as const,
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + 86400,
+    }
+    request.withDb = async (cb) => {
+      const query = {
+        then: (onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) =>
+          mockDbSelect().then(onFulfilled, onRejected),
+        catch: (onRejected: (reason: unknown) => unknown) => mockDbSelect().catch(onRejected),
+        finally: (onFinally?: (() => void) | undefined) => mockDbSelect().finally(onFinally),
+        limit: vi.fn(() => mockDbSelect()),
+      }
+      return cb({
+        select: vi.fn(() => ({
+          from: vi.fn(() => ({
+            where: vi.fn(() => query),
+          })),
+        })),
+      } as never)
+    }
   })
   app.register(billingRoute)
   return app
@@ -50,6 +93,7 @@ beforeEach(() => {
   mockCreatePortalSession.mockResolvedValue({
     url: 'https://billing.stripe.test/portal',
   })
+  mockDbSelect.mockResolvedValue([{ stripeCustomerId: null }])
 })
 
 describe('billing routes', () => {
@@ -131,7 +175,8 @@ describe('billing routes', () => {
       await app.close()
     })
 
-    it('returns 400 when stripe customer id is missing', async () => {
+    it('returns 400 when tenant has no stripe customer id', async () => {
+      mockDbSelect.mockResolvedValueOnce([{ stripeCustomerId: null }])
       const app = createApp()
       const res = await app.inject({
         method: 'GET',
@@ -143,12 +188,12 @@ describe('billing routes', () => {
       await app.close()
     })
 
-    it('creates portal session through billing domain client', async () => {
+    it('creates portal session using stripe customer id from DB', async () => {
+      mockDbSelect.mockResolvedValueOnce([{ stripeCustomerId: 'cus_123' }])
       const app = createApp()
       const res = await app.inject({
         method: 'GET',
         url: '/api/v1/billing/portal-session',
-        headers: { 'x-stripe-customer-id': 'cus_123' },
       })
 
       expect(res.statusCode).toBe(200)
@@ -162,17 +207,17 @@ describe('billing routes', () => {
   })
 
   describe('GET /api/v1/billing/usage', () => {
-    it('returns usage summary for tenant', async () => {
-      const app = createApp()
+    it('returns usage summary with plan from JWT auth', async () => {
+      const app = createApp({ plan: 'growth' })
       const res = await app.inject({
         method: 'GET',
         url: '/api/v1/billing/usage',
-        headers: { 'x-plan': 'growth' },
       })
       expect(res.statusCode).toBe(200)
       const body = res.json()
       expect(body.plan).toBe('growth')
       expect(body.budgetUsd).toBe(500)
+      expect(body.usedUsd).toBe(0)
       expect(body.isOverBudget).toBe(false)
       await app.close()
     })
@@ -187,7 +232,7 @@ describe('billing routes', () => {
       await app.close()
     })
 
-    it('defaults to starter budget when no plan header', async () => {
+    it('defaults to starter plan when auth has no recognized plan', async () => {
       const app = createApp()
       const res = await app.inject({
         method: 'GET',

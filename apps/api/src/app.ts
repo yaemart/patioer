@@ -1,4 +1,5 @@
 import Fastify from 'fastify'
+import corsPlugin from './plugins/cors.js'
 import sensible from '@fastify/sensible'
 import swagger from '@fastify/swagger'
 import swaggerUi from '@fastify/swagger-ui'
@@ -35,11 +36,20 @@ import dashboardRoute from './routes/dashboard.js'
 import walmartOAuthRoute from './routes/walmart/oauth.js'
 import walmartWebhookRoute from './routes/walmart/webhook.js'
 import b2bWayfairRoute from './routes/b2b-wayfair.js'
+import goalsRoute from './routes/goals.js'
+import sopRoute from './routes/sop.js'
+import serviceRoute from './routes/service.js'
+import accountHealthRoute from './routes/account-health.js'
+import inventoryInboundRoute from './routes/inventory-inbound.js'
+import metricsAgentsRoute from './routes/metrics-agents.js'
 
 export const buildServer = () => {
   const app = Fastify({ logger: true })
 
-  // Register metrics plugin first so the onResponse hook covers all routes
+  // CORS before auth/metrics so preflight succeeds for browser clients (split web + API deploys).
+  app.register(corsPlugin)
+
+  // Metrics after CORS; onResponse still covers all routes.
   app.register(metricsPlugin)
 
   app.register(swagger, {
@@ -94,6 +104,12 @@ export const buildServer = () => {
   app.register(walmartOAuthRoute)
   app.register(walmartWebhookRoute)
   app.register(b2bWayfairRoute)
+  app.register(goalsRoute)
+  app.register(sopRoute)
+  app.register(serviceRoute)
+  app.register(accountHealthRoute)
+  app.register(inventoryInboundRoute)
+  app.register(metricsAgentsRoute)
 
   return app
 }

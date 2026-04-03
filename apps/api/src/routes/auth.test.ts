@@ -1,7 +1,9 @@
 import Fastify from 'fastify'
-import { afterEach, describe, expect, it } from 'vitest'
-import authRoute, { _getTestUserStore, setUserStore } from './auth.js'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import authRoute, { _getTestUserStore, setTenantCreatorForTest, setUserStore } from './auth.js'
 import type { UserStore } from './auth.js'
+
+const TEST_TENANT_ID = '123e4567-e89b-12d3-a456-426614174000'
 
 function createInMemoryStore(): UserStore {
   const users = new Map<string, { id: string; email: string; passwordHash: string; tenantId: string; role: string; plan: string; company: string }>()
@@ -19,6 +21,7 @@ function createInMemoryStore(): UserStore {
 function createApp() {
   const store = createInMemoryStore()
   setUserStore(store)
+  setTenantCreatorForTest(vi.fn().mockResolvedValue({ id: TEST_TENANT_ID }))
   const app = Fastify()
   app.register(authRoute)
   return { app, store }
@@ -28,6 +31,7 @@ describe('auth routes', () => {
   afterEach(async () => {
     const store = _getTestUserStore()
     await store.clear()
+    setTenantCreatorForTest(null)
   })
 
   describe('POST /api/v1/auth/register', () => {

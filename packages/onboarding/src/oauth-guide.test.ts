@@ -100,13 +100,15 @@ describe('oauth-guide', () => {
   })
 
   describe('getSupportedPlatforms', () => {
-    it('returns 4 platforms', () => {
+    it('returns all supported platforms', () => {
       const platforms = getSupportedPlatforms()
-      expect(platforms).toHaveLength(4)
+      expect(platforms).toHaveLength(6)
       expect(platforms).toContain('shopify')
       expect(platforms).toContain('amazon')
       expect(platforms).toContain('tiktok')
       expect(platforms).toContain('shopee')
+      expect(platforms).toContain('walmart')
+      expect(platforms).toContain('wayfair')
     })
   })
 

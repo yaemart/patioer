@@ -28,9 +28,10 @@ export type AdsBudgetDecision =
  */
 export function decideBudgetOptimization(
   campaign: HarnessAdsCampaign,
-  opts: { targetRoas?: number } = {},
+  opts: { targetRoas?: number; approvalThresholdUsd?: number } = {},
 ): AdsBudgetDecision {
   const targetRoas = opts.targetRoas ?? DEFAULT_TARGET_ROAS
+  const approvalThreshold = opts.approvalThresholdUsd ?? APPROVAL_BUDGET_THRESHOLD_USD
 
   if (campaign.status !== 'active') {
     return {
@@ -71,7 +72,7 @@ export function decideBudgetOptimization(
     }
   }
 
-  const wouldRequireApproval = proposed > APPROVAL_BUDGET_THRESHOLD_USD
+  const wouldRequireApproval = proposed > approvalThreshold
 
   return {
     action: 'increase_budget',

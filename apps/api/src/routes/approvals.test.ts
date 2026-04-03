@@ -169,6 +169,46 @@ describe('approvals route', () => {
     await app.close()
   })
 
+  it('surfaces guard metadata when payload contains businessGuardReason', async () => {
+    const { app } = createApp([
+      [
+        {
+          id: APPROVAL_ID,
+          status: 'pending',
+          action: 'price.update',
+          payload: {
+            productId: 'p-1',
+            businessGuardReason: 'profit data unavailable — manual review required',
+          },
+        },
+      ],
+    ])
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/approvals',
+      headers: { 'x-tenant-id': '123e4567-e89b-12d3-a456-426614174000' },
+    })
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({
+      approvals: [
+        {
+          id: APPROVAL_ID,
+          status: 'pending',
+          action: 'price.update',
+          payload: {
+            productId: 'p-1',
+            businessGuardReason: 'profit data unavailable — manual review required',
+          },
+          guard: {
+            effect: 'require_approval',
+            reason: 'profit data unavailable — manual review required',
+          },
+        },
+      ],
+    })
+    await app.close()
+  })
+
   it('allows pending to approved transition', async () => {
     const { app } = createApp([
       [{ id: APPROVAL_ID, status: 'pending', agentId: '123e4567-e89b-12d3-a456-426614174001' }],
@@ -372,6 +412,58 @@ describe('approvals route', () => {
     expect(insertedAuditEvents[0]).toMatchObject({
       action: 'approval.resolved.approved',
     })
+    await app.close()
+  })
+
+  it('surfaces autoApprovable and confidence from payload', async () => {
+    const { app } = createApp([
+      [
+        {
+          id: APPROVAL_ID,
+          status: 'pending',
+          action: 'price.update',
+          payload: {
+            productId: 'p-1',
+            autoApprovable: true,
+            autoApproveReason: 'Confidence 95% ≥ 90% threshold',
+            confidence: 0.95,
+          },
+        },
+      ],
+    ])
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/approvals',
+      headers: { 'x-tenant-id': '123e4567-e89b-12d3-a456-426614174000' },
+    })
+    expect(response.statusCode).toBe(200)
+    const body = response.json()
+    expect(body.approvals[0].autoApprovable).toBe(true)
+    expect(body.approvals[0].autoApproveReason).toBe('Confidence 95% ≥ 90% threshold')
+    expect(body.approvals[0].confidence).toBe(0.95)
+    await app.close()
+  })
+
+  it('omits pipeline fields when payload has no pipeline data', async () => {
+    const { app } = createApp([
+      [
+        {
+          id: APPROVAL_ID,
+          status: 'pending',
+          action: 'price.update',
+          payload: { productId: 'p-1' },
+        },
+      ],
+    ])
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/approvals',
+      headers: { 'x-tenant-id': '123e4567-e89b-12d3-a456-426614174000' },
+    })
+    expect(response.statusCode).toBe(200)
+    const body = response.json()
+    expect(body.approvals[0].autoApprovable).toBeUndefined()
+    expect(body.approvals[0].confidence).toBeUndefined()
     await app.close()
   })
 

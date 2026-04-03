@@ -154,6 +154,8 @@ describe('settings governance routes', () => {
       adsBudgetApproval: 500,
       newListingApproval: true,
       humanInLoopAgents: [],
+      operatingMode: 'daily',
+      approvalMode: 'approval_required',
     })
 
     await app.close()
@@ -175,11 +177,12 @@ describe('settings governance routes', () => {
     })
 
     expect(res.statusCode).toBe(200)
-    expect(res.json()).toEqual({
+    expect(res.json()).toMatchObject({
       priceChangeThreshold: 22,
       adsBudgetApproval: 900,
       newListingApproval: false,
       humanInLoopAgents: ['price-sentinel'],
+      operatingMode: 'daily',
     })
 
     expect(state.settingsRow).toMatchObject({
@@ -188,12 +191,13 @@ describe('settings governance routes', () => {
       adsBudgetApproval: 900,
       newListingApproval: false,
       humanInLoopAgents: ['price-sentinel'],
+      operatingMode: 'daily',
     })
 
-    expect(JSON.parse(String(state.agents[0].goalContext))).toEqual({
-      proposals: [],
-      approvalThresholdPercent: 22,
-    })
+    const priceSentinelGoal = JSON.parse(String(state.agents[0].goalContext))
+    expect(priceSentinelGoal.pricingStrategy).toBe('balanced')
+    expect(priceSentinelGoal.minMarginPercent).toBeDefined()
+
     expect(JSON.parse(String(state.agents[1].goalContext))).toEqual({
       maxProducts: 10,
     })
@@ -204,7 +208,7 @@ describe('settings governance routes', () => {
     })
 
     expect(readBack.statusCode).toBe(200)
-    expect(readBack.json()).toEqual({
+    expect(readBack.json()).toMatchObject({
       priceChangeThreshold: 22,
       adsBudgetApproval: 900,
       newListingApproval: false,

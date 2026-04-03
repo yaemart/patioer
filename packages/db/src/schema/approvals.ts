@@ -6,6 +6,7 @@ export const approvalStatusEnum = pgEnum('approval_status', [
   'pending',
   'approved',
   'rejected',
+  'expired',
 ])
 
 export const approvals = pgTable('approvals', {
@@ -19,6 +20,11 @@ export const approvals = pgTable('approvals', {
   action: text('action').notNull(),
   payload: jsonb('payload'),
   status: approvalStatusEnum('status').notNull().default('pending'),
+  displayTitle: text('display_title'),
+  displayDescription: text('display_description'),
+  impactPreview: jsonb('impact_preview'),
+  rollbackPlan: text('rollback_plan'),
+  expireAt: timestamp('expire_at', { withTimezone: true }),
   resolvedBy: text('resolved_by'),
   resolvedAt: timestamp('resolved_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),

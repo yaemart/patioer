@@ -1,4 +1,10 @@
-import type { TenantHarness } from '@patioer/harness'
+import type {
+  AccountHealthPort,
+  InventoryPlanningPort,
+  ServiceOpsPort,
+  TenantHarness,
+  UnitEconomicsPort,
+} from '@patioer/harness'
 import type { MarketContext } from '@patioer/market'
 import type { DataOsPort } from './dataos-types.js'
 
@@ -81,9 +87,81 @@ export interface LlmPort {
   ): Promise<LlmResponse>
 }
 
+export type ApprovalMode = 'approval_required' | 'approval_informed'
+
+export const VALID_APPROVAL_MODES: readonly ApprovalMode[] = ['approval_required', 'approval_informed']
+
+export interface GovernanceSettings {
+  priceChangeThreshold: number
+  adsBudgetApproval: number
+  newListingApproval: boolean
+  humanInLoopAgents: string[]
+  approvalMode: ApprovalMode
+}
+
+const GOVERNANCE_RANGES: Record<string, { min: number; max: number }> = {
+  priceChangeThreshold: { min: 5, max: 30 },
+  adsBudgetApproval: { min: 100, max: 2000 },
+}
+
+export function mergeGovernanceWithSop(
+  base: GovernanceSettings,
+  sopGov: Record<string, unknown> | null,
+): GovernanceSettings {
+  if (!sopGov || Object.keys(sopGov).length === 0) return base
+
+  const merged = { ...base }
+
+  if (typeof sopGov.priceChangeThreshold === 'number') {
+    const { min, max } = GOVERNANCE_RANGES.priceChangeThreshold
+    merged.priceChangeThreshold = Math.min(max, Math.max(min, sopGov.priceChangeThreshold))
+  }
+  if (typeof sopGov.adsBudgetApproval === 'number') {
+    const { min, max } = GOVERNANCE_RANGES.adsBudgetApproval
+    merged.adsBudgetApproval = Math.min(max, Math.max(min, sopGov.adsBudgetApproval))
+  }
+  if (typeof sopGov.newListingApproval === 'boolean') {
+    merged.newListingApproval = sopGov.newListingApproval
+  }
+
+  return merged
+}
+
+export const DEFAULT_GOVERNANCE_SETTINGS: GovernanceSettings = {
+  priceChangeThreshold: 15,
+  adsBudgetApproval: 500,
+  newListingApproval: true,
+  humanInLoopAgents: [],
+  approvalMode: 'approval_required',
+}
+
+export interface GovernancePort {
+  getSettings(tenantId: string): Promise<GovernanceSettings>
+}
+
+export interface SopRecord {
+  id: string
+  scope: string
+  platform: string | null
+  entityType: string | null
+  entityId: string | null
+  status: 'active' | 'archived' | 'draft'
+  effectiveFrom: Date | null
+  effectiveTo: Date | null
+  version: number
+  extractedGoalContext: Record<string, unknown> | null
+  extractedSystemPrompt: string | null
+  extractedGovernance: Record<string, unknown> | null
+}
+
+export interface SopPort {
+  getActiveSops(tenantId: string): Promise<SopRecord[]>
+}
+
 export interface AgentContextOptions {
   tenantId: string
   agentId: string
+  agentType?: string
 }
 
 export interface CreateAgentContextDeps {
@@ -97,4 +175,10 @@ export interface CreateAgentContextDeps {
   approvalsQuery?: ApprovalsQueryPort
   events?: EventsPort
   dataOS?: DataOsPort
+  governance?: GovernancePort
+  unitEconomics?: UnitEconomicsPort
+  inventoryPlanning?: InventoryPlanningPort
+  accountHealth?: AccountHealthPort
+  serviceOps?: ServiceOpsPort
+  sop?: SopPort
 }

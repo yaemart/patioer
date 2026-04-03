@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { AgentContext } from '../context.js'
+import { DEFAULT_GOVERNANCE_SETTINGS } from '../ports.js'
 import type { RecentAgentEvent } from '../types.js'
 import { runCeoAgent } from './ceo-agent.agent.js'
 import { createDataOsMock, createHarnessMock } from './test-helpers.js'
@@ -68,6 +69,10 @@ function createScenarioCtx(scenarioEvents: Map<string, RecentAgentEvent[]>, llmT
     getEventsForAgent: vi.fn().mockImplementation((agentId: string, _limit: number) => {
       return Promise.resolve(scenarioEvents.get(agentId) ?? [])
     }),
+    getGovernanceSettings: vi.fn().mockResolvedValue({ ...DEFAULT_GOVERNANCE_SETTINGS }),
+    getEffectiveGovernance: vi.fn().mockResolvedValue({ ...DEFAULT_GOVERNANCE_SETTINGS }),
+    isHumanInLoop: vi.fn().mockResolvedValue(false),
+    getActiveSop: vi.fn().mockResolvedValue(null),
   }
 }
 

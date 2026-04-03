@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { TenantHarness } from '@patioer/harness'
 import type { AgentContext } from '../context.js'
+import { DEFAULT_GOVERNANCE_SETTINGS } from '../ports.js'
 import { runAdsOptimizer } from './ads-optimizer.agent.js'
 
 function baseHarness(): TenantHarness & {
@@ -51,6 +52,10 @@ function createCtx(overrides: {
     getRecentEvents: vi.fn().mockResolvedValue([]),
     getEventsForAgent: vi.fn().mockResolvedValue([]),
     describeDataOsCapabilities: () => 'DataOS not available',
+    getGovernanceSettings: vi.fn().mockResolvedValue({ ...DEFAULT_GOVERNANCE_SETTINGS }),
+    getEffectiveGovernance: vi.fn().mockResolvedValue({ ...DEFAULT_GOVERNANCE_SETTINGS }),
+    isHumanInLoop: vi.fn().mockResolvedValue(false),
+    getActiveSop: vi.fn().mockResolvedValue(null),
   }
 }
 
@@ -137,6 +142,166 @@ describe('runAdsOptimizer', () => {
     expect(ctx.logAction).toHaveBeenCalledWith(
       'ads_optimizer.approval_requested',
       expect.objectContaining({ keyword: 'ADS_BUDGET_APPROVAL_THRESHOLD' }),
+    )
+  })
+
+  it('loads account health business context and includes it in approval payload', async () => {
+    const campaigns = [
+      {
+        platformCampaignId: 'big',
+        name: 'B',
+        status: 'active' as const,
+        dailyBudget: 460,
+        roas: 2,
+      },
+    ]
+    const h = baseHarness()
+    h.getAdsCampaigns = vi.fn().mockResolvedValue(campaigns)
+    const ctx = createCtx({ harness: h })
+    const getHealthSummary = vi.fn().mockResolvedValue({
+      platform: 'shopify',
+      overallStatus: 'at_risk',
+      openIssues: 3,
+      resolvedLast30d: 2,
+      metrics: {},
+    })
+    ctx.business = {
+      unitEconomics: {
+        getSkuEconomics: vi.fn(),
+        getDailyOverview: vi.fn(),
+      },
+      inventoryPlanning: {
+        getInboundShipments: vi.fn(),
+        getReplenishmentSuggestions: vi.fn(),
+      },
+      accountHealth: {
+        getHealthSummary,
+        getListingIssues: vi.fn(),
+      },
+      serviceOps: {
+        getCases: vi.fn(),
+        getRefundSummary: vi.fn(),
+      },
+    }
+
+    await runAdsOptimizer(ctx, {})
+
+    expect(getHealthSummary).toHaveBeenCalledWith('shopify')
+    expect(ctx.requestApproval).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({
+        healthContext: expect.objectContaining({
+          overallStatus: 'at_risk',
+          openIssues: 3,
+        }),
+      }),
+    }))
+  })
+
+  it('forces approval for at-risk account health even when budget is below threshold', async () => {
+    const campaigns = [
+      {
+        platformCampaignId: 'c1',
+        name: 'A',
+        status: 'active' as const,
+        dailyBudget: 400,
+        totalSpend: 1,
+        roas: 2,
+      },
+    ]
+    const h = baseHarness()
+    h.getAdsCampaigns = vi.fn().mockResolvedValue(campaigns)
+    const ctx = createCtx({ harness: h })
+    ctx.business = {
+      unitEconomics: {
+        getSkuEconomics: vi.fn(),
+        getDailyOverview: vi.fn(),
+      },
+      inventoryPlanning: {
+        getInboundShipments: vi.fn(),
+        getReplenishmentSuggestions: vi.fn(),
+      },
+      accountHealth: {
+        getHealthSummary: vi.fn().mockResolvedValue({
+          platform: 'shopify',
+          overallStatus: 'at_risk',
+          openIssues: 2,
+          resolvedLast30d: 1,
+          metrics: {},
+        }),
+        getListingIssues: vi.fn(),
+      },
+      serviceOps: {
+        getCases: vi.fn(),
+        getRefundSummary: vi.fn(),
+      },
+    }
+
+    const result = await runAdsOptimizer(ctx, {})
+
+    expect(result.approvalsRequested).toBe(1)
+    expect(result.budgetUpdatesApplied).toBe(0)
+    expect(h.updateAdsBudget).not.toHaveBeenCalled()
+    expect(ctx.requestApproval).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({
+        platformCampaignId: 'c1',
+        proposedDailyBudgetUsd: 440,
+        businessGuardReason: 'account health at risk — manual review required before budget increase',
+      }),
+      reason: 'account health at risk — manual review required before budget increase',
+    }))
+  })
+
+  it('blocks automatic budget increase when account health is critical', async () => {
+    const campaigns = [
+      {
+        platformCampaignId: 'c1',
+        name: 'A',
+        status: 'active' as const,
+        dailyBudget: 400,
+        totalSpend: 1,
+        roas: 2,
+      },
+    ]
+    const h = baseHarness()
+    h.getAdsCampaigns = vi.fn().mockResolvedValue(campaigns)
+    const ctx = createCtx({ harness: h })
+    ctx.business = {
+      unitEconomics: {
+        getSkuEconomics: vi.fn(),
+        getDailyOverview: vi.fn(),
+      },
+      inventoryPlanning: {
+        getInboundShipments: vi.fn(),
+        getReplenishmentSuggestions: vi.fn(),
+      },
+      accountHealth: {
+        getHealthSummary: vi.fn().mockResolvedValue({
+          platform: 'shopify',
+          overallStatus: 'critical',
+          openIssues: 5,
+          resolvedLast30d: 0,
+          metrics: {},
+        }),
+        getListingIssues: vi.fn(),
+      },
+      serviceOps: {
+        getCases: vi.fn(),
+        getRefundSummary: vi.fn(),
+      },
+    }
+
+    const result = await runAdsOptimizer(ctx, {})
+
+    expect(result.approvalsRequested).toBe(0)
+    expect(result.budgetUpdatesApplied).toBe(0)
+    expect(h.updateAdsBudget).not.toHaveBeenCalled()
+    expect(ctx.requestApproval).not.toHaveBeenCalled()
+    expect(ctx.logAction).toHaveBeenCalledWith(
+      'ads_optimizer.business_guard_blocked',
+      expect.objectContaining({
+        campaignId: 'c1',
+        businessGuardReason: 'account health critical — suspend budget increase',
+      }),
     )
   })
 

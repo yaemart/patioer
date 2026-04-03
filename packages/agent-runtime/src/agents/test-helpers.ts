@@ -2,6 +2,7 @@ import { vi } from 'vitest'
 import type { TenantHarness } from '@patioer/harness'
 import type { AgentContext } from '../context.js'
 import type { DataOsPort } from '../types.js'
+import { DEFAULT_GOVERNANCE_SETTINGS } from '../ports.js'
 
 export function createHarnessMock(): TenantHarness {
   return {
@@ -53,5 +54,9 @@ export function createTestContext(agentId: string, tenantId = 'tenant-test'): Ag
     getRecentEvents: vi.fn().mockResolvedValue([]),
     getEventsForAgent: vi.fn().mockResolvedValue([]),
     describeDataOsCapabilities: () => 'DataOS unavailable',
+    getGovernanceSettings: vi.fn().mockResolvedValue({ ...DEFAULT_GOVERNANCE_SETTINGS }),
+    getEffectiveGovernance: vi.fn().mockResolvedValue({ ...DEFAULT_GOVERNANCE_SETTINGS }),
+    isHumanInLoop: vi.fn().mockResolvedValue(false),
+    getActiveSop: vi.fn().mockResolvedValue(null),
   }
 }

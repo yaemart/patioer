@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { AgentContext } from '../context.js'
+import { DEFAULT_GOVERNANCE_SETTINGS } from '../ports.js'
 import type { DataOsPort, LakeEventRow } from '../types.js'
 import { runFinanceAgent } from './finance-agent.agent.js'
 import { createDataOsMock, createHarnessMock } from './test-helpers.js'
@@ -59,6 +60,10 @@ function createCtx(overrides?: {
     getEventsForAgent: vi.fn().mockResolvedValue([]),
     describeDataOsCapabilities: () => 'DataOS available',
     dataOS: overrides?.withDataOS !== false ? dataOS : undefined,
+    getGovernanceSettings: vi.fn().mockResolvedValue({ ...DEFAULT_GOVERNANCE_SETTINGS }),
+    getEffectiveGovernance: vi.fn().mockResolvedValue({ ...DEFAULT_GOVERNANCE_SETTINGS }),
+    isHumanInLoop: vi.fn().mockResolvedValue(false),
+    getActiveSop: vi.fn().mockResolvedValue(null),
   }
   return { ctx, dataOS }
 }

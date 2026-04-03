@@ -3,6 +3,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  text,
   timestamp,
   uuid,
 } from 'drizzle-orm/pg-core'
@@ -15,6 +16,8 @@ export const tenantGovernanceSettings = pgTable('tenant_governance_settings', {
   adsBudgetApproval: integer('ads_budget_approval').notNull().default(500),
   newListingApproval: boolean('new_listing_approval').notNull().default(true),
   humanInLoopAgents: jsonb('human_in_loop_agents').notNull().default([]),
+  operatingMode: text('operating_mode').notNull().default('daily'),
+  approvalMode: text('approval_mode').notNull().default('approval_required'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 })

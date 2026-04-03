@@ -28,7 +28,7 @@ const PLANS = [
   { id: 'scale', name: 'Scale', price: '$1,999/mo', agents: 9, platforms: 5 },
 ] as const
 
-const PLATFORMS = ['shopify', 'amazon', 'tiktok', 'shopee'] as const
+const PLATFORMS = ['shopify', 'amazon', 'tiktok', 'shopee', 'walmart', 'wayfair'] as const
 const AGENTS = ['product-scout', 'price-sentinel', 'support-relay', 'ads-optimizer', 'inventory-guard', 'content-writer', 'market-intel'] as const
 
 export default function OnboardingPage() {

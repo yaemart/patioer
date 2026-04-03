@@ -1,7 +1,15 @@
 import { HarnessError } from '@patioer/harness'
 import type { AgentContext } from '../context.js'
+import type { PendingApprovalItem } from '../ports.js'
 import type { PriceDecision, PriceSentinelRunInput } from '../commerce-types.js'
 import { errorMessage } from '../error-message.js'
+import {
+  composeGuardedReason,
+  guardRequiresApproval,
+  requireApprovalGuard,
+  type BusinessGuard,
+} from './business-guard.js'
+import { runAgentPreflight } from './preflight.js'
 
 const DEFAULT_APPROVAL_THRESHOLD_PERCENT = 15
 
@@ -76,26 +84,105 @@ async function safeDataOsWrite(ctx: AgentContext, productId: string, fn: () => P
   }
 }
 
+function recentRange(days: number): { from: Date; to: Date } {
+  const to = new Date()
+  const from = new Date(to)
+  from.setUTCDate(from.getUTCDate() - days)
+  return { from, to }
+}
+
+async function loadEconomicsContext(
+  ctx: AgentContext,
+  platform: string,
+  productId: string,
+): Promise<Record<string, number> | null> {
+  if (!ctx.business?.unitEconomics) return null
+  try {
+    const economics = await ctx.business.unitEconomics.getSkuEconomics(
+      platform,
+      productId,
+      recentRange(30),
+    )
+    if (!economics) return null
+
+    return {
+      grossRevenue30d: economics.grossRevenue,
+      contributionMargin30d: economics.contributionMargin,
+      unitsSold30d: economics.unitsSold,
+      tacos30d: economics.tacos,
+    }
+  } catch (err) {
+    await ctx.logAction('price_sentinel.business_context_degraded', {
+      productId,
+      platform,
+      port: 'unitEconomics',
+      error: errorMessage(err),
+    })
+    return null
+  }
+}
+
+function requiresBusinessReview(
+  proposal: { currentPrice: number; proposedPrice: number },
+  economicsContext: Record<string, number> | null,
+  hasBusinessPort: boolean,
+): BusinessGuard {
+  if (!hasBusinessPort) return { effect: 'none', reason: null }
+
+  if (!economicsContext || economicsContext.grossRevenue30d <= 0) {
+    return requireApprovalGuard('profit data unavailable — manual review required')
+  }
+
+  const isPriceDecrease = proposal.proposedPrice < proposal.currentPrice
+  if (isPriceDecrease && economicsContext.contributionMargin30d <= 0) {
+    return requireApprovalGuard('negative contribution margin in last 30d — manual review required')
+  }
+
+  return { effect: 'none', reason: null }
+}
+
+function hasPendingPriceApproval(
+  pendingApprovals: PendingApprovalItem[],
+  decision: PriceDecision,
+): boolean {
+  return pendingApprovals.some((item) => {
+    if (item.action !== 'price.update') return false
+    const payload = (item.payload ?? {}) as Record<string, unknown>
+    return (
+      payload.productId === decision.productId &&
+      payload.platform === decision.platform &&
+      Number(payload.proposedPrice) === decision.proposedPrice
+    )
+  })
+}
+
 export async function runPriceSentinel(
   ctx: AgentContext,
   input: PriceSentinelRunInput,
 ): Promise<{ decisions: PriceDecision[] }> {
-  const raw = input.approvalThresholdPercent ?? DEFAULT_APPROVAL_THRESHOLD_PERCENT
-  const baseThreshold = Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_APPROVAL_THRESHOLD_PERCENT
   await ctx.logAction('price_sentinel.run.started', {
     proposalCount: input.proposals.length,
-    baseThreshold,
+    inputThreshold: input.approvalThresholdPercent ?? null,
   })
 
-  if (await ctx.budget.isExceeded()) {
-    await ctx.logAction('price_sentinel.budget_exceeded', {
+  const preflight = await runAgentPreflight(ctx, {
+    agentKey: 'price_sentinel',
+    humanInLoopAction: 'price_sentinel.full_run',
+    payload: {
       proposalCount: input.proposals.length,
-    })
+    },
+  })
+  if (preflight.reason !== 'continue') {
     return { decisions: [] }
   }
 
+  const raw = input.approvalThresholdPercent ?? preflight.governance.priceChangeThreshold
+  const baseThreshold = Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_APPROVAL_THRESHOLD_PERCENT
+
   const decisions: PriceDecision[] = []
+  const pendingApprovals = preflight.pendingApprovals
   const defaultPlatform = ctx.getEnabledPlatforms()[0] ?? 'shopify'
+  const hasBusinessPort = Boolean(ctx.business?.unitEconomics)
 
   for (const proposal of input.proposals) {
     assertValidProposal(proposal)
@@ -122,6 +209,9 @@ export async function runPriceSentinel(
       }
     }
 
+    const economicsContext = await loadEconomicsContext(ctx, platform, proposal.productId)
+    const businessGuard = requiresBusinessReview(proposal, economicsContext, hasBusinessPort)
+
     const decision = buildDecision(
       proposal.productId,
       platform,
@@ -130,15 +220,42 @@ export async function runPriceSentinel(
       proposal.reason,
       threshold,
     )
+    decision.requiresApproval = guardRequiresApproval(decision.requiresApproval, businessGuard)
     decisions.push(decision)
 
     if (decision.requiresApproval) {
+      if (businessGuard.reason) {
+        await ctx.logAction('price_sentinel.business_guard_applied', {
+          productId: proposal.productId,
+          platform,
+          businessGuardReason: businessGuard.reason,
+          economicsContext,
+        })
+      }
+      if (hasPendingPriceApproval(pendingApprovals, decision)) {
+        await ctx.logAction('price_sentinel.approval_duplicate_skipped', {
+          decision,
+          economicsContext,
+          businessGuardReason: businessGuard.reason,
+          keyword: 'PRICE_UPDATE_PENDING_DEDUPE',
+        })
+        continue
+      }
       await ctx.requestApproval({
         action: 'price.update',
-        payload: decision,
-        reason: `price delta ${decision.deltaPercent.toFixed(2)}% exceeds ${threshold}% threshold`,
+        payload: { ...decision, economicsContext, businessGuardReason: businessGuard.reason },
+        reason: composeGuardedReason(
+          Math.abs(decision.deltaPercent) > threshold
+            ? `price delta ${decision.deltaPercent.toFixed(2)}% exceeds ${threshold}% threshold`
+            : '',
+          businessGuard,
+        ),
       })
-      await ctx.logAction('price_sentinel.approval_requested', { decision })
+      await ctx.logAction('price_sentinel.approval_requested', {
+        decision,
+        economicsContext,
+        businessGuardReason: businessGuard.reason,
+      })
       await safeDataOsWrite(ctx, proposal.productId, async () => {
         await ctx.dataOS!.recordLakeEvent({
           platform,
@@ -172,11 +289,12 @@ export async function runPriceSentinel(
         platform,
         code,
         productId: proposal.productId,
+        economicsContext,
         message: errorMessage(err),
       })
       continue
     }
-    await ctx.logAction('price_sentinel.price_updated', { decision })
+    await ctx.logAction('price_sentinel.price_updated', { decision, economicsContext })
 
     await safeDataOsWrite(ctx, proposal.productId, async () => {
       const decisionId = await ctx.dataOS!.recordMemory({

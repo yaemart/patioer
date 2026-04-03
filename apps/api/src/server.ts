@@ -8,10 +8,13 @@ import { replayPendingWebhooks } from './lib/webhook-replay.js'
 import { registerStubPlatformWebhookHandlers } from './lib/webhook-topic-handler.js'
 import { closeAllQueues, createWorker } from './lib/queue-factory.js'
 import { processWebhookProcessingJob } from './lib/approval-execute-worker.js'
+import { processOutcomeJob } from './lib/outcome-worker.js'
+import { createDbUserStore, setUserStore } from './routes/auth.js'
 
 dotenv.config()
 registerPlatformHarnessFactories()
 registerStubPlatformWebhookHandlers()
+setUserStore(createDbUserStore())
 
 const rawPort = process.env.PORT
 const port = rawPort !== undefined ? parseInt(rawPort, 10) : 3100
@@ -33,6 +36,7 @@ function startWebhookProcessingWorker(): void {
     return
   }
   createWorker('webhook-processing', processWebhookProcessingJob, { concurrency: 2 })
+  createWorker('outcome-evaluation', processOutcomeJob, { concurrency: 1 })
 }
 
 process.on('SIGTERM', shutdown)

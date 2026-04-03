@@ -12,6 +12,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@fastify/cors": "^10.0.2",
     "@fastify/sensible": "latest",
     "@fastify/swagger": "^9.7.0",
     "@fastify/swagger-ui": "^5.2.5",
@@ -26,6 +27,7 @@
     "@patioer/market": "workspace:*",
     "@patioer/onboarding": "workspace:*",
     "@patioer/shared": "workspace:*",
+    "@patioer/sop": "workspace:*",
     "bullmq": "^5.71.0",
     "dotenv": "latest",
     "drizzle-orm": "latest",

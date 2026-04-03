@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { HarnessError } from '@patioer/harness'
 import type { TenantHarness } from '@patioer/harness'
 import type { AgentContext } from '../context.js'
+import { DEFAULT_GOVERNANCE_SETTINGS } from '../ports.js'
 import { runPriceSentinel } from './price-sentinel.agent.js'
 import { createHarnessMock, createDataOsMock } from './test-helpers.js'
 
@@ -29,6 +30,10 @@ function createCtx(overrides?: {
     getRecentEvents: vi.fn().mockResolvedValue([]),
     getEventsForAgent: vi.fn().mockResolvedValue([]),
     describeDataOsCapabilities: () => 'DataOS not available',
+    getGovernanceSettings: vi.fn().mockResolvedValue({ ...DEFAULT_GOVERNANCE_SETTINGS }),
+    getEffectiveGovernance: vi.fn().mockResolvedValue({ ...DEFAULT_GOVERNANCE_SETTINGS }),
+    isHumanInLoop: vi.fn().mockResolvedValue(false),
+    getActiveSop: vi.fn().mockResolvedValue(null),
   }
 
   return { ctx, harness }
@@ -242,6 +247,164 @@ describe('runPriceSentinel', () => {
     expect(dataOS.recordMemory).toHaveBeenCalledWith(expect.objectContaining({ platform: 'amazon' }))
     expect(dataOS.recordLakeEvent).toHaveBeenCalledWith(expect.objectContaining({ platform: 'amazon' }))
     expect(dataOS.recordPriceEvent).toHaveBeenCalledWith(expect.objectContaining({ platform: 'amazon' }))
+  })
+
+  it('reads unit economics from business ports and includes it in approval payload', async () => {
+    const { ctx } = createCtx()
+    const getSkuEconomics = vi.fn().mockResolvedValue({
+      productId: 'p-1',
+      sku: 'p-1',
+      platform: 'shopify',
+      grossRevenue: 1200,
+      netRevenue: 1000,
+      cogs: 400,
+      platformFee: 120,
+      adSpend: 80,
+      contributionMargin: 400,
+      acos: 0.08,
+      tacos: 0.09,
+      unitsSold: 30,
+    })
+    ctx.business = {
+      unitEconomics: {
+        getSkuEconomics,
+        getDailyOverview: vi.fn(),
+      },
+      inventoryPlanning: {
+        getInboundShipments: vi.fn(),
+        getReplenishmentSuggestions: vi.fn(),
+      },
+      accountHealth: {
+        getHealthSummary: vi.fn(),
+        getListingIssues: vi.fn(),
+      },
+      serviceOps: {
+        getCases: vi.fn(),
+        getRefundSummary: vi.fn(),
+      },
+    }
+
+    await runPriceSentinel(ctx, {
+      proposals: [
+        {
+          productId: 'p-1',
+          currentPrice: 100,
+          proposedPrice: 130,
+          reason: 'large move',
+        },
+      ],
+    })
+
+    expect(getSkuEconomics).toHaveBeenCalledWith(
+      'shopify',
+      'p-1',
+      expect.objectContaining({ from: expect.any(Date), to: expect.any(Date) }),
+    )
+    expect(ctx.requestApproval).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({
+        economicsContext: expect.objectContaining({
+          grossRevenue30d: 1200,
+          contributionMargin30d: 400,
+          unitsSold30d: 30,
+        }),
+      }),
+    }))
+  })
+
+  it('degrades to approval when business port exists but profit data is unavailable', async () => {
+    const { ctx, harness } = createCtx()
+    const getSkuEconomics = vi.fn().mockResolvedValue(null)
+    ctx.business = {
+      unitEconomics: {
+        getSkuEconomics,
+        getDailyOverview: vi.fn(),
+      },
+      inventoryPlanning: {
+        getInboundShipments: vi.fn(),
+        getReplenishmentSuggestions: vi.fn(),
+      },
+      accountHealth: {
+        getHealthSummary: vi.fn(),
+        getListingIssues: vi.fn(),
+      },
+      serviceOps: {
+        getCases: vi.fn(),
+        getRefundSummary: vi.fn(),
+      },
+    }
+
+    await runPriceSentinel(ctx, {
+      proposals: [
+        {
+          productId: 'p-1',
+          currentPrice: 100,
+          proposedPrice: 105,
+          reason: 'small move',
+        },
+      ],
+    })
+
+    expect(harness.updatePrice).not.toHaveBeenCalled()
+    expect(ctx.requestApproval).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({
+        businessGuardReason: 'profit data unavailable — manual review required',
+      }),
+      reason: 'profit data unavailable — manual review required',
+    }))
+  })
+
+  it('degrades price decreases to approval when contribution margin is non-positive', async () => {
+    const { ctx, harness } = createCtx()
+    ctx.business = {
+      unitEconomics: {
+        getSkuEconomics: vi.fn().mockResolvedValue({
+          productId: 'p-1',
+          sku: 'p-1',
+          platform: 'shopify',
+          grossRevenue: 800,
+          netRevenue: 700,
+          cogs: 500,
+          platformFee: 80,
+          adSpend: 150,
+          contributionMargin: -30,
+          acos: 0.2,
+          tacos: 0.21,
+          unitsSold: 10,
+        }),
+        getDailyOverview: vi.fn(),
+      },
+      inventoryPlanning: {
+        getInboundShipments: vi.fn(),
+        getReplenishmentSuggestions: vi.fn(),
+      },
+      accountHealth: {
+        getHealthSummary: vi.fn(),
+        getListingIssues: vi.fn(),
+      },
+      serviceOps: {
+        getCases: vi.fn(),
+        getRefundSummary: vi.fn(),
+      },
+    }
+
+    await runPriceSentinel(ctx, {
+      proposals: [
+        {
+          productId: 'p-1',
+          currentPrice: 100,
+          proposedPrice: 98,
+          reason: 'small decrease',
+        },
+      ],
+    })
+
+    expect(harness.updatePrice).not.toHaveBeenCalled()
+    expect(ctx.requestApproval).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({
+        businessGuardReason: 'negative contribution margin in last 30d — manual review required',
+      }),
+      reason: 'negative contribution margin in last 30d — manual review required',
+    }))
   })
 
   describe('HarnessError handling — Constitution §2.3 + §4.3', () => {

@@ -2,12 +2,18 @@ import type { FastifyPluginAsync } from 'fastify'
 import { and, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { schema } from '@patioer/db'
+import { getAgentGoalContext, type OperatingMode } from '@patioer/agent-runtime'
+
+const OPERATING_MODE_ENUM = ['profit-first', 'launch', 'clearance', 'scale', 'daily'] as const
+const APPROVAL_MODE_ENUM = ['approval_required', 'approval_informed'] as const
 
 const governancePrefsSchema = z.object({
   priceChangeThreshold: z.number().int().min(5).max(30),
   adsBudgetApproval: z.number().int().min(100).max(2000),
   newListingApproval: z.boolean(),
   humanInLoopAgents: z.array(z.string()).default([]),
+  operatingMode: z.enum(OPERATING_MODE_ENUM).optional(),
+  approvalMode: z.enum(APPROVAL_MODE_ENUM).optional(),
 })
 
 type GovernancePrefs = z.infer<typeof governancePrefsSchema>
@@ -17,6 +23,8 @@ const DEFAULT_GOVERNANCE_PREFS: GovernancePrefs = {
   adsBudgetApproval: 500,
   newListingApproval: true,
   humanInLoopAgents: [],
+  operatingMode: 'daily',
+  approvalMode: 'approval_required',
 }
 
 function parseGoalContext(raw: string | null): Record<string, unknown> {
@@ -69,6 +77,8 @@ const settingsRoute: FastifyPluginAsync = async (app) => {
       humanInLoopAgents: Array.isArray(row.humanInLoopAgents)
         ? row.humanInLoopAgents.filter((value): value is string => typeof value === 'string')
         : [],
+      operatingMode: row.operatingMode ?? 'daily',
+      approvalMode: row.approvalMode ?? 'approval_required',
     })
   })
 
@@ -91,6 +101,9 @@ const settingsRoute: FastifyPluginAsync = async (app) => {
     const prefs = parsed.data
     const tenantId = request.tenantId
 
+    const mode = prefs.operatingMode ?? 'daily'
+    const approvalMode = prefs.approvalMode ?? 'approval_required'
+
     await request.withDb(async (db) => {
       const [existing] = await db
         .select({ id: schema.tenantGovernanceSettings.id })
@@ -104,6 +117,8 @@ const settingsRoute: FastifyPluginAsync = async (app) => {
         adsBudgetApproval: prefs.adsBudgetApproval,
         newListingApproval: prefs.newListingApproval,
         humanInLoopAgents: prefs.humanInLoopAgents,
+        operatingMode: mode,
+        approvalMode,
         updatedAt: new Date(),
       }
 
@@ -116,32 +131,40 @@ const settingsRoute: FastifyPluginAsync = async (app) => {
           .where(eq(schema.tenantGovernanceSettings.id, existing.id))
       }
 
-      const agents = await db
-        .select({ id: schema.agents.id, goalContext: schema.agents.goalContext })
-        .from(schema.agents)
-        .where(
-          and(
-            eq(schema.agents.tenantId, tenantId),
-            eq(schema.agents.type, 'price-sentinel'),
-          ),
-        )
+      const agentTypes = ['price-sentinel', 'ads-optimizer', 'inventory-guard'] as const
+      for (const agentType of agentTypes) {
+        const modeGoalContext = getAgentGoalContext(agentType, mode as OperatingMode)
 
-      for (const agent of agents) {
-        const goalContext = parseGoalContext(agent.goalContext)
-        await db
-          .update(schema.agents)
-          .set({
-            goalContext: serializeGoalContext({
-              ...goalContext,
-              approvalThresholdPercent: prefs.priceChangeThreshold,
-            }),
-            updatedAt: new Date(),
-          })
-          .where(eq(schema.agents.id, agent.id))
+        const agents = await db
+          .select({ id: schema.agents.id, goalContext: schema.agents.goalContext })
+          .from(schema.agents)
+          .where(
+            and(
+              eq(schema.agents.tenantId, tenantId),
+              eq(schema.agents.type, agentType),
+            ),
+          )
+
+        const modeKeys = new Set(Object.keys(modeGoalContext))
+        for (const agent of agents) {
+          const existing = parseGoalContext(agent.goalContext)
+          const merged: Record<string, unknown> = {}
+          for (const [k, v] of Object.entries(existing)) {
+            if (!modeKeys.has(k)) merged[k] = v
+          }
+          Object.assign(merged, modeGoalContext, { _goalSource: 'operating-mode' })
+          await db
+            .update(schema.agents)
+            .set({
+              goalContext: serializeGoalContext(merged),
+              updatedAt: new Date(),
+            })
+            .where(eq(schema.agents.id, agent.id))
+        }
       }
     })
 
-    return reply.send(prefs)
+    return reply.send({ ...prefs, operatingMode: mode, approvalMode })
   })
 }
 

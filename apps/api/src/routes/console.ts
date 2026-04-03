@@ -9,6 +9,7 @@ import type { FastifyPluginAsync } from 'fastify'
 import { and, count, desc, eq, gte, sql } from 'drizzle-orm'
 import { schema, type AppDb } from '@patioer/db'
 import { ELECTROOS_AGENT_IDS } from '@patioer/shared'
+import { buildBusinessPortDeps } from '../lib/business-ports.js'
 
 // ─── Shared ───────────────────────────────────────────────────────────────────
 
@@ -406,13 +407,55 @@ const consoleRoute: FastifyPluginAsync = async (app) => {
   app.get('/api/v1/console/alerts', {
     schema: {
       tags: ['Console'],
-      summary: 'Alerts backend not yet wired for trusted console responses',
+      summary: 'Active alerts from account health events and inventory warnings',
       security: [{ bearerAuth: [] }],
     },
   }, async (request, reply) => {
     const tenantId = requireTenant(request, reply)
     if (!tenantId) return
-    return reply.code(501).send({ error: 'alerts backend not configured' })
+    if (!request.withDb) return reply.code(500).send({ error: 'db unavailable' })
+
+    const business = buildBusinessPortDeps(request)
+    const [listingIssues, replenishmentSuggestions] = await Promise.all([
+      business.accountHealth.getListingIssues(tenantId),
+      business.inventoryPlanning.getReplenishmentSuggestions(tenantId),
+    ])
+
+    const alerts = [
+      ...listingIssues
+        .filter((issue) => issue.resolvedAt == null)
+        .map((issue) => ({
+          id: issue.id,
+          source: 'account_health' as const,
+          platform: issue.platform,
+          severity: issue.severity,
+          title: issue.title,
+          description: issue.description,
+          affectedEntity: issue.productId || null,
+          createdAt: issue.detectedAt,
+        })),
+      ...replenishmentSuggestions
+        .filter((item) => item.urgency !== 'ok')
+        .map((item) => ({
+          id: `inventory:${item.platform}:${item.productId}`,
+          source: 'inventory' as const,
+          platform: item.platform,
+          severity: item.urgency === 'critical' ? 'critical' : 'warning',
+          title:
+            item.urgency === 'critical'
+              ? `Out of stock: ${item.sku}`
+              : `Low stock: ${item.sku}`,
+          description: `Current stock ${item.currentStock}, suggested replenish ${item.suggestedQty}`,
+          affectedEntity: item.productId,
+          createdAt: null,
+        })),
+    ]
+
+    return reply.send({
+      totalActive: alerts.length,
+      alerts,
+      checkedAt: new Date().toISOString(),
+    })
   })
 
   // ── §13.1–13.3 Combined Overview ─────────────────────────────────────────

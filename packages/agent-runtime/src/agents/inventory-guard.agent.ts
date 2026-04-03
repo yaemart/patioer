@@ -14,8 +14,10 @@ import {
   effectiveSafetyThreshold,
   suggestedRestockUnits,
 } from './inventory-guard.decision.js'
+import { blockGuard, noBusinessGuard, type BusinessGuard } from './business-guard.js'
 import { getHourInTimeZone, INVENTORY_GUARD_LOCAL_HOUR } from './inventory-guard.schedule.js'
 import { randomRunId } from '../run-id.js'
+import { runAgentPreflight } from './preflight.js'
 
 function resolveTimeZone(input: InventoryGuardRunInput): string {
   if (input.timeZone && input.timeZone.length > 0) return input.timeZone
@@ -23,6 +25,86 @@ function resolveTimeZone(input: InventoryGuardRunInput): string {
     return process.env.INVENTORY_GUARD_TZ
   }
   return 'UTC'
+}
+
+type InventoryBusinessContext = {
+  suggestionByKey: Map<string, { daysOfStock: number; suggestedQty: number; dailyVelocity: number }>
+  nextInboundByKey: Map<string, { quantity: number; expectedArrival: string | null; supplier: string | null }>
+}
+
+const LOW_STOCK_RUNWAY_DAYS = 14
+
+async function loadInventoryBusinessContext(ctx: AgentContext): Promise<InventoryBusinessContext | null> {
+  if (!ctx.business?.inventoryPlanning) return null
+
+  try {
+    const [suggestions, inboundShipments] = await Promise.all([
+      ctx.business.inventoryPlanning.getReplenishmentSuggestions(),
+      ctx.business.inventoryPlanning.getInboundShipments(),
+    ])
+
+    const suggestionByKey = new Map<string, { daysOfStock: number; suggestedQty: number; dailyVelocity: number }>()
+    for (const item of suggestions) {
+      suggestionByKey.set(`${item.platform}:${item.productId}`, {
+        daysOfStock: item.daysOfStock,
+        suggestedQty: item.suggestedQty,
+        dailyVelocity: item.dailyVelocity,
+      })
+    }
+
+    const nextInboundByKey = new Map<string, { quantity: number; expectedArrival: string | null; supplier: string | null }>()
+    for (const item of inboundShipments) {
+      const key = `${item.platform}:${item.productId}`
+      if (!nextInboundByKey.has(key) && item.status === 'in_transit') {
+        nextInboundByKey.set(key, {
+          quantity: item.quantity,
+          expectedArrival: item.expectedArrival,
+          supplier: item.supplier,
+        })
+      }
+    }
+
+    return { suggestionByKey, nextInboundByKey }
+  } catch (err) {
+    await ctx.logAction('inventory_guard.business_context_degraded', {
+      agentId: ctx.agentId,
+      port: 'inventoryPlanning',
+      error: errorMessage(err),
+    })
+    return null
+  }
+}
+
+function daysUntil(dateString: string | null): number | null {
+  if (!dateString) return null
+  const target = new Date(dateString)
+  if (Number.isNaN(target.getTime())) return null
+  const diffMs = target.getTime() - Date.now()
+  return Math.ceil(diffMs / 86400000)
+}
+
+function resolveInventoryBusinessGuard(
+  alert: InventoryGuardPersistRow & { platform: string },
+  businessContext: InventoryBusinessContext | null,
+): BusinessGuard {
+  if (!businessContext) return noBusinessGuard()
+
+  const key = `${alert.platform}:${alert.platformProductId}`
+  const insight = businessContext.suggestionByKey.get(key)
+  const inbound = businessContext.nextInboundByKey.get(key)
+
+  if (alert.status === 'low' && insight && insight.daysOfStock >= LOW_STOCK_RUNWAY_DAYS) {
+    return blockGuard(`days_of_stock ${insight.daysOfStock} >= ${LOW_STOCK_RUNWAY_DAYS}d runway`)
+  }
+
+  if (inbound && insight) {
+    const etaDays = daysUntil(inbound.expectedArrival)
+    if (etaDays !== null && etaDays >= 0 && insight.daysOfStock >= etaDays) {
+      return blockGuard(`inbound ${inbound.quantity} arriving in ${etaDays}d before projected stockout`)
+    }
+  }
+
+  return noBusinessGuard()
 }
 
 /**
@@ -51,8 +133,22 @@ export async function runInventoryGuard(
     enforceDailyWindow: input.enforceDailyWindow ?? false,
   })
 
-  if (await ctx.budget.isExceeded()) {
-    await ctx.logAction('inventory_guard.budget_exceeded', { runId, agentId: ctx.agentId })
+  const preflight = await runAgentPreflight(ctx, {
+    agentKey: 'inventory_guard',
+    humanInLoopAction: 'inventory_guard.full_run',
+    payload: {
+      runId,
+      platforms,
+      safetyThreshold,
+      replenishApprovalMinUnits: replenishMin,
+      timeZone,
+      enforceDailyWindow: input.enforceDailyWindow ?? false,
+    },
+  })
+  if (preflight.reason === 'human_in_loop') {
+    return { runId, synced: 0, perPlatform: [], replenishApprovalsRequested: 1 }
+  }
+  if (preflight.reason === 'budget_exceeded') {
     return { runId, synced: 0, perPlatform: [], budgetExceeded: true }
   }
 
@@ -78,6 +174,8 @@ export async function runInventoryGuard(
   let synced = 0
   let levelsPersisted = 0
   const alerts: Array<InventoryGuardPersistRow & { platform: string }> = []
+  const pendingApprovals = preflight.pendingApprovals
+  const businessContext = await loadInventoryBusinessContext(ctx)
 
   for (const platform of platforms) {
     let harness: ReturnType<AgentContext['getHarness']>
@@ -157,52 +255,85 @@ export async function runInventoryGuard(
     })
   }
 
+  const actionableAlerts = []
+  let businessGuardDeferred = 0
+  for (const alert of alerts) {
+    const businessGuard = resolveInventoryBusinessGuard(alert, businessContext)
+    if (businessGuard.effect === 'block') {
+      businessGuardDeferred += 1
+      await ctx.logAction('inventory_guard.business_guard_deferred', {
+        runId,
+        platform: alert.platform,
+        platformProductId: alert.platformProductId,
+        status: alert.status,
+        businessGuardReason: businessGuard.reason,
+      })
+      continue
+    }
+    actionableAlerts.push(alert)
+  }
+
   let ticketsCreated = 0
-  if (alerts.length > 0) {
-    const body = alerts
+  if (actionableAlerts.length > 0) {
+    const body = actionableAlerts
       .map((a) => {
         const suggest = suggestedRestockUnits(a.quantity, a.safetyThreshold)
+        const insight = businessContext?.suggestionByKey.get(`${a.platform}:${a.platformProductId}`)
+        const inbound = businessContext?.nextInboundByKey.get(`${a.platform}:${a.platformProductId}`)
         return (
           `- [${a.status}] ${a.platform} platformProductId=${a.platformProductId}` +
           (a.sku ? ` sku=${a.sku}` : '') +
-          ` qty=${a.quantity} safety=${a.safetyThreshold} suggest_restock+=${suggest}`
+          ` qty=${a.quantity} safety=${a.safetyThreshold} suggest_restock+=${suggest}` +
+          (insight ? ` days_of_stock=${insight.daysOfStock} velocity=${insight.dailyVelocity.toFixed(2)}` : '') +
+          (inbound ? ` next_inbound=${inbound.quantity}@${inbound.expectedArrival ?? 'unknown'}` : '')
         )
       })
       .join('\n')
     await ctx.createTicket({
-      title: `Inventory Guard: ${alerts.length} SKU(s) need restock`,
+      title: `Inventory Guard: ${actionableAlerts.length} SKU(s) need restock`,
       body,
     })
     ticketsCreated = 1
     await ctx.logAction('inventory_guard.ticket_created', {
       runId,
-      alertCount: alerts.length,
+      alertCount: actionableAlerts.length,
       keyword: 'INVENTORY_GUARD_LOW_STOCK',
     })
   }
 
   let replenishApprovalsRequested = 0
-  for (const a of alerts) {
+  for (const a of actionableAlerts) {
     const suggest = suggestedRestockUnits(a.quantity, a.safetyThreshold)
     if (suggest < replenishMin) continue
 
+    const insight = businessContext?.suggestionByKey.get(`${a.platform}:${a.platformProductId}`)
+    const inbound = businessContext?.nextInboundByKey.get(`${a.platform}:${a.platformProductId}`)
+
     const targetQuantity = a.quantity + suggest
-    if (input.hasPendingInventoryAdjust) {
-      const dup = await input.hasPendingInventoryAdjust({
+    const dup = input.hasPendingInventoryAdjust
+      ? await input.hasPendingInventoryAdjust({
         platform: a.platform,
         platformProductId: a.platformProductId,
         targetQuantity,
       })
-      if (dup) {
-        await ctx.logAction('inventory_guard.replenish_approval_duplicate_skipped', {
-          runId,
-          platform: a.platform,
-          platformProductId: a.platformProductId,
-          targetQuantity,
-          keyword: 'INVENTORY_REPLENISH_PENDING_DEDUPE',
-        })
-        continue
-      }
+      : pendingApprovals.some((item) => {
+        if (item.action !== 'inventory.adjust') return false
+        const payload = (item.payload ?? {}) as Record<string, unknown>
+        return (
+          payload.platform === a.platform &&
+          payload.platformProductId === a.platformProductId &&
+          Number(payload.targetQuantity) === targetQuantity
+        )
+      })
+    if (dup) {
+      await ctx.logAction('inventory_guard.replenish_approval_duplicate_skipped', {
+        runId,
+        platform: a.platform,
+        platformProductId: a.platformProductId,
+        targetQuantity,
+        keyword: 'INVENTORY_REPLENISH_PENDING_DEDUPE',
+      })
+      continue
     }
 
     await ctx.requestApproval({
@@ -215,6 +346,14 @@ export async function runInventoryGuard(
         currentQuantity: a.quantity,
         safetyThreshold: a.safetyThreshold,
         status: a.status,
+        businessContext: {
+          daysOfStock: insight?.daysOfStock ?? null,
+          dailyVelocity: insight?.dailyVelocity ?? null,
+          suggestedQty30d: insight?.suggestedQty ?? null,
+          nextInboundQuantity: inbound?.quantity ?? null,
+          nextInboundExpectedArrival: inbound?.expectedArrival ?? null,
+          nextInboundSupplier: inbound?.supplier ?? null,
+        },
       },
       reason:
         `Restock ${suggest} units to reach target ${targetQuantity} for product ${a.platformProductId} ` +
@@ -236,6 +375,7 @@ export async function runInventoryGuard(
     levelsPersisted,
     ticketsCreated,
     replenishApprovalsRequested,
+    businessGuardDeferred,
     platforms: perPlatform,
     keyword: 'INVENTORY_GUARD_RUN_SUMMARY',
   })

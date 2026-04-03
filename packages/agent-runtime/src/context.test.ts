@@ -158,4 +158,76 @@ describe('createAgentContext', () => {
     expect(ctx.market).toBe(market)
   })
 
+  it('exposes tenant-scoped business ports when provided', async () => {
+    const { deps } = createDeps()
+    const extendedDeps: CreateAgentContextDeps = {
+      ...deps,
+      unitEconomics: {
+        getSkuEconomics: vi.fn().mockResolvedValue({
+          productId: 'SKU-1',
+          sku: 'SKU-1',
+          platform: 'amazon',
+          grossRevenue: 100,
+          netRevenue: 90,
+          cogs: 30,
+          platformFee: 10,
+          adSpend: 5,
+          contributionMargin: 45,
+          acos: 0.05,
+          tacos: 0.06,
+          unitsSold: 3,
+        }),
+        getDailyOverview: vi.fn().mockResolvedValue([]),
+      },
+      inventoryPlanning: {
+        getInboundShipments: vi.fn().mockResolvedValue([]),
+        getReplenishmentSuggestions: vi.fn().mockResolvedValue([]),
+      },
+      accountHealth: {
+        getHealthSummary: vi.fn().mockResolvedValue({
+          platform: 'amazon',
+          overallStatus: 'healthy',
+          openIssues: 0,
+          resolvedLast30d: 0,
+          metrics: {},
+        }),
+        getListingIssues: vi.fn().mockResolvedValue([]),
+      },
+      serviceOps: {
+        getCases: vi.fn().mockResolvedValue([]),
+        getRefundSummary: vi.fn().mockResolvedValue({
+          totalRefunds: 0,
+          totalAmount: 0,
+          byReason: {},
+        }),
+      },
+    }
+    const ctx = createAgentContext(
+      { tenantId: 'tenant-a', agentId: 'agent-a' },
+      extendedDeps,
+    )
+
+    expect(ctx.business).toBeDefined()
+    await ctx.business!.unitEconomics.getSkuEconomics('amazon', 'SKU-1', {
+      from: new Date('2026-03-01T00:00:00.000Z'),
+      to: new Date('2026-03-31T00:00:00.000Z'),
+    })
+    await ctx.business!.inventoryPlanning.getInboundShipments()
+    await ctx.business!.accountHealth.getHealthSummary('amazon')
+    await ctx.business!.serviceOps.getCases({ status: 'open' })
+
+    expect(extendedDeps.unitEconomics?.getSkuEconomics).toHaveBeenCalledWith(
+      'tenant-a',
+      'amazon',
+      'SKU-1',
+      expect.objectContaining({
+        from: expect.any(Date),
+        to: expect.any(Date),
+      }),
+    )
+    expect(extendedDeps.inventoryPlanning?.getInboundShipments).toHaveBeenCalledWith('tenant-a')
+    expect(extendedDeps.accountHealth?.getHealthSummary).toHaveBeenCalledWith('tenant-a', 'amazon')
+    expect(extendedDeps.serviceOps?.getCases).toHaveBeenCalledWith('tenant-a', { status: 'open' })
+  })
+
 })

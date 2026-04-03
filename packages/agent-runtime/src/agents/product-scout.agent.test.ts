@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { AgentContext } from '../context.js'
+import { DEFAULT_GOVERNANCE_SETTINGS } from '../ports.js'
 import { runProductScout } from './product-scout.agent.js'
 
 function createMockContext(
@@ -36,6 +37,10 @@ function createMockContext(
     getRecentEvents: vi.fn().mockResolvedValue([]),
     getEventsForAgent: vi.fn().mockResolvedValue([]),
     describeDataOsCapabilities: () => 'DataOS not available',
+    getGovernanceSettings: vi.fn().mockResolvedValue({ ...DEFAULT_GOVERNANCE_SETTINGS }),
+    getEffectiveGovernance: vi.fn().mockResolvedValue({ ...DEFAULT_GOVERNANCE_SETTINGS }),
+    isHumanInLoop: vi.fn().mockResolvedValue(false),
+    getActiveSop: vi.fn().mockResolvedValue(null),
     ...overrides,
   }
 }
@@ -51,6 +56,21 @@ describe('runProductScout', () => {
     const result = await runProductScout(ctx, {})
     expect(result.scouted).toEqual([])
     expect(ctx.logAction).toHaveBeenCalledWith('product_scout.budget_exceeded', expect.any(Object))
+  })
+
+  it('requests full-run approval and exits when agent is human-in-loop', async () => {
+    const ctx = createMockContext([], {
+      isHumanInLoop: vi.fn().mockResolvedValue(true),
+    })
+
+    const result = await runProductScout(ctx, {})
+
+    expect(result.scouted).toEqual([])
+    expect(ctx.requestApproval).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'product_scout.full_run',
+      }),
+    )
   })
 
   it('scans products and classifies them as normal', async () => {
@@ -72,7 +92,16 @@ describe('runProductScout', () => {
       { id: 'p1', title: 'Almost Out', price: 10, inventory: 3 },
       { id: 'p2', title: 'In Stock', price: 20, inventory: 50 },
     ]
-    const ctx = createMockContext(products)
+    const ctx = createMockContext(products, {
+      getGovernanceSettings: vi.fn().mockResolvedValue({
+        ...DEFAULT_GOVERNANCE_SETTINGS,
+        newListingApproval: false,
+      }),
+      getEffectiveGovernance: vi.fn().mockResolvedValue({
+        ...DEFAULT_GOVERNANCE_SETTINGS,
+        newListingApproval: false,
+      }),
+    })
 
     const result = await runProductScout(ctx, {})
     expect(result.scouted[0]!.flag).toBe('low_inventory')
@@ -138,7 +167,16 @@ describe('runProductScout', () => {
       { id: 'p2', title: 'Expensive B', price: 20000, inventory: 100 },
       { id: 'p3', title: 'Normal C', price: 50, inventory: 50 },
     ]
-    const ctx = createMockContext(products)
+    const ctx = createMockContext(products, {
+      getGovernanceSettings: vi.fn().mockResolvedValue({
+        ...DEFAULT_GOVERNANCE_SETTINGS,
+        newListingApproval: false,
+      }),
+      getEffectiveGovernance: vi.fn().mockResolvedValue({
+        ...DEFAULT_GOVERNANCE_SETTINGS,
+        newListingApproval: false,
+      }),
+    })
 
     const result = await runProductScout(ctx, {})
     expect(result.scouted.filter((s) => s.flag !== 'normal')).toHaveLength(2)
@@ -146,6 +184,49 @@ describe('runProductScout', () => {
       expect.objectContaining({
         title: 'Product Scout: 2 product(s) flagged',
       }),
+    )
+  })
+
+  it('requests approval instead of creating ticket when newListingApproval is enabled', async () => {
+    const products = [
+      { id: 'p1', title: 'Low A', price: 5, inventory: 1 },
+    ]
+    const ctx = createMockContext(products)
+
+    const result = await runProductScout(ctx, {})
+
+    expect(result.scouted[0]!.flag).toBe('low_inventory')
+    expect(ctx.requestApproval).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'product_scout.review_flagged',
+      }),
+    )
+    expect(ctx.createTicket).not.toHaveBeenCalled()
+  })
+
+  it('skips duplicate flagged approval when matching pending approval exists', async () => {
+    const products = [
+      { id: 'p1', title: 'Low A', price: 5, inventory: 1 },
+    ]
+    const ctx = createMockContext(products, {
+      listPendingApprovals: vi.fn().mockResolvedValue([
+        {
+          id: 'approval-1',
+          action: 'product_scout.review_flagged',
+          payload: {
+            products: [{ productId: 'p1' }],
+          },
+          createdAt: new Date().toISOString(),
+        },
+      ]),
+    })
+
+    await runProductScout(ctx, {})
+
+    expect(ctx.requestApproval).not.toHaveBeenCalled()
+    expect(ctx.logAction).toHaveBeenCalledWith(
+      'product_scout.approval_duplicate_skipped',
+      expect.objectContaining({ flaggedCount: 1 }),
     )
   })
 })
