@@ -27,29 +27,31 @@ export async function processOutcomeJob(job: Job<OutcomeJobPayload>): Promise<vo
     return
   }
 
-  let result: OutcomeResult
   try {
-    result = await evaluator.evaluate(decisionId, tenantId, decisionPayload)
+    const result: OutcomeResult = await evaluator.evaluate(
+      decisionId,
+      tenantId,
+      decisionPayload,
+    )
     outcomeEvaluationTotal.labels(scope, result.verdict).inc()
+
+    const dataOS = tryCreateDataOsPort(tenantId, 'amazon')
+    if (dataOS) {
+      await dataOS.writeOutcome(decisionId, result)
+      outcomeEvaluationTotal.labels(scope, 'persisted').inc()
+      console.log(
+        `[outcome-worker] Persisted outcome for ${scope} decision ${decisionId}: verdict=${result.verdict}`,
+      )
+    } else {
+      outcomeEvaluationTotal.labels(scope, 'dataos_unavailable').inc()
+      console.log(
+        `[outcome-worker] DataOS unavailable — logged only: ${scope} decision ${decisionId} for tenant ${tenantId}`,
+        JSON.stringify(result.metrics),
+      )
+    }
   } catch (err) {
     outcomeEvaluationTotal.labels(scope, 'error').inc()
     console.error(`[outcome-worker] Evaluator threw for ${scope} decision ${decisionId}:`, err)
-    return
-  }
-
-  const dataOS = tryCreateDataOsPort(tenantId, 'amazon')
-  if (dataOS) {
-    await dataOS.writeOutcome(decisionId, result)
-    outcomeEvaluationTotal.labels(scope, 'persisted').inc()
-    console.log(
-      `[outcome-worker] Persisted outcome for ${scope} decision ${decisionId}: verdict=${result.verdict}`,
-    )
-  } else {
-    outcomeEvaluationTotal.labels(scope, 'dataos_unavailable').inc()
-    console.log(
-      `[outcome-worker] DataOS unavailable — logged only: ${scope} decision ${decisionId} for tenant ${tenantId}`,
-      JSON.stringify(result.metrics),
-    )
   }
 }
 

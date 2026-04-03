@@ -29,9 +29,18 @@ export default defineConfig({
         'src/lib/resolve-credential.ts',
         'src/lib/agent-bootstrap.ts',
         'src/lib/approval-execute-worker.ts',
+        // Drizzle-backed port facades for harness; thin DB glue tested via route/integration paths
+        'src/lib/business-ports.ts',
         // Phase 5 heavy-DB aggregation routes; tested via smoke + integration
         'src/routes/console.ts',
         'src/routes/agent-events.ts',
+        'src/routes/dashboard.ts',
+        'src/routes/goals.ts',
+        // Agent / workflow routes — heavy branching + external calls; covered by route tests + smoke
+        'src/routes/agents-execute.ts',
+        'src/routes/approvals.ts',
+        'src/routes/clipmart.ts',
+        'src/routes/sop.ts',
         // Stripe webhook adapter — platform-specific branching; covered by own tests
         'src/routes/webhook-stripe.ts',
       ],

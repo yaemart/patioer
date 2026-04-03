@@ -17,3 +17,10 @@ paperclip/
 
 # Local scratch / agent temp output
 .tmp/
+
+# Screenshots / binary assets dropped at repo root (keep repo lean)
+/*.png
+/*.jpg
+/*.jpeg
+/*.gif
+/*.bmp
