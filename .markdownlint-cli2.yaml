@@ -1,0 +1,31 @@
+# markdownlint-cli2 — docs + README only (see workflow globs).
+# Relaxed for long planning/ops Markdown; tighten rules in follow-up PRs if desired.
+config:
+  default: true
+  MD009: false # trailing spaces (wrapped copy-paste)
+  MD010: false # hard tabs (legacy tables in README / plans)
+  MD013: false # line length
+  MD022: false # blanks around headings
+  MD024: false # duplicate headings (common in long specs)
+  MD029: false # ordered list prefix style
+  MD031: false # blanks around fences
+  MD032: false # blanks around lists
+  MD033: false # inline HTML
+  MD036: false # emphasis used as heading
+  MD040: false # fenced code language
+  MD041: false # first line must be h1
+  MD046: false # code block style
+  MD056: false # table column count (GitHub still renders wide ops tables)
+  MD058: false # blanks around tables
+  MD060: false # table column style
+  MD007: false # list indent (nested blockquotes in plans)
+  MD027: false # blockquote spacing
+  MD028: false # blank line inside blockquote
+  MD037: false # spaces inside emphasis (tables with * * placeholders)
+
+globs:
+  - "./README.md"
+  - "./docs/**/*.md"
+
+ignores:
+  - "node_modules/**"

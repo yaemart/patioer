@@ -1,0 +1,13 @@
+# Lychee link checker — used by .github/workflows/docs.yml
+# Offline mode skips HTTP(S); we still exclude paths that should never be scanned.
+
+exclude_path = ["node_modules", ".git", "dist", "coverage", ".next", "paperclip"]
+
+# If future jobs run without --offline, skip local / example hosts referenced in runbooks.
+exclude = [
+  '^https?://localhost',
+  '^https?://127\\.0\\.0\\.1',
+  '^https?://\\[::1\\]',
+  '^https?://dataos-clickhouse',
+  '^https?://dataos-api',
+]
