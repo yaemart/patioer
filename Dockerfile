@@ -20,5 +20,5 @@ COPY . .
 # Expose port
 EXPOSE 3100
 
-# Start the application with tsx for runtime TypeScript compilation
-CMD ["node", "--import", "tsx", "apps/api/src/server.ts"]
+# Use ENTRYPOINT to prevent Railway from overriding the start command
+ENTRYPOINT ["node", "--import", "tsx", "apps/api/src/server.ts"]
