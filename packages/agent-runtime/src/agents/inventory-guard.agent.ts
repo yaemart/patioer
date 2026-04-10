@@ -45,22 +45,28 @@ async function loadInventoryBusinessContext(ctx: AgentContext): Promise<Inventor
 
     const suggestionByKey = new Map<string, { daysOfStock: number; suggestedQty: number; dailyVelocity: number }>()
     for (const item of suggestions) {
-      suggestionByKey.set(`${item.platform}:${item.productId}`, {
+      const value = {
         daysOfStock: item.daysOfStock,
         suggestedQty: item.suggestedQty,
         dailyVelocity: item.dailyVelocity,
-      })
+      }
+      if (item.productId) suggestionByKey.set(`${item.platform}:${item.productId}`, value)
+      if (item.sku && item.sku !== item.productId) suggestionByKey.set(`${item.platform}:${item.sku}`, value)
     }
 
     const nextInboundByKey = new Map<string, { quantity: number; expectedArrival: string | null; supplier: string | null }>()
     for (const item of inboundShipments) {
-      const key = `${item.platform}:${item.productId}`
-      if (!nextInboundByKey.has(key) && item.status === 'in_transit') {
-        nextInboundByKey.set(key, {
-          quantity: item.quantity,
-          expectedArrival: item.expectedArrival,
-          supplier: item.supplier,
-        })
+      if (item.status !== 'in_transit') continue
+      const value = {
+        quantity: item.quantity,
+        expectedArrival: item.expectedArrival,
+        supplier: item.supplier,
+      }
+      const keys: string[] = []
+      if (item.productId) keys.push(`${item.platform}:${item.productId}`)
+      if (item.sku && item.sku !== item.productId) keys.push(`${item.platform}:${item.sku}`)
+      for (const key of keys) {
+        if (!nextInboundByKey.has(key)) nextInboundByKey.set(key, value)
       }
     }
 
@@ -73,6 +79,32 @@ async function loadInventoryBusinessContext(ctx: AgentContext): Promise<Inventor
     })
     return null
   }
+}
+
+function lookupInsight(
+  businessContext: InventoryBusinessContext | null,
+  platform: string,
+  platformProductId: string,
+  sku?: string,
+) {
+  if (!businessContext) return undefined
+  return (
+    businessContext.suggestionByKey.get(`${platform}:${platformProductId}`) ??
+    (sku && sku !== platformProductId ? businessContext.suggestionByKey.get(`${platform}:${sku}`) : undefined)
+  )
+}
+
+function lookupInbound(
+  businessContext: InventoryBusinessContext | null,
+  platform: string,
+  platformProductId: string,
+  sku?: string,
+) {
+  if (!businessContext) return undefined
+  return (
+    businessContext.nextInboundByKey.get(`${platform}:${platformProductId}`) ??
+    (sku && sku !== platformProductId ? businessContext.nextInboundByKey.get(`${platform}:${sku}`) : undefined)
+  )
 }
 
 function daysUntil(dateString: string | null): number | null {
@@ -278,8 +310,8 @@ export async function runInventoryGuard(
     const body = actionableAlerts
       .map((a) => {
         const suggest = suggestedRestockUnits(a.quantity, a.safetyThreshold)
-        const insight = businessContext?.suggestionByKey.get(`${a.platform}:${a.platformProductId}`)
-        const inbound = businessContext?.nextInboundByKey.get(`${a.platform}:${a.platformProductId}`)
+        const insight = lookupInsight(businessContext, a.platform, a.platformProductId, a.sku)
+        const inbound = lookupInbound(businessContext, a.platform, a.platformProductId, a.sku)
         return (
           `- [${a.status}] ${a.platform} platformProductId=${a.platformProductId}` +
           (a.sku ? ` sku=${a.sku}` : '') +
@@ -306,8 +338,8 @@ export async function runInventoryGuard(
     const suggest = suggestedRestockUnits(a.quantity, a.safetyThreshold)
     if (suggest < replenishMin) continue
 
-    const insight = businessContext?.suggestionByKey.get(`${a.platform}:${a.platformProductId}`)
-    const inbound = businessContext?.nextInboundByKey.get(`${a.platform}:${a.platformProductId}`)
+    const insight = lookupInsight(businessContext, a.platform, a.platformProductId, a.sku)
+    const inbound = lookupInbound(businessContext, a.platform, a.platformProductId, a.sku)
 
     const targetQuantity = a.quantity + suggest
     const dup = input.hasPendingInventoryAdjust

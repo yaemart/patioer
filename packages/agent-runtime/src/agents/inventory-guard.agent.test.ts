@@ -133,6 +133,7 @@ describe('runInventoryGuard', () => {
     const h = baseHarness()
     h.getInventoryLevels = vi.fn().mockResolvedValue([{ platformProductId: 'p1', quantity: 2 }])
     const ctx = createCtx({ harness: h })
+    const expectedArrivalDate = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10)
     ctx.business = {
       unitEconomics: {
         getSkuEconomics: vi.fn(),
@@ -147,7 +148,7 @@ describe('runInventoryGuard', () => {
             platform: 'shopify',
             quantity: 50,
             status: 'in_transit',
-            expectedArrival: '2026-04-10',
+            expectedArrival: expectedArrivalDate,
             supplier: 'Factory A',
             leadTimeDays: 12,
             landedCostPerUnit: 1.2,
@@ -189,7 +190,7 @@ describe('runInventoryGuard', () => {
           dailyVelocity: 3,
           suggestedQty30d: 40,
           nextInboundQuantity: 50,
-          nextInboundExpectedArrival: '2026-04-10',
+          nextInboundExpectedArrival: expectedArrivalDate,
         }),
       }),
     }))
