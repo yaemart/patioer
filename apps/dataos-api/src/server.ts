@@ -21,7 +21,11 @@ if (!internalKey && process.env.NODE_ENV === 'production') {
 const resolvedInternalKey = internalKey ?? 'dev-dataos-internal-key'
 const redisUrl = process.env.REDIS_URL ?? 'redis://127.0.0.1:6379'
 const bullUrl = process.env.BULLMQ_CONNECTION_URL ?? redisUrl
-const clickhouseUrl = process.env.CLICKHOUSE_URL ?? 'http://localhost:8123'
+const clickhouseUrl = process.env.CLICKHOUSE_URL
+if (!clickhouseUrl) {
+  console.error('CLICKHOUSE_URL is required for DataOS API')
+  process.exit(1)
+}
 const clickhouseUser = process.env.CLICKHOUSE_USER ?? 'default'
 const clickhousePassword = process.env.CLICKHOUSE_PASSWORD ?? ''
 
