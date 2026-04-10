@@ -99,7 +99,7 @@ function resolveInventoryBusinessGuard(
 
   if (inbound && insight) {
     const etaDays = daysUntil(inbound.expectedArrival)
-    if (etaDays !== null && etaDays >= 0 && insight.daysOfStock >= etaDays) {
+    if (etaDays !== null && etaDays > 0 && insight.daysOfStock >= etaDays) {
       return blockGuard(`inbound ${inbound.quantity} arriving in ${etaDays}d before projected stockout`)
     }
   }
