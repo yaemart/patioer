@@ -1,0 +1,15 @@
+[services.electroos-api]
+buildCommand = "pnpm install --frozen-lockfile"
+startCommand = "node --import tsx apps/api/src/server.ts"
+
+[services.electroos-api.deploy]
+healthcheckPath = "/api/v1/health"
+healthcheckTimeout = 30
+
+[services.dataos-api]
+buildCommand = "pnpm install --frozen-lockfile"
+startCommand = "node --import tsx apps/dataos-api/src/server.ts"
+
+[services.dataos-api.deploy]
+healthcheckPath = "/api/v1/health"
+healthcheckTimeout = 30
